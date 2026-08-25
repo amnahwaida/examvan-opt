@@ -4,3 +4,4 @@ build-san/
 *.o
 .env
 postgres_data/
+build-uws/
