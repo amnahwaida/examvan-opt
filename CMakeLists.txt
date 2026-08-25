@@ -37,7 +37,6 @@ if(WITH_UWEBSOCKETS)
   )
   FetchContent_MakeAvailable(uSockets uWebSockets)
   add_compile_definitions(HAS_UWEBSOCKETS=1)
-  include_directories(${uSockets_SOURCE_DIR}/src ${uWebSockets_SOURCE_DIR}/src)
 endif()
 
 find_package(PostgreSQL QUIET)
@@ -106,6 +105,10 @@ target_include_directories(examvan_core PUBLIC
 
 target_link_libraries(examvan_core PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
 if(WITH_UWEBSOCKETS)
+  target_include_directories(examvan_core PUBLIC ${uSockets_SOURCE_DIR}/src ${uWebSockets_SOURCE_DIR}/src)
+  if(DEFINED usockets_SOURCE_DIR)
+    target_include_directories(examvan_core PUBLIC ${usockets_SOURCE_DIR}/src ${uwebsockets_SOURCE_DIR}/src)
+  endif()
   target_link_libraries(examvan_core PUBLIC uSockets)
 endif()
 if(PostgreSQL_FOUND)
