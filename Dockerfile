@@ -6,7 +6,7 @@ COPY src src
 COPY tests tests
 COPY templates templates
 COPY static static
-RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITH_UWEBSOCKETS=OFF && cmake --build build -j$(nproc) && ./build/examvan-tests
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITH_UWEBSOCKETS=ON && cmake --build build -j$(nproc) && ./build/examvan-tests
 
 FROM builder AS sanitizer
 RUN cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON && cmake --build build-san -j$(nproc) && ./build-san/examvan-tests
