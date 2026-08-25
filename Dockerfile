@@ -12,8 +12,8 @@ FROM builder AS sanitizer
 RUN cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON && cmake --build build-san -j$(nproc) && ./build-san/examvan-tests
 CMD ["./build-san/examvan-tests"]
 
-FROM debian:12-slim AS runtime
-RUN apt-get update && apt-get install -y libssl3 libpq5 libhiredis0.14 libcurl4 ca-certificates curl && rm -rf /var/lib/apt/lists/*
+FROM gcc:13-bookworm AS runtime
+RUN apt-get update && apt-get install -y libpq-dev libhiredis-dev libcurl4-openssl-dev curl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/build/examvan-server /usr/local/bin/examvan-server
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
