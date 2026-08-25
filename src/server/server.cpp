@@ -5,6 +5,9 @@
 #include <thread>
 #include <atomic>
 #include <cstring>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -260,14 +263,27 @@ bool Server::listen(const ServerOpts& opts) {
   int opt=1; setsockopt(g_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
   sockaddr_in addr{}; addr.sin_family=AF_INET; addr.sin_addr.s_addr=INADDR_ANY; addr.sin_port=htons(opts.port);
   if(bind(g_fd,(sockaddr*)&addr,sizeof(addr))<0){ close(g_fd); g_fd=-1; return false; }
-  if(::listen(g_fd, 128)<0){ close(g_fd); g_fd=-1; return false; }
+  if(::listen(g_fd, SOMAXCONN)<0){ close(g_fd); g_fd=-1; return false; }
   g_running=true;
   running_=true;
+  static std::queue<int> q;
+  static std::mutex qmu;
+  static std::condition_variable qcv;
+  for(int i=0;i<8;i++){
+    std::thread([this]{
+      while(g_running){
+        int cfd=-1;
+        { std::unique_lock<std::mutex> lk(qmu); qcv.wait(lk, []{ return !q.empty() || !g_running.load(); }); if(!g_running && q.empty()) break; if(q.empty()) continue; cfd=q.front(); q.pop(); }
+        handle_client(cfd, router_, &cfg_, hub_);
+      }
+    }).detach();
+  }
   std::thread([this]{
     while(g_running){
       int cfd=accept(g_fd,nullptr,nullptr);
       if(cfd<0){ if(!g_running) break; continue; }
-      std::thread(handle_client, cfd, router_, &cfg_, hub_).detach();
+      { std::lock_guard<std::mutex> lk(qmu); q.push(cfd); }
+      qcv.notify_one();
     }
   }).detach();
   return true;
