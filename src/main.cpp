@@ -8,6 +8,7 @@
 #include "jobs/jobs.hpp"
 #include "server/server.hpp"
 #include "queue/submission_queue.hpp"
+#include "handlers/auth/login.hpp"
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -29,6 +30,7 @@ int main(){
     [&](const std::string& k){ (void)k; },
     [&](const std::string& v){ (void)v; }
   );
+  examvan::handlers::auth::set_user_for_test(cfg.admin_user, cfg.admin_pass, "superadmin");
   examvan::Router router;
   examvan::register_full_routes(router, cfg);
   std::cout << "Routes (" << router.routes().size() << "): ";

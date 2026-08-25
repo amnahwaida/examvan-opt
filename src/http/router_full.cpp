@@ -11,16 +11,21 @@
 #include "handlers/admin/settings.hpp"
 #include "handlers/admin/pengawas.hpp"
 #include "handlers/admin/submissions.hpp"
+#include "handlers/auth/login.hpp"
+#include "handlers/auth/logout.hpp"
+#include "session/cookie.hpp"
+#include <fstream>
+#include <sstream>
 
 namespace examvan {
 
 void register_full_routes(Router& r, const Config& cfg){
   register_routes(r, cfg);
 
-  r.add("GET","/login", [](const Request&){ Response res; res.status=200; res.headers["Content-Type"]="text/html"; res.body="<html><body>Login</body></html>"; return res; });
-  r.add("POST","/login", [](const Request& req){ if(req.body.empty()){Response rr; rr.status=400; rr.json(400,"{\"error\":\"missing\"}"); return rr;} Response res; res.json(200,"{\"ok\":true}"); return res; });
-  r.add("POST","/logout", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
-  r.add("GET","/logout", [](const Request&){ Response res; res.status=302; res.headers["Location"]="/login"; return res; });
+  r.add("GET","/login", [cfg](const Request& req){ return handlers::auth::login_page(req); });
+  r.add("POST","/login", [cfg](const Request& req){ return handlers::auth::login_handler(req, cfg); });
+  r.add("POST","/logout", [](const Request& req){ return handlers::auth::logout_handler(req); });
+  r.add("GET","/logout", [](const Request& req){ return handlers::auth::logout_page(req); });
   r.add("GET","/register", [](const Request&){ Response res; res.status=200; res.headers["Content-Type"]="text/html"; res.body="<html>Register</html>"; return res; });
   r.add("POST","/register", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
   r.add("GET","/register/confirm", [](const Request&){ Response res; res.status=200; res.headers["Content-Type"]="text/html"; res.body="<html>Confirm</html>"; return res; });
@@ -54,8 +59,20 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/api/webhook", handlers::api::webhook);
 
   r.add("GET","/admin", [](const Request&){ Response rr; rr.status=302; rr.headers["Location"]="/admin/dashboard"; return rr; });
-  r.add("GET","/admin/dashboard", handlers::admin::dashboard_page);
-  r.add("GET","/admin/settings", handlers::admin::settings_page);
+  r.add("GET","/admin/dashboard", [cfg](const Request& req){
+    auto it=req.headers.find("Cookie");
+    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+      Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/dashboard"; return rr;
+    }
+    return handlers::admin::dashboard_page(req);
+  });
+  r.add("GET","/admin/settings", [cfg](const Request& req){
+    auto it=req.headers.find("Cookie");
+    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+      Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/settings"; return rr;
+    }
+    return handlers::admin::settings_page(req);
+  });
   r.add("GET","/admin/api/stats", handlers::admin::dashboard_stats);
   r.add("GET","/admin/api/saas-settings", handlers::admin::settings_page);
   r.add("POST","/admin/api/saas-settings", handlers::admin::update_settings);
