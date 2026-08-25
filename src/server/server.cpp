@@ -151,10 +151,21 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
 }
 
 static void handle_client(int cfd, examvan::Router* router, const examvan::Config* cfg, examvan::Hub* hub) {
-  char buf[8192]={0};
-  ssize_t n=recv(cfd, buf, sizeof(buf)-1, 0);
-  if(n<=0){ close(cfd); return; }
-  std::string req(buf, n);
+  std::string req;
+  char buf[8192];
+  ssize_t n=0;
+  while((n=recv(cfd, buf, sizeof(buf), 0))>0){
+    req.append(buf, n);
+    if(req.find("\r\n\r\n")!=std::string::npos) break;
+    if(req.size()>16384) break;
+  }
+  if(req.empty()){ close(cfd); return; }
+  std::string expect = extract_header(req, "Expect");
+  for(auto &c: expect) c=tolower(c);
+  if(expect.find("100-continue")!=std::string::npos){
+    std::string cont="HTTP/1.1 100 Continue\r\n\r\n";
+    send(cfd, cont.c_str(), cont.size(), 0);
+  }
   size_t sp1=req.find(' '); size_t sp2=req.find(' ', sp1+1);
   if(sp1==std::string::npos||sp2==std::string::npos){ close(cfd); return; }
   std::string method=req.substr(0,sp1);
@@ -167,6 +178,18 @@ static void handle_client(int cfd, examvan::Router* router, const examvan::Confi
   }
   size_t hdr_end=req.find("\r\n\r\n");
   std::string body = hdr_end!=std::string::npos ? req.substr(hdr_end+4) : "";
+  std::string cl_s = extract_header(req, "Content-Length");
+  if(!cl_s.empty()){
+    try{
+      size_t cl=std::stoul(cl_s);
+      while(body.size()<cl){
+        n=recv(cfd, buf, sizeof(buf), 0);
+        if(n<=0) break;
+        body.append(buf, n);
+      }
+      if(body.size()>cl) body.resize(cl);
+    }catch(...){}
+  }
   std::string cookie_hdr = extract_header(req, "Cookie");
   std::string xver = extract_header(req, "X-App-Version");
   std::string origin = extract_header(req, "Origin");
