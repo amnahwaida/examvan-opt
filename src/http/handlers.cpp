@@ -5,7 +5,15 @@ namespace examvan {
 
 Response health_handler(const Request& req, const Config& cfg){
   (void)req;
-  std::string body="{\"status\":\"ok\",\"version\":\""+cfg.version+"\"}";
+  /* Paritas Go health.go (json-schema, 6 key persis) — sama dengan
+   * handlers::api::health; register_routes dasar harus identik router_full. */
+  std::string body =
+    "{\"certificate_fingerprint\":\"\","
+    "\"required_app_version\":\"\","
+    "\"server_time_utc\":\"\","
+    "\"status\":\"healthy\","
+    "\"success\":true,"
+    "\"version\":\""+cfg.version+"\"}";
   Response res; res.json(200,body); return res;
 }
 

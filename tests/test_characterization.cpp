@@ -17,8 +17,11 @@ TEST(Characterization, HealthGolden) {
   Request req; req.method="GET"; req.path="/api/health";
   auto res=r.dispatch(req);
   EXPECT_EQ(res.status,200);
-  EXPECT_NE(res.body.find("\"status\":\"ok\""), std::string::npos);
-  EXPECT_NE(res.body.find("2.7.2"), std::string::npos);
+  /* Golden Go health.go: status "healthy" + 6 key json-schema */
+  EXPECT_NE(res.body.find("\"status\":\"healthy\""), std::string::npos);
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
+  EXPECT_NE(res.body.find("required_app_version"), std::string::npos);
+  EXPECT_NE(res.body.find("server_time_utc"), std::string::npos);
 }
 
 TEST(Characterization, PublicHasilStructure) {
@@ -43,12 +46,13 @@ TEST(Characterization, ShortUrlRedirect) {
   EXPECT_EQ(res.headers["Location"], "/hasil/MYTOKEN");
 }
 
-TEST(Characterization, ApiVersion426) {
+TEST(Characterization, ApiVersionWebClientAllowed) {
+  /* Semantik Go: TANPA header X-App-Version → izinkan (client web);
+   * required kosong (fresh DB tanpa system_apps) → izinkan semua. */
   Config cfg; Router r; register_full_routes(r,cfg);
   Request req; req.method="GET"; req.path="/api/exams";
-  req.headers["X-App-Version"]="0.0.1";
   auto res=r.dispatch(req);
-  EXPECT_EQ(res.status,426);
+  EXPECT_EQ(res.status,200);
 }
 
 TEST(Characterization, TemplatesExist) {

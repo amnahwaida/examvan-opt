@@ -8,7 +8,7 @@ TEST(Handlers, Health) {
   Request req; req.method="GET"; req.path="/api/health";
   auto res=r.dispatch(req);
   EXPECT_EQ(res.status,200);
-  EXPECT_NE(res.body.find("ok"), std::string::npos);
+  EXPECT_NE(res.body.find("healthy"), std::string::npos);
 }
 TEST(Handlers, NotFound) {
   Config cfg; Router r; register_routes(r,cfg);

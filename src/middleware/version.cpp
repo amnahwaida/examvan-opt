@@ -17,6 +17,12 @@ bool is_version_allowed(const std::string& client, const std::string& required){
   if(client.empty()) return false;
   return compare_versions(client, required)>=0;
 }
+bool should_block_version(const std::string& client, const std::string& required){
+  if(client.empty()) return false;
+  if(required.empty()) return false;
+  return !is_version_allowed(client, required);
+}
+
 Response version_gate(const Request& req, const std::string& required, std::function<Response(const Request&)> next){
   auto it=req.headers.find("X-App-Version");
   std::string cv=it!=req.headers.end()?it->second:"";

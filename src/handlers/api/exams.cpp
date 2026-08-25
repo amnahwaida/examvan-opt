@@ -7,7 +7,17 @@ namespace examvan::handlers::api {
 
 Response health(const Request& req){
   (void)req;
-  Response r; r.json(200,"{\"status\":\"ok\",\"required_app_version\":\"2.7.2\"}"); return r;
+  /* Paritas Go health.go: 6 key persis (json-schema, dok 03 §2).
+   * required_app_version kosong = DB belum punya system_apps terbit
+   * (paritas deployment fresh); diisi dari saas_settings saat wiring DB. */
+  Response r; r.json(200,
+    "{\"certificate_fingerprint\":\"\","
+    "\"required_app_version\":\"\","
+    "\"server_time_utc\":\""+helpers::format_iso_utc(std::chrono::system_clock::now())+"\","
+    "\"status\":\"healthy\","
+    "\"success\":true,"
+    "\"version\":\"2.7.2\"}");
+  return r;
 }
 
 Response time_handler(const Request&){
@@ -15,12 +25,20 @@ Response time_handler(const Request&){
 }
 
 Response list_exams(const Request& req){
+  /* Semantik AndroidVersionCheck Go (version.go):
+   * 1) header X-App-Version KOSONG  → izinkan (client web)
+   * 2) required versi KOSONG        → izinkan (belum ada APK terbit)
+   * 3) header ada + required ada    → bandingkan, 426 + pesan Go bila tua */
   auto v=req.headers.find("X-App-Version");
   std::string cv=v!=req.headers.end()?v->second:"";
-  if(!middleware::is_version_allowed(cv,"2.7.2")){
-    Response r; r.status=426; r.json(426,"{\"error\":\"Versi Aplikasi Kedaluwarsa\"}"); return r;
+  const std::string required=""; // paritas fresh-DB; wiring saas_settings menyusul
+  if(middleware::should_block_version(cv,required)){
+    Response r; r.status=426; r.json(426,
+      "{\"success\":false,\"message\":\"Versi aplikasi Anda ("+cv+") sudah tidak didukung. "
+      "Silakan download versi terbaru ("+required+") dari halaman Download.\"}");
+    return r;
   }
-  Response r; r.json(200,"{\"exams\":[]}");
+  Response r; r.json(200,"{\"data\":[],\"pagination\":{\"page\":1,\"per_page\":50,\"total\":0,\"total_pages\":0},\"success\":true}");
   return r;
 }
 

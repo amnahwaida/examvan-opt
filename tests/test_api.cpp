@@ -12,12 +12,15 @@ TEST(Api, Health) {
   EXPECT_NE(res.body.find("required_app_version"), std::string::npos);
 }
 
-TEST(Api, VersionGate) {
+TEST(Api, VersionGateGoSemantics) {
   Request req; req.method="GET"; req.path="/api/exams";
   req.headers["X-App-Version"]="1.0.0";
-  auto res=handlers::api::list_exams(req);
-  EXPECT_EQ(res.status,426);
+  /* required kosong (fresh DB) → Go mengizinkan meski versi tua */
+  EXPECT_EQ(handlers::api::list_exams(req).status,200);
   req.headers["X-App-Version"]="2.7.2";
+  EXPECT_EQ(handlers::api::list_exams(req).status,200);
+  /* tanpa header (client web) → izinkan */
+  req.headers.erase("X-App-Version");
   EXPECT_EQ(handlers::api::list_exams(req).status,200);
 }
 

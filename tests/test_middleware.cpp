@@ -20,6 +20,19 @@ TEST(Middleware, VersionGate426) {
   EXPECT_EQ(res.status,426);
 }
 
+/* Semantik AndroidVersionCheck Go (version.go) — sumber: F8 shadow parity */
+TEST(Middleware, ShouldBlockGoSemantics) {
+  // 1) client kosong → izinkan (client web)
+  EXPECT_FALSE(should_block_version("", "2.7.2"));
+  // 2) required kosong → izinkan (belum ada APK terbit)
+  EXPECT_FALSE(should_block_version("1.0.0", ""));
+  // 3a) client tua + required ada → blok
+  EXPECT_TRUE(should_block_version("1.0.0", "2.7.2"));
+  // 3b) client sama/lebih baru → izinkan
+  EXPECT_FALSE(should_block_version("2.7.2", "2.7.2"));
+  EXPECT_FALSE(should_block_version("2.8.0", "2.7.2"));
+}
+
 TEST(Middleware, RateLimit) {
   RateLimiter rl(2, std::chrono::seconds(10));
   EXPECT_TRUE(rl.allow("ip1"));
