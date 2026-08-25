@@ -47,6 +47,7 @@ if(WITH_UWEBSOCKETS)
         ${_usock_src}/src/*.c
         ${_usock_src}/src/eventing/*.c
         ${_usock_src}/src/crypto/*.c
+        ${_usock_src}/src/crypto/*.cpp
       )
       add_library(uSockets STATIC ${USOCKETS_CSRC})
       target_include_directories(uSockets PUBLIC ${_usock_src}/src)
