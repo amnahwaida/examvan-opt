@@ -90,6 +90,7 @@ add_library(examvan_core STATIC
   src/handlers/admin/submissions.cpp
   src/handlers/admin/export.cpp
   src/handlers/auth/login.cpp
+  src/handlers/auth/logout.cpp
   src/queue/submission_queue.cpp
   src/jobs/jobs.cpp
   src/server/server.cpp
@@ -142,6 +143,7 @@ add_executable(examvan-tests
   tests/test_f4_hasil.cpp
   tests/test_f4_download.cpp
   tests/test_f5_login.cpp
+  tests/test_f5_logout.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)
