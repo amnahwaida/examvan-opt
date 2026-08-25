@@ -191,69 +191,80 @@ static std::thread g_uWS_thread;
 
 bool Server::listen(const ServerOpts& opts) {
 #ifdef HAS_UWEBSOCKETS
-  g_app = new uWS::App();
-  auto* hub_ptr = hub_;
-  auto* router_ptr = router_;
-  auto& cfg_ref = cfg_;
-  g_app->get("/api/health", [router_ptr](auto *res, auto *req){
-    examvan::Request r; r.method="GET"; r.path="/api/health";
-    auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
-    res->writeHeader("Content-Type","application/json");
-    res->end(resp.body);
-  });
-  g_app->any("/*", [router_ptr](auto *res, auto *req){
-    std::string path(req->getUrl());
-    std::string method(req->getMethod());
-    examvan::Request r; r.method=method; r.path=path;
-    auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
-    if(resp.status==0) resp.status=404;
-    for(auto &h: resp.headers) res->writeHeader(h.first, h.second);
-    res->writeStatus(std::to_string(resp.status));
-    res->end(resp.body);
-  });
-  g_app->ws<WsData>("/ws/:room_id", {
-    .upgrade = [hub_ptr, &cfg_ref](auto *res, auto *req, auto *context){
-      std::string cookie(req->getHeader("cookie"));
-      auto sess = examvan::verify_session_cookie(cfg_ref.secret_key, cookie);
-      bool priv = sess.has_value() && sess->admin_id!=0;
-      std::string origin(std::string(req->getHeader("origin")));
-      std::string host(std::string(req->getHeader("host")));
-      if(!examvan::check_origin(origin, host)){ res->close(); return; }
-      std::string room(req->getParameter(0));
-      res->template upgrade<WsData>({room, priv, ""}, req->getHeader("sec-websocket-key"), req->getHeader("sec-websocket-protocol"), req->getHeader("sec-websocket-extensions"), context);
-    },
-    .open = [hub_ptr](auto *ws){
-      auto* d = ws->getUserData();
-      auto c = std::make_shared<examvan::Client>();
-      c->room = d->room; c->privileged = d->privileged;
-      hub_ptr->add_client(c);
-      d->id = std::to_string((uintptr_t)ws);
-      ws->getUserData()->id = d->id;
-    },
-    .message = [hub_ptr](auto *ws, std::string_view msg, uWS::OpCode op){
-      if(op!=uWS::OpCode::TEXT) return;
-      auto* d = ws->getUserData();
-      auto c = std::make_shared<examvan::Client>();
-      c->room = d->room; c->privileged = d->privileged;
-      hub_ptr->handle_message(c, std::string(msg));
-      while(!c->send_queue.empty()){
-        std::string m;
-        { std::lock_guard<std::mutex> g(c->mu); if(c->send_queue.empty()) break; m=c->send_queue.front(); c->send_queue.pop(); }
-        ws->send(m, uWS::OpCode::TEXT);
+  // uWS::Loop bersifat thread-local: App harus dibuat, di-listen, dan
+  // di-run() pada thread yang SAMA. Jika App dibuat di main lalu run()
+  // di thread lain, Loop::get() membuat loop baru yang kosong → run()
+  // langsung selesai dan tidak ada request yang pernah dilayani.
+  g_uWS_thread = std::thread([this, port = opts.port]{
+    g_app = new uWS::App();
+    auto* hub_ptr = hub_;
+    auto* router_ptr = router_;
+    auto* cfg_ptr = &cfg_;
+    g_app->get("/api/health", [router_ptr](auto *res, auto *req){
+      examvan::Request r; r.method="GET"; r.path="/api/health";
+      auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
+      res->writeHeader("Content-Type","application/json");
+      res->end(resp.body);
+    });
+    g_app->any("/*", [router_ptr](auto *res, auto *req){
+      std::string path(req->getUrl());
+      std::string method(req->getMethod());
+      examvan::Request r; r.method=method; r.path=path;
+      auto cookie(std::string_view(req->getHeader("cookie")));
+      if(!cookie.empty()) r.headers["Cookie"]=std::string(cookie);
+      auto xver(std::string_view(req->getHeader("x-app-version")));
+      if(!xver.empty()) r.headers["X-App-Version"]=std::string(xver);
+      auto origin(std::string_view(req->getHeader("origin")));
+      if(!origin.empty()) r.headers["Origin"]=std::string(origin);
+      auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
+      if(resp.status==0) resp.status=404;
+      res->writeStatus(std::to_string(resp.status));
+      for(auto &h: resp.headers) res->writeHeader(h.first, h.second);
+      res->end(resp.body);
+    });
+    g_app->ws<WsData>("/ws/:room_id", {
+      .upgrade = [hub_ptr, cfg_ptr](auto *res, auto *req, auto *context){
+        std::string cookie(req->getHeader("cookie"));
+        auto sess = examvan::verify_session_cookie(cfg_ptr->secret_key, cookie);
+        bool priv = sess.has_value() && sess->admin_id!=0;
+        std::string origin(req->getHeader("origin"));
+        std::string host(req->getHeader("host"));
+        if(!examvan::check_origin(origin, host)){ res->close(); return; }
+        std::string room(req->getParameter(0));
+        res->template upgrade<WsData>({room, priv, ""}, req->getHeader("sec-websocket-key"), req->getHeader("sec-websocket-protocol"), req->getHeader("sec-websocket-extensions"), context);
+      },
+      .open = [hub_ptr](auto *ws){
+        auto* d = ws->getUserData();
+        auto c = std::make_shared<examvan::Client>();
+        c->room = d->room; c->privileged = d->privileged;
+        hub_ptr->add_client(c);
+        d->id = std::to_string((uintptr_t)ws);
+      },
+      .message = [hub_ptr](auto *ws, std::string_view msg, uWS::OpCode op){
+        if(op!=uWS::OpCode::TEXT) return;
+        auto* d = ws->getUserData();
+        auto c = std::make_shared<examvan::Client>();
+        c->room = d->room; c->privileged = d->privileged;
+        hub_ptr->handle_message(c, std::string(msg));
+        while(!c->send_queue.empty()){
+          std::string m;
+          { std::lock_guard<std::mutex> g(c->mu); if(c->send_queue.empty()) break; m=c->send_queue.front(); c->send_queue.pop(); }
+          ws->send(m, uWS::OpCode::TEXT);
+        }
+      },
+      .close = [hub_ptr](auto *ws, int, std::string_view){
+        auto* d = ws->getUserData();
+        auto c = std::make_shared<examvan::Client>();
+        c->room = d->room;
+        hub_ptr->remove_client(c);
       }
-    },
-    .close = [hub_ptr](auto *ws, int, std::string_view){
-      auto* d = ws->getUserData();
-      auto c = std::make_shared<examvan::Client>();
-      c->room = d->room;
-      hub_ptr->remove_client(c);
-    }
+    });
+    g_app->listen(port, [](auto *token){
+      if(token) std::cout << "uWS listening" << std::endl;
+      else std::cerr << "uWS failed to listen" << std::endl;
+    });
+    g_app->run();
   });
-  g_app->listen(opts.port, [opts](auto *token){
-    if(token) std::cout << "uWS listening on " << opts.port << std::endl;
-    else std::cout << "uWS failed to listen on " << opts.port << std::endl;
-  });
-  g_uWS_thread = std::thread([]{ g_app->run(); });
   g_uWS_thread.detach();
   running_=true; g_running=true;
   return true;
