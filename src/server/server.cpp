@@ -19,7 +19,9 @@ struct WsData { std::string room; bool privileged; std::string id; };
 namespace examvan::server {
 
 static std::atomic<bool> g_running{false};
+#ifndef HAS_UWEBSOCKETS
 static int g_fd{-1};
+#endif
 
 Server::Server(const Config& cfg, Hub* hub, Router* router) : cfg_(cfg), hub_(hub), router_(router) {}
 
@@ -40,6 +42,7 @@ std::string Server::describe() const {
   return ss.str();
 }
 
+#ifndef HAS_UWEBSOCKETS
 static std::string http_response(const examvan::Response& r) {
   std::ostringstream ss;
   ss << "HTTP/1.1 " << r.status << " OK\r\n";
@@ -175,6 +178,8 @@ static void handle_client(int cfd, examvan::Router* router, const examvan::Confi
   send(cfd, out.c_str(), out.size(), 0);
   close(cfd);
 }
+
+#endif // !HAS_UWEBSOCKETS
 
 #ifdef HAS_UWEBSOCKETS
 static uWS::App* g_app = nullptr;
