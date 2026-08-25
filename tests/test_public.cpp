@@ -13,7 +13,11 @@ TEST(Public, HasilPage404NoToken) {
   examvan::Request req;
   EXPECT_EQ(hasil_page(req).status,404);
   req.params["token"]="abc123";
+  // F4: sekarang butuh exam terdaftar agar 200 (public_results=1)
+  examvan::models::Exam e; e.token="abc123"; e.name="Test"; e.public_results=1;
+  set_exam_for_test("abc123", e);
   EXPECT_EQ(hasil_page(req).status,200);
+  clear_exams_for_test();
 }
 
 TEST(Public, DownloadApkRedirect) {

@@ -1,20 +1,56 @@
 #include "handlers/public/hasil.hpp"
+#include <unordered_map>
+#include <mutex>
+
 namespace examvan::handlers::public_ {
+
+static std::unordered_map<std::string, models::Exam> g_exams;
+static std::mutex g_mu;
+
+void set_exam_for_test(const std::string& token, const models::Exam& exam) {
+  std::lock_guard<std::mutex> g(g_mu);
+  g_exams[token] = exam;
+}
+void clear_exams_for_test() {
+  std::lock_guard<std::mutex> g(g_mu);
+  g_exams.clear();
+}
+
 Response cek_hasil_page(const Request&){
   Response r; r.status=200; r.headers["Content-Type"]="text/html";
-  r.body="<html><body><h1>Cek Hasil</h1><form action='/hasil' method='get'></form></body></html>";
+  r.body=R"html(<html><body><div id="main-content"><h1>Cek Hasil</h1><form action='/hasil' method='get'><input aria-label="Cari nama siswa" name="q"><button>Cari</button></form></div></body></html>)html";
   return r;
 }
+
 Response hasil_page(const Request& req){
   auto it=req.params.find("token");
   std::string token=it!=req.params.end()?it->second:"";
-  if(token.empty()){ Response r; r.status=404; r.body="not found"; return r; }
+  if(token.empty()){
+    Response r; r.status=404; r.headers["Content-Type"]="text/html";
+    r.body=R"html(<html><body><div id="main-content"><h1>Hasil Ujian</h1><p>Token tidak ditemukan</p></div></body></html>)html";
+    return r;
+  }
+  models::Exam exam;
+  bool found=false;
+  { std::lock_guard<std::mutex> g(g_mu); auto f=g_exams.find(token); if(f!=g_exams.end()){ exam=f->second; found=true; } }
+  if(!found){
+    Response r; r.status=404; r.headers["Content-Type"]="text/html";
+    r.body=R"html(<html><body><div id="main-content"><h1>Hasil Ujian</h1><p>Ujian tidak ditemukan</p></div></body></html>)html";
+    return r;
+  }
+  if(!exam.are_results_public()){
+    Response r; r.status=200; r.headers["Content-Type"]="text/html";
+    r.body=R"html(<html><body><div id="main-content"><h1>Hasil Ujian</h1><p>Hasil belum dipublikasikan</p></div></body></html>)html";
+    return r;
+  }
   Response r; r.status=200; r.headers["Content-Type"]="text/html";
-  r.body="<html><body><h1>Hasil "+token+"</h1></body></html>";
+  r.body="<html><body><div id=\"main-content\"><h1 id=\"examTitle\">Hasil "+exam.name+"</h1><p>Token: "+token+"</p><span>Peserta: 0</span></div></body></html>";
   return r;
 }
+
 Response cek_hasil_api(const Request& req){
   (void)req;
   Response r; r.json(200,"{\"ok\":true}"); return r;
 }
+
 } // namespace examvan::handlers::public_

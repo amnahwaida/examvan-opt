@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "http/router_full.hpp"
 #include "config/config.hpp"
+#include "handlers/public/hasil.hpp"
 #include <fstream>
 #include <string>
 
@@ -26,9 +27,12 @@ TEST(Characterization, PublicHasilStructure) {
   auto res=r.dispatch(req);
   EXPECT_EQ(res.status,200);
   EXPECT_NE(res.body.find("Cek Hasil"), std::string::npos);
+  examvan::models::Exam e; e.token="ABC123"; e.name="Test"; e.public_results=1;
+  examvan::handlers::public_::set_exam_for_test("ABC123", e);
   req.path="/hasil/ABC123"; req.params["token"]="ABC123";
   auto res2=r.dispatch(req);
   EXPECT_EQ(res2.status,200);
+  examvan::handlers::public_::clear_exams_for_test();
 }
 
 TEST(Characterization, ShortUrlRedirect) {

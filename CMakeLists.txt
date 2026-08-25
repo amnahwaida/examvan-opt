@@ -138,6 +138,7 @@ add_executable(examvan-tests
   tests/test_characterization.cpp
   tests/test_scoring.cpp
   tests/test_server_live.cpp
+  tests/test_f4_hasil.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)
