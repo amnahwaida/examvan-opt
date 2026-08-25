@@ -1,0 +1,172 @@
+/* EXAMVAN Theme System — CSS Custom Properties for Light & Dark Mode */
+/* This is the SINGLE SOURCE OF TRUTH for all theme variables. */
+
+:root {
+    /* App is a dark-only UI; declare it so native controls/scrollbars match and
+       the browser does not auto-flip form widgets to light. */
+    color-scheme: dark;
+    /* === Colors (Dark Mode - Default) === */
+    --color-bg: #09090e;
+    --color-bg-secondary: #111827;
+    --color-surface: rgba(255, 255, 255, 0.03);
+    --color-surface-hover: rgba(255, 255, 255, 0.07);
+    --color-glass: rgba(13, 13, 30, 0.5);
+    --color-glass-border: rgba(255, 255, 255, 0.08);
+    --color-primary: #6366f1;
+    --color-primary-dark: #4f46e5;
+    --color-primary-light: #a5b4fc;
+    /* Batch 13 (kontrak lintas-agen): teks/chip indigo terang di dark surface,
+       kontras ≥6.1:1. Pemakaian #818cf8 literal wajib lewat token ini. */
+    --color-primary-bright: #818cf8;
+    --color-primary-glow: rgba(99, 102, 241, 0.25);
+    --color-accent: #8b5cf6;
+    --color-accent-light: #a78bfa;
+    --color-accent-emerald: #34d399;
+    --color-accent-cyan: #22d3ee;
+    --color-success: #10b981;
+    --color-success-bg: rgba(16, 185, 129, 0.12);
+    --color-danger: #ef4444;
+    /* Batch 12 (kontrak lintas-agen): untuk teks status merah yang butuh
+       versi lebih terang dari --color-danger #ef4444 namun tetap beda dari
+       --color-danger-light #fca5a5. Pemakaian #f87171 literal wajib lewat
+       token ini. */
+    --color-danger-bright: #f87171;
+    --color-danger-light: #fca5a5;
+    --color-danger-bg: rgba(239, 68, 68, 0.12);
+    --color-warning: #f59e0b;
+    --color-warning-light: #fbbf24;
+    --color-warning-bg: rgba(245, 158, 11, 0.12);
+    /* Teks primary versi soft (di atas surface gelap) & placeholder/dorman. */
+    --color-primary-soft: #c7d2fe;
+    --color-text-placeholder: #94a3b8;
+    /* === RGB triplet + tone tokens (Batch 7) ===
+       Kontrak lintas-agen — nama & nilai WAJIB persis; kelas utilitas
+       .tone-* / .notice-warning di admin-base.css mensubstitusi memakai
+       rgba(var(--rgb-*), alpha). Token existing (warning-light,
+       danger-light, accent-light, primary-light) TIDAK dideklarasikan ulang:
+       rekonsiliasi memakai padanan yang sudah ada di atas. */
+    --rgb-success: 16, 185, 129;        /* triplet hijau — surface/border badge sukses */
+    --color-success-light: #34d399;     /* teks sukses terang di atas surface gelap */
+    --rgb-warning: 245, 158, 11;        /* triplet kuning — .tone-warning & .notice-warning */
+    --rgb-danger: 239, 68, 68;          /* triplet merah — .tone-danger (pasangan --color-danger) */
+    --rgb-info: 99, 102, 241;
+    --color-info-light: #38bdf8;         /* R137: pasangan literal sky-400 kartu kuota dashboard */           /* triplet indigo info — pasangan var(--color-primary-light) */
+    --rgb-accent: 168, 85, 247;         /* triplet aksen ungu — .tone-accent (beda dari --color-accent #8b5cf6) */
+    /* === Triplet hitam/putih (Batch 8) ===
+       Kontrak lintas-agen — nama & nilai WAJIB persis. Tujuan: mengganti sisa
+       substitusi rgba hitam/putih literal di CSS inti
+       (shadow, overlay, border kaca, scrollbar track, dsb.) menjadi
+       rgba(var(--rgb-black), α) / rgba(var(--rgb-white), α), sehingga intensi-
+       tas lapisan gelap/terang bisa disetel dari satu titik. Definisi token
+       warna di :root (mis. --color-surface di bawah) TETAP literal: mereka
+       source-of-truth, bukan substitusi. */
+    --rgb-black: 0, 0, 0;
+    --rgb-white: 255, 255, 255;
+    /* Surface kaca lebih pekat dari --color-surface — latar .tone-neutral. */
+    --glass-bg-strong: rgba(255, 255, 255, 0.06);
+    --color-text: #f8fafc;
+    --color-text-secondary: #cbd5e1;
+    --color-text-muted: #a0aec0;
+    --rgb-text-muted: 160, 174, 192; /* R125: triplet #a0aec0 — source-of-truth untuk tint muted */
+    --color-text-on-primary: #ffffff;
+    --color-text-on-accent: #ffffff;
+
+    /* === Spacing & Effects === */
+    --radius: 16px;
+    --radius-xs: 4px;
+    --radius-sm: 10px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --shadow-card: 0 8px 32px rgba(var(--rgb-black), 0.3);
+    --shadow-lg: 0 20px 50px rgba(var(--rgb-black), 0.4);
+    --shadow-sm: 0 4px 12px rgba(var(--rgb-black), 0.2);
+    --ease-spring: cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* === Fonts === */
+    --font-sans: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
+    --font-display: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+
+    /* === Background Gradient === */
+    --color-card-bg: #1e1e2e;
+    --bg-gradient: radial-gradient(ellipse at 50% 0%, #17152f 0%, #0c0a1a 50%, #06050b 100%);
+
+    /* === Gradien tombol lolos AA (Batch 10, kontrak lintas-agen T16/T18) ===
+       Nama & nilai WAJIB persis — sama dengan definisi lokal shared.html
+       yang lama (Batch 9). Semua endpoint gradien terverifikasi ≥ 4.5:1
+       terhadap label putih 15.5px bold (WCAG AA teks normal), dihitung oleh
+       uiux-batch9-publik.test.mjs:
+         #9333ea = 5.38:1 · #7c3aed = 5.70:1 · #2563eb = 5.17:1 · #1d4ed8 = 6.70:1
+       Agen lain (publik maupun admin: nav/dashboard) memakai var(--grad-btn-*);
+       JANGAN mengganti nilai tanpa menghitung ulang kontras AA. */
+    --grad-btn-violet-start: #9333ea;
+    --grad-btn-violet-end: #7c3aed;
+    --grad-btn-blue-start: #2563eb;
+    --grad-btn-blue-end: #1d4ed8;
+
+    /* === Z-index Scale (S33, Batch 6) ===
+       Kontrak lintas-agen — nama & nilai WAJIB persis (admin templates
+       mensubstitusi memakai nama yang sama):
+         --z-skip-link : 9998   (skip-link off-screen/fokus)
+         --z-dropdown  : 9999   (dropdown/popover di atas konten)
+         --z-toast     : 10002  (lapisan toast tertinggi reguler)
+         --z-onboarding: 10001  (modal onboarding instansi — DI BAWAH toast)
+       Batch 10 (R52): --z-onboarding diturunkan dari 99999 menjadi 10001.
+       Alasan: modal onboarding adalah layar pertama admin baru, tetapi justru
+       karena itu toast sukses/gagal simpan instansi HARUS tetap terlihat di
+       atasnya — nilai lama 99999 menimbun feedback (toast 10002) dan
+       skip-link yang fokus di 10002. Urutan final:
+         dropdown (9999) < onboarding (10001) < toast/skip-link fokus (10002).
+       Nilai z lain yang tersebar (nav 100/210/220, overlay 90/160 dst.)
+       adalah layering lokal konteks-spesifik dan TIDAK dijadikan token:
+       tidak berulang lintas-file dengan makna sama, jadi literalnya
+       dipertahankan agar refactor ini tetap netral-visual. */
+    --z-skip-link: 9998;
+    --z-dropdown: 9999;
+    --z-toast: 10002;
+    --z-onboarding: 10001;
+    /* S116 (Batch 18): melengkapi tangga stacking legacy menjadi token -
+       bottom-bar 9997 / hint 9998 / dialog overlay 10000 / topbar floating
+       10002. Seluruh literal z-index >=1000 kini lewat var(--z-*). */
+    --z-bottom-bar: 9997;
+    --z-hint: 9998;
+    --z-modal-overlay: 10000;
+    --z-topbar-floating: 10002;
+}
+
+/* KEPUTUSAN Batch 4 (temuan S17): palet light (:root[data-theme="light"])
+   DIHAPUS dari file ini. Alasan: dead code — tidak ada mekanisme apa pun
+   yang mengaktifkannya (aplikasi dark-by-design; surfaces hardcoded dark,
+   sehingga palet light hanya menghasilkan UI setengah-light yang rusak).
+   Bila kelak dibutuhkan, hidupkan kembali via git history pada commit
+   Batch 4 ini. color-scheme: dark di atas TIDAK diubah. */
+
+/* ===== Font Face Fallbacks (Google Fonts self-host placeholder) ===== */
+/* Jika ingin self-host font, tambahkan @font-face di sini */
+
+/* ===== Skip link (WCAG 2.4.1) =====
+   Batch 6: base styling .skip-link dipindah ke SINI (dulu inline <style>
+   di partial public_skip_link shared.html + salinan lokal register_confirm)
+   agar folder template publik bebas dari duplikasi drift (tugas 6 / S30).
+   Reveal saat focus menang atas segala kondisi; admin-core.js juga
+   me-reveal via JS bila dimuat. */
+.skip-link {
+        position: absolute;
+        left: -9999px;
+        z-index: var(--z-skip-link);
+        padding: 12px 20px;
+        background: var(--color-primary, #6366f1);
+        color: #fff;
+        border-radius: 8px;
+        font-weight: 600;
+        text-decoration: none;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+        left: 12px !important;
+        top: 12px;
+        z-index: var(--z-toast); /* S33: dulu literal 10002 — lapisan tertinggi reguler */
+        outline: 2px solid #fff;
+        outline-offset: 2px;
+}

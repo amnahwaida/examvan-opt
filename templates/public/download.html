@@ -1,0 +1,1024 @@
+{{ template "public_head" . }}
+<script src="/static/js/admin-core.js?v={{.version}}" defer></script>
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+<!-- R108: link public-mobile/desktop.css di sini DIHAPUS — public_head
+     (shared.html) sudah memancarkan keduanya; duplikat = request CSS dobel. -->
+<style>
+  main {
+    flex: 1;
+    max-width: 1240px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 120px 24px 48px;
+  }
+  
+  .hero-section {
+    text-align: center;
+    margin-bottom: 50px;
+  }
+  .live-badge {
+    background: rgba(var(--rgb-success), 0.1);
+    border: 1px solid rgba(var(--rgb-success), 0.25);
+    color: var(--color-success-light);
+    padding: 8px 18px;
+    border-radius: 99px;
+    font-size: 13.5px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 24px;
+    box-shadow: 0 0 20px rgba(var(--rgb-success), 0.1);
+  }
+  .badge-pulse {
+    width: 8px;
+    height: 8px;
+    background-color: var(--color-success);
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px rgba(var(--rgb-success), 0.2);
+    animation: pulseDot 2s infinite;
+  }
+  @keyframes pulseDot {
+    0% { box-shadow: 0 0 0 0 rgba(var(--rgb-success), 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(var(--rgb-success), 0); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--rgb-success), 0); }
+  }
+
+  .hero-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: clamp(34px, 5vw, 60px);
+    font-weight: 800;
+    background: linear-gradient(135deg, #ffffff 30%, var(--color-primary-light) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 20px;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+  .hero-desc {
+    font-size: 18px;
+    color: var(--color-text-muted);
+    max-width: 700px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  .tabs-container {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 60px;
+    flex-wrap: wrap;
+    background: rgba(17, 24, 39, 0.6);
+    border: 1px solid var(--color-glass-border);
+    padding: 8px;
+    border-radius: 20px;
+    backdrop-filter: blur(12px);
+    width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
+    box-shadow: 0 8px 32px rgba(var(--rgb-black), 0.2);
+  }
+  .tab-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--color-text-muted);
+    padding: 14px 28px;
+    border-radius: 14px;
+    font-weight: 700;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .tab-btn:hover {
+    color: white;
+    background: rgba(var(--rgb-white), 0.05);
+  }
+  .tab-btn.active {
+    background: linear-gradient(135deg, var(--color-primary), rgb(var(--rgb-accent)));
+    color: white;
+    border-color: transparent;
+    box-shadow: 0 4px 15px rgba(var(--rgb-info), 0.3);
+  }
+
+  .platform-layout {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 40px;
+    align-items: start;
+  }
+  @media (max-width: 1024px) {
+    .platform-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .platform-section {
+    display: none;
+    animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .download-card, .instruction-card {
+    background: rgba(17, 24, 39, 0.5);
+    border: 1px solid rgba(var(--rgb-white), 0.06);
+    border-radius: 28px;
+    padding: 40px 32px;
+    backdrop-filter: blur(16px);
+    box-shadow: 0 24px 48px rgba(var(--rgb-black), 0.2);
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+  .download-card:hover, .instruction-card:hover {
+    border-color: rgba(var(--rgb-info), 0.2);
+    box-shadow: 0 30px 60px rgba(var(--rgb-black), 0.3), 0 0 30px rgba(var(--rgb-info), 0.1);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 32px;
+    border-bottom: 1px dashed rgba(var(--rgb-white), 0.1);
+    padding-bottom: 24px;
+  }
+  .card-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+  }
+  .icon-android { background: rgba(var(--rgb-success), 0.15); color: var(--color-success); border: 1px solid rgba(var(--rgb-success), 0.3); }
+  .icon-windows { background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.3); }
+  .icon-linux { background: rgba(var(--rgb-warning), 0.15); color: var(--color-warning); border: 1px solid rgba(var(--rgb-warning), 0.3); }
+
+  .card-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 26px;
+    font-weight: 800;
+    margin: 0 0 6px 0;
+    color: white;
+  }
+  .card-subtitle {
+    font-size: 15px;
+    color: var(--color-text-muted);
+    margin: 0;
+  }
+
+  .flavor-box {
+    background: rgba(var(--rgb-black), 0.25);
+    border: 1px solid rgba(var(--rgb-white), 0.04);
+    border-radius: 20px;
+    padding: 24px;
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    transition: background 0.3s, border-color 0.3s;
+  }
+  .flavor-box:hover {
+    background: rgba(var(--rgb-white), 0.03);
+    border-color: rgba(var(--rgb-white), 0.1);
+  }
+  .flavor-title {
+    color: white; 
+    margin: 0 0 8px 0; 
+    font-family: 'Outfit', sans-serif; 
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .new-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, var(--color-success), #059669);
+    color: #04120c;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    padding: 4px 10px;
+    border-radius: 99px;
+    text-transform: uppercase;
+    box-shadow: 0 2px 10px rgba(var(--rgb-success), 0.35);
+  }
+  .flavor-meta {
+    color: var(--color-text-muted); 
+    font-size: 14px; 
+    line-height: 1.6; 
+    margin: 0;
+  }
+  .meta-val {
+    color: var(--color-text-secondary);
+    font-weight: 700;
+  }
+  
+  .btn-download-big {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 16px 24px;
+    border-radius: 14px;
+    font-weight: 800;
+    font-size: 15.5px;
+    text-decoration: none;
+    color: white;
+    background: linear-gradient(135deg, var(--grad-btn-violet-start), var(--grad-btn-violet-end));
+    box-shadow: 0 4px 15px rgba(var(--rgb-info), 0.3);
+    transition: all 0.3s;
+  }
+  .btn-download-big:hover {
+    box-shadow: 0 6px 24px rgba(var(--rgb-info), 0.5);
+    transform: translateY(-2px);
+  }
+  .btn-download-big.is-loading {
+    opacity: 0.7;
+    pointer-events: none;
+  }
+  @keyframes dl-spin { to { transform: rotate(360deg); } }
+
+  /* Instructions */
+  .inst-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: white;
+    margin: 0 0 24px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px dashed rgba(var(--rgb-white), 0.1);
+    padding-bottom: 20px;
+  }
+  .inst-title svg {
+    color: var(--color-primary);
+  }
+  .inst-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .step-item {
+    display: flex;
+    gap: 16px;
+  }
+  .step-number {
+    background: linear-gradient(135deg, rgba(var(--rgb-info), 0.2), rgba(var(--rgb-accent), 0.2));
+    border: 1px solid rgba(var(--rgb-info), 0.3);
+    color: var(--color-primary-light);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 14px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .step-content {
+    display: flex;
+    flex-direction: column;
+  }
+  .step-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: white;
+    margin-bottom: 6px;
+  }
+  .step-desc {
+    font-size: 14px;
+    color: var(--color-text-muted);
+    line-height: 1.6;
+  }
+
+  .device-tips {
+    background: rgba(var(--rgb-warning), 0.08);
+    border: 1px solid rgba(var(--rgb-warning), 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    margin-top: 32px;
+  }
+  .tips-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--color-warning-light);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .tips-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+  }
+  .tips-list li {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+    padding-left: 20px;
+    position: relative;
+  }
+  .tips-list li::before {
+    content: "•";
+    color: var(--color-warning-light);
+    font-weight: bold;
+    position: absolute;
+    left: 4px;
+    top: 0;
+  }
+
+  .server-version-box {
+    margin-top: 40px;
+    background: rgba(17, 24, 39, 0.5);
+    border: 1px solid rgba(var(--rgb-white), 0.08);
+    padding: 20px 28px;
+    border-radius: 20px;
+    font-size: 14.5px;
+    color: var(--color-text-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    backdrop-filter: blur(16px);
+  }
+  
+  .reveal {
+    opacity: 0;
+    transform: translateY(30px);
+    transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  /* Reduced-motion: tampilkan konten langsung tanpa animasi reveal. */
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; transition: none; }
+  }
+
+  @media (max-width: 768px) {
+    main { padding: 100px 20px 40px; }
+    .hero-title { font-size: 34px; }
+    .hero-desc { font-size: 16px; }
+    .tabs-container { flex-direction: column; width: 100%; }
+    .tab-btn { justify-content: center; width: 100%; }
+    .server-version-box { flex-direction: column; gap: 12px; text-align: center; }
+    /* More breathing room for card content + code blocks on phones. */
+    .download-card, .instruction-card { padding: 24px 18px; }
+  }
+
+  /* R127 (ronde 10): paritas S96 hasil.css — gradien judul hero memakai
+     -webkit-text-fill-color: transparent yang lolos ke media cetak (teks
+     tercetak kosong). Reset minimal, tanpa flag important. */
+  @media print {
+    .hero-title {
+      -webkit-text-fill-color: initial;
+      background: none;
+    }
+  }
+</style>
+<style>
+  /* ===== Toast — dipakai showApiErrorToast (admin-core.js) untuk error R2
+     yang konsisten dengan halaman admin. Style direplikasi dari
+     tailwind/output.css karena halaman unduhan tidak memuat output.css. ===== */
+  .toast-container {
+    position: fixed;
+    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    right: 24px;
+    z-index:var(--z-dropdown);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: calc(100vw - 48px);
+    pointer-events: none;
+  }
+  .toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(var(--rgb-white), 0.1);
+    font-size: 0.85rem;
+    font-weight: 500;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    color: #fff;
+    background: var(--color-glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 8px 32px rgba(var(--rgb-black), 0.3);
+    animation: toastIn 0.3s ease;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: box-shadow 0.2s;
+    min-width: 280px;
+    max-width: 420px;
+  }
+  .toast:hover { box-shadow: 0 12px 40px rgba(var(--rgb-black), 0.4); }
+  .toast-body { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+  .toast-icon { width: 20px; height: 20px; flex-shrink: 0; display: block; }
+  .toast-msg { flex: 1; line-height: 1.4; word-break: break-word; }
+  .toast-close {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(var(--rgb-white), 0.08);
+    color: rgba(var(--rgb-white), 0.7);
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.2s;
+  }
+  .toast:hover .toast-close { opacity: 1; }
+  /* S55: port T10a dari output.css — tombol ✕ sebelumnya opacity:0 permanen;
+     pengguna keyboard yang Tab ke tombol ini tidak bisa melihatnya. */
+  .toast-close:focus-visible { opacity: 1; }
+  .toast-close:hover { background: rgba(var(--rgb-white), 0.15); color: #fff; }
+  .toast-success { background: rgba(var(--rgb-success), 0.2); border-color: rgba(var(--rgb-success), 0.3); }
+  .toast-error { background: rgba(var(--rgb-danger), 0.2); border-color: rgba(var(--rgb-danger), 0.3); }
+  .toast-warning { background: rgba(var(--rgb-warning), 0.2); border-color: rgba(var(--rgb-warning), 0.3); }
+  .toast-info { background: rgba(var(--rgb-info), 0.2); border-color: rgba(var(--rgb-info), 0.3); }
+  .toast-success .toast-icon { color: var(--color-success-light); }
+   .toast-error .toast-icon { color: var(--color-danger-bright); }
+  .toast-warning .toast-icon { color: var(--color-warning-light); }
+  .toast-info .toast-icon { color: var(--color-primary-light); }
+  .toast-r2-config {
+    background: linear-gradient(135deg, rgba(var(--rgb-warning), 0.3), rgba(234, 88, 12, 0.16));
+    border-color: rgba(var(--rgb-warning), 0.6);
+    box-shadow: 0 8px 32px rgba(var(--rgb-warning), 0.25);
+  }
+  .toast-r2-config .toast-icon { color: var(--color-warning-light); }
+  .toast-exit { animation: toastOut 0.3s ease forwards; }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes toastOut {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(40px); }
+  }
+  @media (max-width: 768px) {
+    .toast { min-width: 0; max-width: 100%; padding: 12px 14px; font-size: 0.82rem; }
+    .toast-close { opacity: 1; }
+  }
+</style>
+<noscript><style>.reveal { opacity: 1 !important; transform: none !important; }</style></noscript>
+
+  <main id="main-content">
+    
+    <div class="hero-section reveal">
+      <div class="live-badge">
+        <span class="badge-pulse"></span>
+        Rilis Resmi Aktif v{{.android_version}}
+      </div>
+      <h1 class="hero-title">Pusat Unduhan EXAMVAN</h1>
+      <p class="hero-desc">Unduh berkas instalasi client ujian terproteksi untuk tipe perangkat Android, Windows, maupun Linux.</p>
+
+      <!-- Tabs Navigation — pola ARIA tabs: role=tablist/tab/tabpanel,
+           aria-selected sinkron JS, panel terhubung via aria-controls/aria-labelledby.
+           Tab aktif tersimpan di URL hash (#android/#windows/#linux) agar
+           deep-linkable. -->
+      <!-- S59: klik tab dilayani registry Actions (data-action + data-platform),
+           tanpa onclick inline. Semantik ARIA tabs (S14) dipertahankan. -->
+      <div class="tabs-container" role="tablist" aria-label="Pilih platform unduhan">
+        <button id="tab-android" class="tab-btn active" role="tab" aria-selected="true" aria-controls="section-android" data-action="switch-tab" data-platform="android">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+          Android (HP / Tablet)
+        </button>
+        <button id="tab-windows" class="tab-btn" role="tab" aria-selected="false" aria-controls="section-windows" data-action="switch-tab" data-platform="windows">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          Windows (PC / Laptop)
+        </button>
+        <button id="tab-linux" class="tab-btn" role="tab" aria-selected="false" aria-controls="section-linux" data-action="switch-tab" data-platform="linux">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          Linux
+        </button>
+      </div>
+    </div>
+
+    <!-- Android Platform Section -->
+    <div id="section-android" class="platform-section" role="tabpanel" aria-labelledby="tab-android" style="display: block;">
+      <div class="platform-layout">
+        
+        <div class="download-card reveal">
+          <div class="card-header">
+            <div class="card-icon icon-android">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4483-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993s-.4482.9997-.9993.9997zm-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5515 0 .9997.4482.9997.9993s-.4482.9997-.9997.9997zm11.4045-6.02l1.9973-3.4592c.1158-.201.0462-.4576-.1551-.5737-.201-.1162-.4576-.0462-.5737.1551l-2.0224 3.502c-1.3965-.6328-2.9658-.9881-4.6277-.9881s-3.2312.3553-4.6276.9881l-2.0225-3.502c-.1161-.2013-.3726-.2713-.5737-.1551-.2013.1161-.2709.3726-.1551.5737l1.9973 3.4592C2.695 10.7495.2718 14.7766.2718 19.5h23.4563c0-4.7234-2.4232-8.7505-6.7996-10.1786z"/></svg>
+            </div>
+            <div>
+              <h2 class="card-title">Instalasi Client Android</h2>
+              <p class="card-subtitle">Pilih versi aplikasi yang sesuai dengan kebutuhan perangkat</p>
+            </div>
+          </div>
+
+          <!-- Official EXAMVAN APK — rilis resmi dari system_apps (Cloudflare R2) -->
+          {{ if .android_app }}
+          <div class="flavor-box" style="border-color: rgba(139,92,246,0.35); background: rgba(139,92,246,0.06);">
+            <div>
+              <h3 class="flavor-title" style="color:#c4b5fd;">{{ .android_app.Name }} — Rilis Resmi
+                <span class="new-badge">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Terbaru
+                </span>
+              </h3>
+              <p class="flavor-meta">
+                Rilis Resmi • Versi: <span class="meta-val">v{{ .android_app.Version }}</span> • Ukuran: <span class="meta-val" data-size-bytes="{{ .android_app.SizeBytes }}"></span> MB
+              </p>
+            </div>
+            <a href="/download/app/{{ .android_app.ID }}" class="btn-download-big" style="background: linear-gradient(135deg, var(--grad-btn-violet-start), var(--grad-btn-violet-end));" data-action="download-app" data-app-id="{{ .android_app.ID }}">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Unduh APK
+            </a>
+          </div>
+          {{ end }}
+
+          <!-- Rilis Android tambahan dari sistem (mis. flavor kiosk) — satu kartu per entri R2 -->
+          <!-- R131 (ronde 10): guard loop ini diubah dari kondisi "app resmi ada"
+               menjadi "ada system_apps" — bila app resmi (BestAndroidApp) kosong
+               tapi stok system_apps Android lain tersedia, entri tetap dirender
+               (dulu: kartu "Belum ada installer" padahal stok ada / dead-branch).
+               Pembanding ID dinilai aman-nil lewat cabang (not $.android_app)
+               karena and/or Go template short-circuit (go 1.18+). -->
+          {{ if .system_apps }}
+            {{ range .system_apps }}
+              {{ if and (eq .Platform "android") (or (not $.android_app) (ne .ID $.android_app.ID)) }}
+                <div class="flavor-box">
+                  <div>
+                    <h3 class="flavor-title">{{ .Name }}</h3>
+                    <p class="flavor-meta">
+                      Rilis Resmi • Versi: <span class="meta-val">v{{ .Version }}</span> • Ukuran: <span class="meta-val" data-size-bytes="{{ .SizeBytes }}"></span> MB
+                    </p>
+                  </div>
+                  <a href="/download/app/{{ .ID }}" class="btn-download-big" data-action="download-app" data-app-id="{{ .ID }}">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    Unduh Aplikasi Klien
+                  </a>
+                </div>
+              {{ end }}
+            {{ end }}
+          {{ end }}
+
+          {{ if not .android_app }}
+            <div style="text-align: center; padding: 60px 20px; color: var(--color-text-muted); background: rgba(var(--rgb-black),0.15); border-radius: 16px; border: 1px dashed rgba(var(--rgb-white),0.05);">
+              <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px; opacity:0.4;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              <p style="font-size:15px; font-weight:600;">Belum ada installer Android (APK) yang tersedia di sistem.</p>
+            </div>
+          {{ end }}
+        </div>
+
+        <!-- Android Instructions -->
+        <div class="instruction-card reveal">
+          <h3 class="inst-title">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Panduan Aktivasi Android
+          </h3>
+
+          <!-- Panduan dipisah per audiens: siswa awam vs admin IT sekolah
+               (temuan S11). Instruksi teknis kiosk/ADB hanya untuk admin. -->
+          <details id="panduan-siswa-android" open>
+            <summary style="cursor: pointer;">Untuk Siswa — Instalasi Normal</summary>
+            <div class="inst-steps" style="margin-top: 20px;">
+              <div class="step-item">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                  <span class="step-title">Unduh Aplikasi</span>
+                  <span class="step-desc">Ketuk tombol <strong>Unduh APK</strong> di kartu unduhan di atas, lalu tunggu hingga unduhan selesai.</span>
+                </div>
+              </div>
+              <div class="step-item">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                  <span class="step-title">Izinkan Pemasangan dari Sumber Tidak Dikenal</span>
+                  <span class="step-desc">Buka file APK hasil unduhan. Jika muncul peringatan keamanan, pilih izinkan pemasangan dari sumber tidak dikenal untuk aplikasi browser yang Anda pakai. Lokasi menu pengaturan ini <strong>berbeda-beda tergantung merk HP</strong> — buka daftar di bawah sesuai merk perangkatmu:</span>
+                  <details style="margin-top: 12px;">
+                    <summary style="cursor: pointer; font-weight: 700; color: var(--color-primary-light);">Samsung</summary>
+                    <span class="step-desc" style="display: block; margin-top: 8px;">Pengaturan → <strong>Aplikasi</strong> → ketuk titik tiga (⋮) di kanan atas → <strong>Akses khusus</strong> → <strong>Instal aplikasi tak dikenal</strong> → pilih browser (Chrome/dll.) → aktifkan <strong>Izinkan dari sumber ini</strong>.</span>
+                  </details>
+                  <details style="margin-top: 8px;">
+                    <summary style="cursor: pointer; font-weight: 700; color: var(--color-primary-light);">Xiaomi / Redmi / POCO</summary>
+                    <span class="step-desc" style="display: block; margin-top: 8px;">Pengaturan → <strong>Sandi &amp; keamanan</strong> (atau <strong>Privasi</strong>) → <strong>Kontrol lebih lanjut</strong> → <strong>Instal aplikasi tak dikenal</strong> → pilih browser → aktifkan izinnya. Jika diminta, masuk ke akun Mi dan centang <strong>"Saya menyadari risikonya"</strong>.</span>
+                  </details>
+                  <details style="margin-top: 8px;">
+                    <summary style="cursor: pointer; font-weight: 700; color: var(--color-primary-light);">vivo / iQOO</summary>
+                    <span class="step-desc" style="display: block; margin-top: 8px;">Pengaturan → <strong>Aplikasi</strong> → <strong>Instal aplikasi tak dikenal</strong> (atau lewat <strong>Manajer i</strong> → Izin) → pilih browser → aktifkan <strong>Izinkan menginstal aplikasi tak dikenal</strong>.</span>
+                  </details>
+                  <details style="margin-top: 8px;">
+                    <summary style="cursor: pointer; font-weight: 700; color: var(--color-primary-light);">Oppo / Realme / OnePlus</summary>
+                    <span class="step-desc" style="display: block; margin-top: 8px;">Pengaturan → <strong>Pengaturan tambahan</strong> → <strong>Instal aplikasi tak dikenal</strong> (atau <strong>Perangkat &amp; aplikasi</strong> → akses khusus) → pilih browser → aktifkan <strong>Izinkan instalasi aplikasi</strong>.</span>
+                  </details>
+                </div>
+              </div>
+              <div class="step-item">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                  <span class="step-title">Masukkan Alamat Server &amp; Token Ujian</span>
+                  <span class="step-desc">Buka aplikasi EXAMVAN, lalu isi kolom alamat server dan Token Ujian 8-karakter. <strong>Alamat server &amp; token diberikan oleh pengawas atau panitia ujian</strong> saat ujian dimulai — jangan menebak-nebak.<br>
+                    Contoh format alamat server: <code style="background: rgba(var(--rgb-black),0.4); color: var(--color-primary-bright); padding: 6px 10px; border-radius: 8px; font-family: monospace; font-size: 13px; border: 1px solid rgba(129,140,248,0.2);">http://192.168.1.10:8080</code></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="device-tips" style="margin-top: 24px;">
+              <div class="tips-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>
+                Tips Pemecahan Masalah
+              </div>
+              <ul class="tips-list">
+                <li><strong style="color: var(--color-warning-light);">Uninstall Versi Lama:</strong> Hapus versi lawas terlebih dahulu sebelum memasang yang baru untuk mencegah konflik sertifikat digital.</li>
+                <li><strong style="color: var(--color-warning-light);">Play Protect:</strong> Jika muncul penolakan, pilih <strong>"Detail"</strong> lalu klik <strong>"Tetap Pasang" (Install Anyway)</strong>.</li>
+              </ul>
+            </div>
+          </details>
+
+          <details id="panduan-admin-it-android" style="margin-top: 24px;">
+            <summary style="cursor: pointer;">Untuk Admin IT Sekolah — Metode Kiosk (Device Owner)</summary>
+            <div style="margin-top: 20px; background: rgba(var(--rgb-danger), 0.08); border: 1px solid rgba(var(--rgb-danger), 0.25); border-radius: 16px; padding: 16px 20px;">
+              <strong style="color: var(--color-danger-bright);">PERINGATAN:</strong>
+              <span style="color: var(--color-text-muted); font-size: 14px; line-height: 1.6; display: block; margin-top: 6px;">
+                Metode ini akan <strong>menghapus seluruh data</strong> di perangkat dan menguncinya sebagai kiosk ujian. Hanya gunakan pada perangkat sekolah yang dikelola tim IT — <strong>jangan gunakan pada HP pribadi siswa/guru</strong>.
+              </span>
+            </div>
+            <div class="inst-steps" style="margin-top: 20px;">
+              <div class="step-item">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                  <span class="step-title">Factory Reset Perangkat</span>
+                  <span class="step-desc">Hapus seluruh akun Google di perangkat (harus dalam kondisi kosong seperti baru), lalu instal berkas Kiosk APK.</span>
+                </div>
+              </div>
+              <div class="step-item">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                  <span class="step-title">Daftarkan Hak Akses via ADB</span>
+                  <span class="step-desc">Hubungkan perangkat ke komputer dengan USB Debugging aktif. Ketikkan perintah ini di terminal komputer Anda:<br>
+                    <code style="background: rgba(var(--rgb-black),0.4); color: var(--color-primary-bright); padding: 8px 12px; border-radius: 8px; font-family: monospace; font-size: 13px; display: block; margin-top: 10px; word-break: break-all; border: 1px solid rgba(129,140,248,0.2);">adb shell dpm set-device-owner com.examvan.app.kiosk/com.examvan.app.receiver.MyDeviceAdminReceiver</code>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </details>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Windows Platform Section -->
+    <div id="section-windows" class="platform-section" role="tabpanel" aria-labelledby="tab-windows">
+      <div class="platform-layout">
+        
+        <div class="download-card reveal">
+          <div class="card-header">
+            <div class="card-icon icon-windows">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.951-1.801"/></svg>
+            </div>
+            <div>
+              <h2 class="card-title">Instalasi Client Windows</h2>
+              <p class="card-subtitle">Unduh executable khusus PC / Laptop berbasis Windows 10 & 11</p>
+            </div>
+          </div>
+
+          <!-- Dynamic Windows Releases from Sistem -->
+          {{ $hasWindowsApp := false }}
+          {{ if .system_apps }}
+            {{ range .system_apps }}
+              {{ if eq .Platform "windows" }}
+                {{ $hasWindowsApp = true }}
+                <div class="flavor-box">
+                  <div>
+                    <h3 class="flavor-title">{{.Name}}</h3>
+                    <p class="flavor-meta">
+                      Rilis Resmi • Versi: <span class="meta-val">v{{.Version}}</span> • Ukuran: <span class="meta-val" data-size-bytes="{{ .SizeBytes }}"></span> MB
+                    </p>
+                  </div>
+                  <a href="/download/app/{{.ID}}" class="btn-download-big" style="background: linear-gradient(135deg, var(--grad-btn-blue-start), var(--grad-btn-blue-end));" data-action="download-app" data-app-id="{{.ID}}">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    Unduh Windows Client (.exe)
+                  </a>
+                </div>
+              {{ end }}
+            {{ end }}
+          {{ end }}
+
+          {{ if not $hasWindowsApp }}
+            <div style="text-align: center; padding: 60px 20px; color: var(--color-text-muted); background: rgba(var(--rgb-black),0.15); border-radius: 16px; border: 1px dashed rgba(var(--rgb-white),0.05);">
+              <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px; opacity:0.4;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              <p style="font-size:15px; font-weight:600;">Belum ada installer Windows (.exe) yang tersedia di sistem.</p>
+            </div>
+          {{ end }}
+        </div>
+
+        <!-- Windows Instructions -->
+        <div class="instruction-card reveal">
+          <h3 class="inst-title">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Panduan Aktivasi Windows
+          </h3>
+          <div class="inst-steps">
+            <div class="step-item">
+              <span class="step-number">1</span>
+              <div class="step-content">
+                <span class="step-title">Jalankan Berkas Installer</span>
+                <span class="step-desc">Ekstrak folder jika berkas berbentuk ZIP, kemudian klik ganda pada file <code>.exe</code> yang diunduh.</span>
+              </div>
+            </div>
+            <div class="step-item">
+              <span class="step-number">2</span>
+              <div class="step-content">
+                <span class="step-title">SmartScreen Bypass</span>
+                <span class="step-desc">Bila sistem mendeteksi proteksi Windows Defender SmartScreen, klik <strong>"More Info"/"Info lainnya"</strong> lalu pilih <strong>"Run anyway"/"Tetap jalankan"</strong>.</span>
+              </div>
+            </div>
+            <div class="step-item">
+              <span class="step-number">3</span>
+              <div class="step-content">
+                <span class="step-title">Mulai Ujian</span>
+                <span class="step-desc">Aplikasi akan mengaktifkan <em>lockdown engine</em> (menutup akses Alt+Tab, tombol Windows, dan Task Manager) secara otomatis begitu ujian dimulai.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Linux Platform Section -->
+    <div id="section-linux" class="platform-section" role="tabpanel" aria-labelledby="tab-linux">
+      <div class="platform-layout">
+        
+        <div class="download-card reveal">
+          <div class="card-header">
+            <div class="card-icon icon-linux">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M12.015 0c-2.41 0-4.623 1.156-5.918 3.125-.333.51-.531 1.094-.531 1.688 0 2.21 2.375 5.56 4.312 8.44-1.28.374-2.22 1.34-2.47 2.344-.656-.25-1.5-.188-2.124.281-.781.593-1.062 1.562-.688 2.406.344.75 1.125 1.125 1.938 1.125 1.125 0 2.125-.656 2.5-1.625.5 1.25 1.938 2.22 3.688 2.22 1.718 0 3.156-.97 3.656-2.188.375.938 1.344 1.594 2.469 1.594.781 0 1.53-.375 1.875-1.094.406-.844.156-1.844-.625-2.438-.594-.47-1.406-.56-2.062-.31-2.41-1.03-2.312-2.188-3.468-2.25 1.937-2.844 4.312-6.188 4.312-8.375 0-.594-.188-1.156-.531-1.656-1.313-1.97-3.5-3.125-5.938-3.125H12zM9 16c.563 0 1 .438 1 1s-.438 1-1 1-1-.438-1-1 .438-1 1-1zm6 0c.563 0 1 .438 1 1s-.438 1-1 1-1-.438-1-1 .438-1 1-1z"/></svg>
+            </div>
+            <div>
+              <h2 class="card-title">Instalasi Client Linux</h2>
+              <p class="card-subtitle">Unduh binary portable/AppImage untuk sistem operasi berbasis GNU/Linux</p>
+            </div>
+          </div>
+
+          <!-- Dynamic Linux Releases from Sistem -->
+          {{ $hasLinuxApp := false }}
+          {{ if .system_apps }}
+            {{ range .system_apps }}
+              {{ if eq .Platform "linux" }}
+                {{ $hasLinuxApp = true }}
+                <div class="flavor-box">
+                  <div>
+                    <h3 class="flavor-title">{{.Name}}</h3>
+                    <p class="flavor-meta">
+                      Rilis Resmi • Versi: <span class="meta-val">v{{.Version}}</span> • Ukuran: <span class="meta-val" data-size-bytes="{{ .SizeBytes }}"></span> MB
+                    </p>
+                  </div>
+                  <a href="/download/app/{{.ID}}" class="btn-download-big" style="background: linear-gradient(135deg, var(--grad-btn-violet-start), var(--grad-btn-violet-end));" data-action="download-app" data-app-id="{{.ID}}">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    Unduh Linux AppImage (.AppImage)
+                  </a>
+                </div>
+              {{ end }}
+            {{ end }}
+          {{ end }}
+
+          {{ if not $hasLinuxApp }}
+            <div style="text-align: center; padding: 60px 20px; color: var(--color-text-muted); background: rgba(var(--rgb-black),0.15); border-radius: 16px; border: 1px dashed rgba(var(--rgb-white),0.05);">
+              <svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px; opacity:0.4;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              <p style="font-size:15px; font-weight:600;">Belum ada installer Linux (.AppImage) yang tersedia di sistem.</p>
+            </div>
+          {{ end }}
+        </div>
+
+        <!-- Linux Instructions -->
+        <div class="instruction-card reveal">
+          <h3 class="inst-title">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Panduan Eksekusi Linux
+          </h3>
+          <div class="inst-steps">
+            <div class="step-item">
+              <span class="step-number">1</span>
+              <div class="step-content">
+                <span class="step-title">Berikan Hak Akses Eksekusi</span>
+                <span class="step-desc">Buka terminal Anda di lokasi berkas <code>.AppImage</code> diunduh, lalu jalankan perintah:<br>
+                  <code style="background: rgba(var(--rgb-black),0.4); color: var(--color-primary-bright); padding: 6px 12px; border-radius: 8px; font-family: monospace; font-size: 13px; display: inline-block; margin-top: 10px; border: 1px solid rgba(129,140,248,0.2);">chmod +x EXAMVAN.AppImage</code>
+                </span>
+              </div>
+            </div>
+            <div class="step-item">
+              <span class="step-number">2</span>
+              <div class="step-content">
+                <span class="step-title">Jalankan Aplikasi Klien</span>
+                <span class="step-desc">Klik ganda pada file atau jalankan dari terminal dengan mengetik: <code>./EXAMVAN.AppImage</code>.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- WebApp & Server Status Info -->
+    <div class="server-version-box reveal">
+      <span>Versi WebApp Server yang aktif saat ini:</span>
+      <!-- R69: label stabilitas rilis dihapus — data yang dikirim server
+           (webapp_version) tidak mencakup status stabilitas, jadi halaman
+           tidak boleh mengklaim apa yang tak dikendalikan data. -->
+      <strong style="color: white; font-family: 'Outfit'; font-size: 16px; background: rgba(var(--rgb-white),0.1); padding: 4px 12px; border-radius: 8px;">v{{.webapp_version}}</strong>
+    </div>
+
+  </main>
+
+  <script>
+    // Daftar platform valid untuk resolusi location.hash — hash arbitrer
+    // tidak dipercaya dan selalu jatuh ke default.
+    var VALID_PLATFORMS = ['android', 'windows', 'linux'];
+    var DEFAULT_PLATFORM = 'android';
+
+    // S59: aksi halaman lewat registry Actions (admin-core.js) — pengganti
+    // onclick inline. Argumen dibawa via data-*; preventDefault dipertahankan
+    // agar href fallback tidak ikut menavigasi saat probe berjalan.
+    document.addEventListener('DOMContentLoaded', () => {
+      // T19: registrasi HARUS di dalam DOMContentLoaded — admin-core.js dimuat
+      // defer, jadi saat script ini dieksekusi registry Actions belum ada
+      // (guard typeof lama selalu false → semua tab & unduhan mati untuk klik
+      // mouse). Deferred scripts selesai sebelum DOMContentLoaded.
+      if (typeof Actions !== 'undefined') {
+        Actions.register('switch-tab', function (el) {
+          switchTab(el.getAttribute('data-platform'));
+        });
+        Actions.register('download-app', function (el, ev) {
+          if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+          downloadApp(el.getAttribute('data-app-id'), el);
+        });
+      }
+    });
+
+    function switchTab(platform, opts) {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const active = btn.id === 'tab-' + platform;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        // Roving tabindex: hanya tab aktif yang bisa di-tab keyboard.
+        btn.tabIndex = active ? 0 : -1;
+      });
+      document.querySelectorAll('.platform-section').forEach(sec => sec.style.display = 'none');
+
+      document.getElementById('tab-' + platform).classList.add('active');
+      const section = document.getElementById('section-' + platform);
+      section.style.display = 'block';
+      // Konten tab yang baru ditampilkan mungkin belum pernah ter-observe
+      // dalam keadaan terlihat — tampilkan langsung agar tidak blank.
+      section.querySelectorAll('.reveal:not(.visible)').forEach(el => el.classList.add('visible'));
+
+      // Simpan tab aktif di URL agar deep-linkable. replaceState (bukan
+      // assignment) supaya tidak memicu scroll-to-top / entri history baru;
+      // ops skipHash dipakai saat balasan dari event hashchange.
+      if (!opts || !opts.skipHash) {
+        history.replaceState(null, '', '#' + platform);
+      }
+    }
+
+    function resolvePlatformFromHash() {
+      const h = (location.hash || '').replace('#', '');
+      return VALID_PLATFORMS.includes(h) ? h : DEFAULT_PLATFORM;
+    }
+
+    // Init halaman: deep-link tab, navigasi keyboard, sinkronisasi hash,
+    // reveal-on-scroll. Registrasi Actions dilakukan di listener pertama
+    // (urutan listener DOMContentLoaded terjaga).
+    document.addEventListener('DOMContentLoaded', () => {
+      // Deep-link: buka tab sesuai #hash URL (fallback default bila kosong/
+      // tidak dikenal). Dipanggil sekali juga tanpa hash agar state ARIA
+      // (aria-selected/tabIndex) tersinkron dari awal.
+      switchTab(resolvePlatformFromHash(), { skipHash: true });
+
+      // S84 (ronde 8): ukuran APK diisi via textContent dari atribut
+      // data-size-bytes (server kirim byte mentah) — pengganti pola
+      // write-ke-dokumen yang deprecated/blocking; dengan JS mati kolom
+      // ukuran kosong, bukan markup rusak.
+      (function () {
+        var els = document.querySelectorAll('[data-size-bytes]');
+        for (var i = 0; i < els.length; i++) {
+          var bytes = parseInt(els[i].getAttribute('data-size-bytes'), 10);
+          if (!isNaN(bytes)) els[i].textContent = (bytes / 1048576.0).toFixed(2);
+        }
+      })();
+
+      // Navigasi keyboard antar tab (pola ARIA tabs): panah kiri/kanan,
+      // Home/End memindahkan fokus & mengaktifkan tab.
+      const tablist = document.querySelector('[role="tablist"]');
+      if (tablist) {
+        tablist.addEventListener('keydown', (e) => {
+          if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
+          e.preventDefault();
+          const tabs = VALID_PLATFORMS.map(p => document.getElementById('tab-' + p));
+          const current = tabs.indexOf(document.activeElement);
+          if (current < 0) return;
+          let next;
+          if (e.key === 'ArrowRight') next = (current + 1) % tabs.length;
+          else if (e.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
+          else if (e.key === 'Home') next = 0;
+          else next = tabs.length - 1;
+          tabs[next].focus();
+          switchTab(VALID_PLATFORMS[next]);
+        });
+      }
+
+      // Hash berubah dari luar (mis. user edit URL / back-forward cache):
+      // ikuti perubahan tanpa menulis ulang hash.
+      window.addEventListener('hashchange', () => {
+        switchTab(resolvePlatformFromHash(), { skipHash: true });
+      });
+
+      if (!('IntersectionObserver' in window)) {
+        document.querySelectorAll('.reveal').forEach(el => el.classList.add('visible'));
+        return;
+      }
+      const obs = new IntersectionObserver(entries => {
+        entries.forEach(e => {
+          if (e.isIntersecting) {
+            e.target.classList.add('visible');
+            obs.unobserve(e.target);
+          }
+        });
+      }, { threshold: 0.1 });
+
+      document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+    });
+
+    // Unduhan via "probe" (redirect:manual) — cek status HTTP dulu supaya error
+    // JSON dari server (mis. R2_NOT_CONFIGURED / SIGNED_URL_FAILED) ditampilkan
+    // lewat showApiErrorToast alih-alih halaman JSON mentah. Redirect (302 /
+    // opaqueredirect) = sukses → navigasi ulang untuk unduhan native (browser
+    // menangani Content-Disposition). Dipakai sengaja fetch mentah (bukan
+    // apiFetch): apiFetch menganggap respons redirect non-2xx sebagai error.
+    function downloadApp(appId, btn) {
+        var url = '/download/app/' + appId;
+        // Guard dobel-klik: selama probe berjalan, tap lanjutan diabaikan —
+        // di jaringan lambat dulu tombol terasa "mati" sehingga user tap
+        // berkali-kali (multiple request unduhan).
+        if (!btn) { window.location = url; return; }   // dipanggil tanpa elemen tombol
+        if (btn.dataset.loading === '1') return;
+        btn.dataset.loading = '1';
+        btn.setAttribute('aria-busy', 'true');
+        btn.classList.add('is-loading');
+        var original = btn.innerHTML;
+        btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: dl-spin 0.8s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg> Memeriksa...';
+
+        function restore() {
+            btn.dataset.loading = '';
+            btn.removeAttribute('aria-busy');
+            btn.classList.remove('is-loading');
+            btn.innerHTML = original;
+        }
+
+        // Fallback defensif: jika admin-core.js gagal dimuat (cache/CSP),
+        // lanjutkan navigasi polos seperti anchor biasa — jangan blokir unduhan.
+        if (typeof showApiErrorToast !== 'function') {
+            window.location = url;
+            restore();
+            return;
+        }
+        fetch(url, { redirect: 'manual' })
+            .then(function(resp) {
+                // Sukses: redirect ke signed URL (302 / opaqueredirect 0), atau —
+                // pada browser yang mengabaikan redirect:'manual' (Safari lama) —
+                // file sudah ter-follow dengan 200. Server tidak pernah
+                // mengembalikan 2xx untuk error (4xx/5xx JSON), jadi resp.ok aman.
+                if (resp.ok || resp.status === 302 || resp.status === 0 || resp.type === 'opaqueredirect') {
+                    window.location = url;
+                    return;
+                }
+                return resp.json().then(function(res) {
+                    showApiErrorToast(res, 'Gagal memulai unduhan');
+                }, function() {
+                    showApiErrorToast(null, 'Gagal memulai unduhan');
+                });
+            })
+            .catch(function() {
+                showApiErrorToast(null, 'Gagal memulai unduhan');
+            })
+            .finally(restore);
+    }
+  </script>{{ template "public_foot" . }}

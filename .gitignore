@@ -1,0 +1,6 @@
+build/
+build-san/
+.vscode/
+*.o
+.env
+postgres_data/

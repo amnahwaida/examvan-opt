@@ -1,0 +1,210 @@
+{{template "admin/partials/svg-symbols.html"}}
+{{ $adminRole := .admin_role }}
+<!-- Skip-link WCAG 2.4.1 (S30): elemen interaktif pertama di semua halaman
+     yang memuat partial ini. CSS reveal ada di theme.css (.skip-link:focus),
+     perilaku focus/blur di admin-core.js initSkipLink(). Target #mainContent:
+     dashboard/settings sudah punya id ini pada <main>; halaman lain akan
+     menyusul (anchor tak eksis = no-op aman, link tetap terfokus). -->
+<a href="#mainContent" class="skip-link">Langsung ke konten utama</a>
+{{ $isSuper := contains $adminRole "superadmin" }}
+{{ $isOp := contains $adminRole "operator" }}
+{{ $isGuru := or (contains $adminRole "guru") (or $isSuper $isOp) }}
+{{ $isPengawas := or (contains $adminRole "pengawas") $isSuper }}
+{{ $activePage := .active_page }}
+{{ $isSettings := or (eq $activePage "settings") (eq $activePage "users") (eq $activePage "billing") (eq $activePage "vouchers") (eq $activePage "voucher-audit") (eq $activePage "packages") (eq $activePage "system-apps") }}
+
+<header>
+<nav class="topbar">
+ <div class="topbar-left">
+  <div class="topbar-logo">E</div>
+  <a href="/" class="topbar-title" style="text-decoration:none;color:inherit;">EXAMVAN</a>
+ </div>
+ <div class="topbar-center">
+  <div class="topbar-nav">
+   {{ if $isGuru }}
+    <a href="/admin/dashboard" class="nav-link {{if eq $activePage "dashboard"}}active{{end}}" {{if eq $activePage "dashboard"}}aria-current="page"{{end}}><svg class="icon-svg" aria-hidden="true"><use href="#hi-dashboard"/></svg> Daftar Ujian</a>
+    <a href="/admin/submissions" class="nav-link {{if eq $activePage "submissions"}}active{{end}}" {{if eq $activePage "submissions"}}aria-current="page"{{end}}><svg class="icon-svg" aria-hidden="true"><use href="#hi-results"/></svg> Hasil Ujian</a>
+   {{ end }}
+   {{ if or $isPengawas $isGuru }}
+    <a href="/admin/pengawas" class="nav-link {{if eq $activePage "pengawas"}}active{{end}}" {{if eq $activePage "pengawas"}}aria-current="page"{{end}}><svg class="icon-svg" aria-hidden="true"><use href="#hi-eye"/></svg> Pengawasan</a>
+   {{ end }}
+   {{ if $isGuru }}
+    <a href="/admin/settings" class="nav-link {{if $isSettings}}active{{end}}" {{if $isSettings}}aria-current="page"{{end}}><svg class="icon-svg" aria-hidden="true"><use href="#hi-settings"/></svg> Pengaturan</a>
+   {{ end }}
+  </div>
+ </div>
+ <div class="topbar-right">
+  <div class="topbar-menu-dropdown">
+    {{/* R29: onclick inline hamburger dihapus — wiring toggle+stopPropagation+
+         sinkron aria-expanded dilayani initMenuToggle() admin-core.js yang
+         berjalan di semua halaman admin (satu sumber kebenaran; atribut
+         data-action di sini justru menimbulkan dobel-toggle dengan handler
+         elemen milik core). */}}
+    <button class="topbar-menu-toggle" id="menuToggleBtn" aria-label="Menu akun & pengaturan" aria-haspopup="true" aria-expanded="false">
+     <span class="menu-hamburger-icon">&#9776;</span>
+    </button>
+   <div class="topbar-dropdown-content" id="menuDropdownContent">
+    <div class="dropdown-header mobile-only-header">
+     <div class="dropdown-brand-row">
+      <div class="dropdown-logo">E</div>
+      <span class="dropdown-brand-title">EXAMVAN</span>
+     </div>
+    </div>
+    
+    <div class="dropdown-divider mobile-only-divider"></div>
+    <div class="mobile-nav-links">
+     {{ if $isGuru }}
+      <a href="/admin/dashboard" class="dropdown-item {{if eq $activePage "dashboard"}}active{{end}}" {{if eq $activePage "dashboard"}}aria-current="page"{{end}}><svg class="icon-svg"><use href="#hi-dashboard"/></svg> Daftar Ujian</a>
+      <a href="/admin/submissions" class="dropdown-item {{if eq $activePage "submissions"}}active{{end}}" {{if eq $activePage "submissions"}}aria-current="page"{{end}}><svg class="icon-svg"><use href="#hi-results"/></svg> Hasil Ujian</a>
+     {{ end }}
+     {{ if or $isPengawas $isGuru }}
+      <a href="/admin/pengawas" class="dropdown-item {{if eq $activePage "pengawas"}}active{{end}}" {{if eq $activePage "pengawas"}}aria-current="page"{{end}}><svg class="icon-svg"><use href="#hi-eye"/></svg> Pengawasan</a>
+     {{ end }}
+     {{ if $isGuru }}
+      <div class="dropdown-divider"></div>
+      <a href="/admin/settings" class="dropdown-item {{if $isSettings}}active{{end}}" {{if $isSettings}}aria-current="page"{{end}}><svg class="icon-svg"><use href="#hi-settings"/></svg> Pengaturan</a>
+     {{ end }}
+    </div>
+    <div class="dropdown-divider"></div>
+    
+    <div class="dropdown-user-info">
+     <span class="dropdown-user-name">{{.admin_user}}</span>
+     <span class="dropdown-user-role">{{displayRole $adminRole}}</span>
+    </div>
+    <div class="dropdown-divider"></div>
+    
+    {{/* Tautan Billing/Aplikasi Sistem sudah ada di blok "Pengaturan" di atas —
+         jangan diduplikasi lagi di blok akun (membuat menu mobile dobel). */}}
+    <button class="dropdown-item" data-action="open-change-password-modal">
+     <svg class="icon-svg"><use href="#hi-key"/></svg> Ubah Password
+    </button>
+    <div class="dropdown-divider"></div>
+    <form method="POST" action="/logout" style="display:inline;">
+     <input type="hidden" name="_csrf_token" value="{{.csrf_token}}">
+     <button type="submit" class="dropdown-item dropdown-logout" style="width:100%;border:none;background:none;cursor:pointer;">
+      <svg class="icon-svg" aria-hidden="true"><use href="#hi-logout"/></svg> Logout
+     </button>
+    </form>
+   </div>
+  </div>
+ </div>
+ </nav>
+</header>
+
+{{/* T14: satu-satunya sumber #toastContainer untuk semua halaman admin —
+     duplikat per-halaman (dashboard/settings/pengawas_detail/submissions)
+     dihapus. showToast (admin-core.js) menulis ke elemen ini; halaman tanpa
+     container membuat toast "Sesi berakhir"/api:error lenyap senyap. */}}
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+<script>
+/* Batch 9 (R29): registrasi aksi milik partial nav. admin-core.js dimuat di
+   akhir body tiap halaman, jadi saat partial ini dieksekusi Actions belum
+   tentu ada — registrasi ditunda sampai core siap (DOMContentLoaded), atau
+   langsung bila core sudah termuat. Handler resolve fungsi global saat klik
+   (openChangePasswordModal hidup di admin.js yang dimuat setelahnya). */
+(function () {
+    function registerNavActions() {
+        if (typeof Actions === 'undefined') return;
+        if (!Actions.has('open-change-password-modal')) {
+            Actions.register('open-change-password-modal', function () {
+                if (typeof openChangePasswordModal === 'function') openChangePasswordModal();
+            });
+        }
+    }
+    // Bila core sudah ada (urutan muat berbeda), daftar langsung.
+    registerNavActions();
+    // Core selalu dimuat sinkron sebelum event ini menyala.
+    document.addEventListener('DOMContentLoaded', registerNavActions);
+})();
+</script>
+
+{{if .needs_instansi}}
+{{/* R29: stopPropagation overlay/kartu dihapus — tidak ada listener global
+     yang menutup modal ini (wajib diisi), dan klik-luar dropdown milik core
+     aman terhadap bubble. Tanpa dismiss backdrop sesemestinya. */}}
+<div id="instansiOnboardingModal" class="modal-overlay" style="display:flex; z-index:var(--z-onboarding); background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(12px);">
+    <div class="modal-card" style="max-width: 480px; border: 1px solid rgba(168, 85, 247, 0.4); box-shadow: 0 0 30px rgba(168, 85, 247, 0.35);" >
+        <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 14px; margin-bottom: 16px;">
+            <h3 style="margin:0; font-size:1.15rem; color:#fff; display:flex; align-items:center; gap:10px;">
+                <svg class="icon-svg" style="width:24px;height:24px;color:#c084fc;"><use href="#hi-building-library"/></svg>
+                Wajib Atur Nama Instansi / Sekolah
+            </h3>
+        </div>
+        <div class="modal-body">
+            <div style="background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.3); padding:14px 16px; border-radius:10px; margin-bottom:20px;">
+                <p style="margin:0; color:#e9d5ff; font-size:0.88rem; line-height:1.5;">
+                    <strong>Selamat!</strong> Akun Anda telah mengaktifkan <strong>Paket Sekolah</strong>. 
+                    Sebelum menggunakan fitur aplikasi, silakan atur nama resmi Sekolah/Instansi Anda terlebih dahulu.
+                </p>
+            </div>
+            <form id="formMandatoryInstansi">
+                <div style="margin-bottom:20px;">
+                    <label for="newInstansiName" style="display:block; margin-bottom:8px; font-weight:600; font-size:0.85rem; color:var(--color-text-secondary);">
+                        Nama Sekolah / Instansi <span style="color:#ef4444;">*</span>
+                    </label>
+                    <input type="text" id="newInstansiName" required placeholder="Contoh: SMA Negeri 1 Jakarta" style="width:100%; padding:12px 14px; border-radius:8px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#fff; font-size:0.95rem;" autofocus autocomplete="off">
+                    <div style="margin-top: 6px; font-size:0.75rem; color:var(--color-text-muted);">
+                        Nama instansi ini digunakan untuk menghubungkan akun pengawas &amp; guru di sekolah Anda.
+                    </div>
+                </div>
+                <div>
+                    <button type="submit" id="btnSaveInstansi" style="width: 100%; padding:12px; border-radius:8px; font-weight:700; font-size:0.95rem; background:linear-gradient(135deg, var(--grad-btn-violet-start), var(--grad-btn-violet-end)); border:none; color:#fff; cursor:pointer; box-shadow:0 4px 14px rgba(var(--rgb-accent),0.35);">
+                        Simpan &amp; Aktifkan Fitur Sekolah
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function submitMandatoryInstansi(e) {
+    e.preventDefault();
+    var input = document.getElementById('newInstansiName');
+    var val = input.value.trim();
+    if (!val || val.length < 3 || val.toLowerCase() === 'personal') {
+        showToast('Silakan masukkan nama instansi/sekolah yang valid (min. 3 karakter).', 'error');
+        input.focus();
+        return;
+    }
+    
+    var btn = document.getElementById('btnSaveInstansi');
+    var oldText = btn.innerText;
+    btn.innerText = 'Menyimpan...';
+    btn.disabled = true;
+    
+    apiFetch('/admin/api/instansi/update', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ instansi: val })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if(data.success) {
+            showToast(data.message || 'Nama Instansi berhasil disimpan!', 'success');
+            setTimeout(function(){ window.location.reload(); }, 1200);
+        } else {
+            showToast(data.message || 'Gagal menyimpan instansi', 'error');
+            btn.innerText = oldText;
+            btn.disabled = false;
+        }
+    })
+    .catch(function(err) {
+        console.error(err);
+        showToast('Terjadi kesalahan jaringan', 'error');
+        btn.innerText = oldText;
+        btn.disabled = false;
+    });
+}
+
+// Batch 11 (T21): wiring submit instansi via addEventListener — handler
+// inline non-onclick (onsubmit) tidak diizinkan lagi di template.
+(function() {
+    var form = document.getElementById('formMandatoryInstansi');
+    if (form) form.addEventListener('submit', submitMandatoryInstansi);
+})();
+</script>
+{{end}}

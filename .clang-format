@@ -1,0 +1,9 @@
+BasedOnStyle: Google
+ColumnLimit: 100
+IndentWidth: 2
+DerivePointerAlignment: false
+PointerAlignment: Left
+AllowShortFunctionsOnASingleLine: None
+SortIncludes: true
+Language: Cpp
+Standard: c++20

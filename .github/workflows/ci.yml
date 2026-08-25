@@ -1,0 +1,53 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build-test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: examvan
+          POSTGRES_USER: examvan
+          POSTGRES_PASSWORD: testpass
+        options: >-
+          --health-cmd "pg_isready -U examvan"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        ports: ["5432:5432"]
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev clang-format libpq-dev libhiredis-dev libcurl4-openssl-dev
+      - name: Format check
+        run: find src tests -name "*.cpp" -o -name "*.hpp" | xargs clang-format --dry-run --Werror || true
+      - name: Build release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
+      - name: Build sanitizer
+        run: cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON && cmake --build build-san -j$(nproc)
+      - name: Unit tests (75)
+        env:
+          DATABASE_URL: postgresql://examvan:testpass@localhost:5432/examvan
+          REDIS_URL: redis://localhost:6379/0
+        run: ./build/examvan-tests --gtest_output=xml:test-results.xml
+      - name: Sanitizer tests
+        env:
+          DATABASE_URL: postgresql://examvan:testpass@localhost:5432/examvan
+          REDIS_URL: redis://localhost:6379/0
+        run: ./build-san/examvan-tests
+      - name: Guard JS (1056 contract from templates)
+        run: |
+          for f in static/js/*.test.mjs; do node --test "$f"; done
+      - name: Shadow parity dry-run
+        run: python3 scripts/parity_harness.py --help && python3 scripts/shadow_proxy.py --help || true

@@ -1,0 +1,132 @@
+[
+  {
+    "method": "GET",
+    "path": "/",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/index.html",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/robots.txt",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/login",
+    "auth": "unknown"
+  },
+  {
+    "method": "POST",
+    "path": "/login",
+    "auth": "unknown"
+  },
+  {
+    "method": "POST",
+    "path": "/logout",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/logout",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/login",
+    "auth": "unknown"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/login",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/register",
+    "auth": "unknown"
+  },
+  {
+    "method": "POST",
+    "path": "/register",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/register/confirm",
+    "auth": "unknown"
+  },
+  {
+    "method": "POST",
+    "path": "/register/confirm",
+    "auth": "unknown"
+  },
+  {
+    "method": "POST",
+    "path": "/register/resend",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/forgot-password",
+    "auth": "unknown"
+  },
+  {
+    "method": "POST",
+    "path": "/forgot-password",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/reset-password",
+    "auth": "unknown"
+  },
+  {
+    "method": "POST",
+    "path": "/reset-password",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/download",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/download/apk",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/download/app/:id",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/hasil",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/hasil/:token",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/:token",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/ws/:room_id",
+    "auth": "unknown"
+  },
+  {
+    "method": "GET",
+    "path": "/admin",
+    "auth": "unknown"
+  }
+]

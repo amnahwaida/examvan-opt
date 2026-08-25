@@ -1,0 +1,1221 @@
+{{/*
+  EXAMVAN Admin Dashboard — Full port from Python
+  Template variables:
+    .stats, .exams, .exam_pengawas_map, .admin_user, .admin_role,
+    .admin_id, .max_size_mb, .max_exams, .account_expires,
+    .active_page, .page, .total_pages, .total_exams,
+    .search, .search_active, .version, .csrf_token,
+    .net_info (optional), .admin_instansi (optional)
+*/}}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ {{template "admin/partials/head.html" dict "version" .version "csrf_token" .csrf_token "title" "Dashboard"}}
+ <style>
+.dropdown-user-instansi{display:block;font-size:0.7rem;color:var(--color-text-muted);margin-top:1px;padding:0 16px}
+.pengawas-cell{position:relative}
+.pengawas-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:8px;font-size:0.75rem;font-weight:600;background:rgba(var(--rgb-accent),0.1);color:var(--color-accent-light);border:1px solid rgba(var(--rgb-accent),0.2);cursor:pointer;white-space:nowrap;user-select:none}
+.pengawas-more{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(var(--rgb-accent),0.2);font-size:0.65rem;font-weight:700;color:var(--color-accent-light);margin-left:2px}
+.pengawas-popup{display:none;position:absolute;z-index:var(--z-dropdown);top:100%;left:0;min-width:160px;background:var(--color-card-bg,#1e1e2e);border:1px solid var(--color-glass-border);border-radius:10px;padding:6px 0;box-shadow:0 8px 32px rgba(0,0,0,0.4);margin-top:4px}
+.pengawas-popup.show{display:block}
+.pengawas-popup-item{padding:6px 14px;font-size:0.78rem;color:var(--color-text);white-space:nowrap}
+.pengawas-popup-item:hover{background:rgba(var(--rgb-accent),0.08)}
+.token-mode-group{display:flex;flex-direction:column;gap:6px}
+.token-mode-select{padding:2px 6px;background:rgba(255,255,255,0.05);border:1px solid var(--color-glass-border);border-radius:6px;color:var(--color-text-secondary);font-size:0.75rem;outline:none;cursor:pointer;margin-bottom:4px;width:100%;max-width:120px;transition:border-color 0.2s}
+.token-mode-select:focus{border-color:rgba(var(--rgb-info),0.5)}
+.token-dynamic-settings{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.token-interval-group{display:flex;align-items:center;gap:4px}
+.token-interval-input{width:54px;padding:4px 8px;border-radius:6px;background:var(--color-bg);border:1px solid var(--color-glass-border);color:var(--color-text);font-size:0.75rem;text-align:center;font-family:var(--font-mono);outline:none;transition:border-color 0.2s}
+.token-interval-input:focus{outline:none;border-color:rgba(var(--rgb-info),0.5);box-shadow:0 0 0 2px var(--color-primary-glow)}
+.token-interval-label{font-size:0.7rem;color:var(--color-text-muted);white-space:nowrap}
+.btn-save-interval{background:rgba(var(--rgb-success),0.15);border:1px solid rgba(var(--rgb-success),0.3);color:var(--color-success-light);border-radius:6px;padding:4px 8px;cursor:pointer;display:inline-flex;align-items:center;line-height:1}
+.btn-save-interval:hover{background:rgba(var(--rgb-success),0.25)}
+/* Student access & answer-key controls (moved from pengawasan page) */
+.pd-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pd-action-link {
+  background: rgba(var(--rgb-info),0.08);
+  color: var(--color-primary-light);
+  border-color: rgba(var(--rgb-info),0.25);
+}
+.pd-action-link:hover { background: rgba(var(--rgb-info),0.15); border-color: rgba(var(--rgb-info),0.4); }
+.pd-action-active {
+  background: rgba(var(--rgb-success),0.1);
+  color: var(--color-success-light);
+  border-color: rgba(var(--rgb-success),0.3);
+}
+.pd-action-active:hover { background: rgba(var(--rgb-success),0.18); }
+.pd-action-danger {
+  background: rgba(var(--rgb-danger),0.1);
+  color: var(--color-danger-bright);
+  border-color: rgba(var(--rgb-danger),0.3);
+}
+.pd-action-danger:hover { background: rgba(var(--rgb-danger),0.18); }
+.pd-action-warning {
+  background: rgba(251,191,36,0.1);
+  color: #fbbf24;
+  border-color: rgba(251,191,36,0.3);
+}
+.pd-action-warning:hover { background: rgba(251,191,36,0.18); }
+.pd-action-muted {
+  background: rgba(var(--rgb-text-muted),0.1);
+  color: var(--color-text-muted);
+  border-color: rgba(var(--rgb-text-muted),0.3);
+}
+.pd-action-muted:hover { background: rgba(var(--rgb-text-muted),0.18); }
+@media (max-width: 768px) {
+  .pd-action-btn { min-height: 40px; }
+  /* R121: tombol aksi baris ujian (.btn-sm-compact ±25px) di bawah konvensi
+     sentuh proyek — disamakan 44px ala submissions.html:319/:322. */
+  .td-actions .btn-sm-compact { min-height: 44px; min-width: 44px; }
+}
+/* Mobile layout overrides (preserving project theme/colors) */
+@media (max-width: 768px) {
+  .exam-table, 
+  .exam-table tbody, 
+  .exam-table tr, 
+  .exam-table td {
+    display: block !important;
+    width: 100% !important;
+  }
+  .exam-table thead {
+    display: none !important;
+  }
+  
+  /* Layout-only Card adjustments */
+  .exam-table tbody tr {
+    position: relative !important;
+    margin-bottom: 16px !important;
+    padding: 16px 18px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+
+  /* Cells layout */
+  .exam-table td {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 6px 0 !important;
+    border: none !important;
+    font-size: 0.8rem !important;
+  }
+  
+  .exam-table td::before {
+    content: attr(data-label) !important;
+    font-weight: 700 !important;
+    font-size: 0.68rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+  }
+
+  /* Floating Checkbox — larger hit area for touch */
+  .exam-table.table-with-checkbox td:first-child {
+    position: absolute !important;
+    top: 16px !important;
+    right: 16px !important;
+    width: auto !important;
+    padding: 0 !important;
+    z-index: 10 !important;
+  }
+  .exam-table.table-with-checkbox td:first-child::before {
+    content: none !important;
+  }
+  .exam-table td .exam-checkbox-input {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  /* Token cell: stack label + controls so the token/interval controls get
+     the full card width instead of cramming into a narrow right column. */
+  .exam-table td.td-token {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+  .exam-table td.td-token .token-mode-group { width: 100% !important; }
+
+  /* Card Title (Exam Name) */
+  .exam-table td.td-name {
+    padding: 0 !important;
+    margin-bottom: 8px !important;
+    width: calc(100% - 30px) !important;
+  }
+  .exam-table td.td-name::before {
+    content: none !important;
+  }
+  .exam-table td.td-name a {
+    font-size: 1.1rem !important;
+    font-weight: 800 !important;
+    line-height: 1.3 !important;
+  }
+
+  /* Action Buttons Row */
+  .exam-table td.td-actions {
+    justify-content: flex-end !important;
+    border-top: 1px solid var(--color-glass-border) !important;
+    margin-top: 8px !important;
+    padding-top: 12px !important;
+  }
+  .exam-table td.td-actions::before {
+    content: none !important;
+  }
+
+  /* Reset table cell borders */
+  .exam-table td:first-child,
+  .exam-table td:last-child {
+    border-radius: 0 !important;
+  }
+
+  /* Spacing adjustments for Upload form on mobile */
+  .network-info {
+    margin-bottom: 12px !important;
+  }
+  .upload-section {
+    margin-top: 0 !important;
+    margin-bottom: 14px !important;
+    padding: 16px !important;
+  }
+  /* R19: seksi naik ke h2 — rule mobile mencakup kedua level agar aman */
+  .upload-section h2,
+  .upload-section h3 {
+    font-size: 1rem !important;
+    margin-bottom: 12px !important;
+  }
+  .upload-form .form-row {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    width: 100% !important;
+  }
+  .upload-form .form-group {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 100% !important;
+  }
+  .upload-form .file-input-wrapper,
+  .upload-form .file-input-display {
+    width: 100% !important;
+  }
+  .upload-form .form-group label {
+    font-size: 0.75rem !important;
+    font-weight: 700 !important;
+  }
+  .upload-form input[type="text"],
+  .upload-form .file-input-display {
+    padding: 10px 12px !important;
+    font-size: 0.82rem !important;
+    border-radius: 8px !important;
+  }
+  .upload-form .file-input-display {
+    height: auto !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+  #btnUpload {
+    margin-top: 14px !important;
+    width: 100% !important;
+    padding: 12px !important;
+    font-size: 0.85rem !important;
+    font-weight: 700 !important;
+    border-radius: 8px !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+  }
+}
+</style>
+</head>
+<body class="dashboard-page">
+{{template "admin/partials/nav.html" dict "active_page" .active_page "admin_role" .admin_role "admin_user" .admin_user "csrf_token" .csrf_token "needs_instansi" .needs_instansi}}
+
+<main class="dashboard" id="mainContent">
+<h1 class="sr-only">Daftar Ujian</h1>
+
+<!-- Stats Cards -->
+<section class="stats-grid" id="statsGrid">
+<div class="stat-card stat-total" title="Jumlah keseluruhan ujian yang telah Anda buat atau kelola">
+<div class="stat-icon"><svg class="icon-svg"><use href="#hi-dashboard"/></svg></div>
+<div class="stat-info">
+<span class="stat-value">{{index .stats "total_all"}}</span>
+<span class="stat-label">Total Ujian</span>
+</div>
+</div>
+<div class="stat-card stat-status" title="Jumlah ujian yang berstatus aktif (bisa dikerjakan) dan nonaktif (ditutup)">
+<div class="stat-icon">
+<svg class="icon-svg"><use href="#hi-check"/></svg>
+<svg class="icon-overlay"><use href="#hi-lock"/></svg>
+</div>
+<div class="stat-info">
+<div class="stat-status-row">
+<span class="stat-value">{{index .stats "active"}}</span>
+<span class="stat-value">{{index .stats "inactive"}}</span>
+</div>
+<span class="stat-label">Aktif &middot; Nonaktif</span>
+<div class="stat-bar"><div class="stat-bar-fill" style="width:{{index .stats "active_pct"}}%;"></div></div>
+</div>
+</div>
+{{/* Kartu ubah instansi hanya untuk Super Admin & Operator — endpoint
+     /admin/api/instansi/update kini di bawah AdminManagementRequired, jadi
+     guru/pengawas tidak boleh melihat kontrol yang akan gagal (dan tidak
+     seharusnya mengganti nama instansi sekolah). */}}
+{{if or (eq .admin_role "superadmin") (hasRole .admin_role "operator")}}
+<div class="stat-card stat-instansi" title="Klik untuk mengubah nama Instansi/Sekolah Anda" style="cursor:pointer;" data-action="instansi-open" role="button" tabindex="0">
+<div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m16-11v11M8 14v.01M12 14v.01M16 14v.01M9 21v-4h6v4"/></svg></div>
+<div class="stat-info" style="flex:1;">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:4px;width:100%;min-width:0;">
+  <span class="stat-value stat-value-sm" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{default "Belum Ditetapkan" .admin_instansi}}">{{default "Belum Ditetapkan" .admin_instansi}}</span>
+  <svg class="icon-svg" style="width:14px;height:14px;color:var(--color-accent-light);opacity:0.85;flex-shrink:0;" title="Ubah Nama Instansi"><use href="#hi-edit"/></svg>
+</div>
+<span class="stat-label">Instansi (Klik untuk Ubah)</span>
+</div>
+</div>
+{{end}}
+<div class="stat-card stat-storage" title="Total ukuran dari seluruh ujian yang sudah Anda unggah sejauh ini">
+<div class="stat-icon"><svg class="icon-svg"><use href="#hi-download"/></svg></div>
+<div class="stat-info">
+<span class="stat-value">{{printf "%.2f" (index .stats "storage_mb")}} MB</span>
+<span class="stat-label">Storage</span>
+</div>
+</div>
+{{if .is_super}}
+<div class="stat-card stat-disk" title="Sisa kapasitas disk fisik pada partisi penyimpanan server (STORAGE_PATH). Batas Maks Storage tidak boleh melebihi nilai ini. Hanya terlihat oleh Super Admin.">
+<div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/></svg></div>
+<div class="stat-info">
+<span class="stat-value">{{.server_disk_free}}</span>
+<span class="stat-label">Sisa Disk Server</span>
+</div>
+</div>
+{{end}}
+</section>
+
+<!-- Network Info -->
+<section class="network-info glass-card">
+<h2 style="font-size:1.15rem;"><svg class="icon-svg" style="vertical-align:middle;margin-top:-2px;"><use href="#hi-settings"/></svg> Info Server & Paket Aktif</h2>
+<div class="network-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
+<div class="net-item" title="Paket langganan akun Anda saat ini">
+<span class="net-label">Paket Aktif</span>
+<span class="net-value" style="color:var(--color-accent-light);font-weight:800;font-size:13px;">{{default "Gratis / Trial" .package_name}}</span>
+</div>
+<div class="net-item" title="Maksimal total ujian/PDF yang dapat disimpan di sistem">
+<span class="net-label">Max Total Ujian</span>
+<span class="net-value">{{.max_exams}}</span>
+</div>
+<div class="net-item" title="Maksimal ujian yang berjalan bersamaan (sudah dimulai &amp; bisa dikerjakan siswa)">
+<span class="net-label">Ujian Serentak</span>
+<span class="net-value" style="color:var(--color-info-light);font-weight:700;">{{.max_concurrent}}</span>
+</div>
+<div class="net-item" title="Batas waktu berlakunya akun Anda">
+<span class="net-label">Masa Aktif</span>
+{{if .account_expires}}
+<span class="net-value" id="expiryCountdown" data-expires="{{.account_expires}}" style="font-size:13px;">&#x23F3;</span>
+{{else if .is_super}}
+<span class="net-value badge-https">Selamanya</span>
+{{else}}
+<span class="net-value" style="color:var(--color-danger-bright);font-weight:600;font-size:13px;">Belum Berlangganan</span>
+{{end}}
+</div>
+<div class="net-item" title="Maksimal ukuran file PDF dalam sekali upload">
+<span class="net-label">Max Upload</span>
+{{if .is_super}}
+<span class="net-value">Tidak Terbatas</span>
+{{else}}
+<span class="net-value">{{.max_size_mb}} MB</span>
+{{end}}
+</div>
+<div class="net-item" title="Sisa penyimpanan yang dapat digunakan">
+<span class="net-label">Sisa Storage</span>
+<span class="net-value">{{.remaining_storage}}</span>
+</div>
+{{if .instansi_code}}
+<div class="net-item" title="Kode Unik Instansi Anda (Identitas unik sekolah)">
+<span class="net-label">Kode Instansi</span>
+<span class="net-value" style="font-family:var(--font-mono);color:var(--color-success-light);font-weight:700;font-size:12px;cursor:pointer;" data-action="instansi-code-copy" data-code="{{.instansi_code}}" role="button" tabindex="0" title="Klik untuk menyalin Kode Instansi">
+  {{.instansi_code}}
+</span>
+</div>
+{{end}}
+</div>
+<!-- Server Address Box -->
+<div class="server-url-box" title="Informasi pengaturan API aplikasi ujian" style="margin-top:16px;padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:space-between;gap:12px;">
+  <div style="display:flex;align-items:center;gap:8px;">
+    <svg class="icon-svg" style="color:var(--color-primary-light);width:18px;height:18px;"><use href="#hi-link"/></svg>
+    <div style="display:flex;flex-direction:column;">
+      <span style="font-size:0.75rem;color:var(--color-text-muted);font-weight:500;" title="Gunakan URL ini pada aplikasi Android/Desktop peserta ujian">Alamat API / Server (Android &amp; Desktop)</span>
+      <code id="serverUrlValue" title="URL yang dibutuhkan untuk login dan mengakses ujian dari aplikasi" style="font-size:0.85rem;color:var(--color-text);font-family:monospace;word-break:break-all;">{{.server_url}}</code>
+    </div>
+  </div>
+  <button class="btn-sm" title="Salin alamat URL server ini" data-action="server-url-copy" data-url="{{.server_url}}" style="padding:4px 8px;font-size:0.75rem;display:inline-flex;align-items:center;gap:4px;flex-shrink:0;">
+    <svg class="icon-svg" style="width:12px;height:12px;"><use href="#hi-clipboard"/></svg> Salin
+  </button>
+</div>
+</section>
+
+<!-- Upload Section -->
+<section class="upload-section glass-card">
+<h2 style="font-size:1.15rem;margin-bottom:16px;display:flex;align-items:center;gap:8px;"><svg class="icon-svg"><use href="#hi-upload"/></svg> Tambah Ujian Baru</h2>
+<div id="methodPdfForm">
+<form id="uploadForm" class="upload-form" enctype="multipart/form-data">
+<input type="hidden" name="csrf_token" value="{{.csrf_token}}">
+<div class="form-row">
+<div class="form-group flex-1">
+<label class="required" for="examName">Nama Ujian</label>
+<input type="text" id="examName" name="name" placeholder="Contoh: UTS Matematika Kelas 10" required title="Nama ujian yang akan tampil di daftar ujian">
+</div>
+<div class="form-group flex-1">
+<label class="required" for="pdfFile">File PDF</label>
+<div class="file-input-wrapper">
+<input type="file" id="pdfFile" name="pdf_file" accept="application/pdf" data-max-mb="{{.max_size_mb}}" required title="Pilih file PDF ujian yang akan diupload, maksimal {{.max_size_mb}}MB">
+<div class="file-input-display" id="fileDisplay">
+<svg class="icon-svg" style="width:20px;height:20px;"><use href="#hi-file"/></svg>
+<span class="file-text">Pilih file PDF...</span>
+</div>
+</div>
+</div>
+<div class="form-group" style="flex:0 0 220px;">
+<label for="customToken">Token Kustom</label>
+<input type="text" id="customToken" name="custom_token" maxlength="8" minlength="8" placeholder="Contoh: MAT101BK" style="text-transform:uppercase;" title="Token kustom 8 karakter (kosongkan untuk generate otomatis)">
+</div>
+</div>
+<div class="upload-progress" id="uploadProgress" style="display:none;">
+<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+<span class="progress-text" id="progressText">0%</span>
+</div>
+<button type="submit" class="btn-upload" id="btnUpload" style="margin-top:16px;"><span>Upload Ujian</span></button>
+</form>
+</div>
+</section>
+
+<!-- Exam Table -->
+<section class="exam-table-section glass-card">
+<div class="table-header">
+<h2 style="font-size:1.15rem;"><svg class="icon-svg" style="vertical-align:middle;margin-top:-2px;"><use href="#hi-dashboard"/></svg> Daftar Ujian</h2>
+<div class="table-toolbar">
+<select id="statusFilter" class="toolbar-select" aria-label="Filter status ujian">
+<option value="" {{if eq $.status_filter ""}}selected{{end}}>Semua Status</option>
+<option value="active" {{if eq $.status_filter "active"}}selected{{end}}>Aktif</option>
+<option value="inactive" {{if eq $.status_filter "inactive"}}selected{{end}}>Nonaktif</option>
+<option value="tombstoned" {{if eq $.status_filter "tombstoned"}}selected{{end}}>Nonaktif Otomatis</option>
+</select>
+<div class="toolbar-search-wrap">
+<label for="searchExam" style="position:absolute;left:-9999px;">Cari ujian</label>
+<input type="text" id="searchExam" class="toolbar-search-input" placeholder="Cari nama, token, atau pembuat..." value="{{.search}}">
+<button class="toolbar-search-clear" id="searchClearBtn" data-action="search-clear" aria-label="Bersihkan pencarian" style="display:{{if .search}}flex{{else}}none{{end}};"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-x"/></svg></button>
+</div>
+<button class="toolbar-btn toolbar-btn-search" data-action="exams-search"><svg class="icon-svg"><use href="#hi-search"/></svg> Cari</button>
+<button class="toolbar-btn toolbar-btn-refresh" data-action="page-reload" aria-label="Muat ulang daftar"><svg class="icon-svg"><use href="#hi-refresh"/></svg></button>
+<button class="toolbar-btn toolbar-btn-delete" id="bulkDeleteBtn" data-action="bulk-delete-confirm" style="display:none;"><svg class="icon-svg"><use href="#hi-trash"/></svg> Hapus Terpilih (<span id="bulkDeleteCount">0</span>)</button>
+<button class="toolbar-btn toolbar-btn-toggle" id="bulkToggleBtn" data-action="bulk-toggle-exams" style="display:none;"><svg class="icon-svg"><use href="#hi-lock"/></svg> Nonaktifkan Terpilih (<span id="bulkToggleCount">0</span>)</button>
+</div>
+</div>
+
+{{if not .exams}}
+<div class="empty-state">
+<div class="empty-icon"><svg class="icon-svg-xl" style="margin:0 auto 16px;opacity:0.4;"><use href="#hi-upload"/></svg></div>
+<p>Belum ada ujian. Upload ujian pertama Anda di atas.</p>
+</div>
+{{else}}
+{{/* Di ponsel thead disembunyikan (layout kartu), jadi kontrol "pilih semua"
+     perlu tersedia di luar thead. */}}
+<label class="mobile-select-all-exams">
+<input type="checkbox" id="selectAllExamsMobile" class="exam-checkbox-input"> Pilih semua ujian
+</label>
+<div class="table-responsive">
+<table class="exam-table table-with-checkbox" id="examTable">
+<thead>
+<tr>
+<th scope="col" style="width:40px;text-align:center;"><input type="checkbox" id="selectAllExams" title="Pilih Semua" class="exam-checkbox-input"></th>
+<th scope="col">Nama Ujian</th>
+{{if or (eq .admin_role "superadmin") (hasRole .admin_role "operator")}}
+<th scope="col">Pembuat</th>
+<th scope="col">Guru</th>
+{{end}}
+<th scope="col">Token</th>
+<th scope="col">Status</th>
+<th scope="col">Pengawas</th>
+<th scope="col">Aksi</th>
+</tr>
+</thead>
+<tbody>
+{{range $i, $exam := .exams}}
+<tr id="exam-row-{{$exam.ID}}">
+<td data-label=""><input type="checkbox" class="exam-checkbox exam-checkbox-input" value="{{$exam.ID}}" data-name="{{$exam.Name}}" data-status="{{$exam.Status}}" data-owner="{{$exam.CreatorName}}" data-owner-id="{{$exam.CreatedBy}}"></td>
+<td class="td-name" data-label="Nama Ujian"><a href="/admin/submissions?exam_id={{$exam.ID}}" class="exam-link" title="Lihat Hasil Ujian">{{$exam.Name}}</a></td>
+{{if or (eq $.admin_role "superadmin") (hasRole $.admin_role "operator")}}
+<td data-label="Pembuat"><span style="font-weight:600;color:var(--accent-light);">{{$exam.CreatorName}}</span></td>
+<td data-label="Guru"><span style="color:var(--color-text-secondary);">{{or $exam.DelegatedName "—"}}</span></td>
+{{end}}
+<td class="td-token" data-label="Token">
+<div class="token-mode-group">
+  <select class="token-mode-select" aria-label="Mode token ujian" title="Statis: token tetap sepanjang ujian. Dinamis: token berganti otomatis tiap beberapa menit demi keamanan (anti-bocor)." data-exam-id="{{$exam.ID}}">
+    <option value="static" {{if eq $exam.TokenMode "static"}}selected{{end}}>Statis</option>
+    <option value="dynamic" {{if or (not $exam.TokenMode) (eq $exam.TokenMode "dynamic")}}selected{{end}}>Dinamis</option>
+  </select>
+
+  <!-- Static settings -->
+  <div class="token-static-settings" id="token-static-{{$exam.ID}}" style="{{if eq $exam.TokenMode "static"}}display:flex;{{else}}display:none;{{end}}align-items:center;gap:4px;white-space:nowrap;">
+    <code class="token-code" id="token-{{$exam.ID}}" data-token="{{$exam.ActiveToken}}" data-action="token-copy" role="button" tabindex="0" title="Klik untuk Salin Token">{{$exam.ActiveToken}}</code>
+    <button class="btn-icon btn-edit" data-exam-id="{{$exam.ID}}" data-token="{{$exam.Token}}" data-action="token-edit-open" title="Kustomisasi Token Awal" style="background:transparent;border:none;cursor:pointer;color:var(--color-text-muted);padding:2px;display:inline-flex;align-items:center;justify-content:center;transition:color 0.2s;margin-left:-2px;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-edit"/></svg></button>
+  </div>
+
+  <!-- Dynamic settings -->
+  <div class="token-dynamic-settings" id="token-dynamic-{{$exam.ID}}" style="{{if eq $exam.TokenMode "static"}}display:none;{{else}}display:flex;{{end}}align-items:center;gap:6px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;white-space:nowrap;">
+      <code class="token-code" id="token-dyn-{{$exam.ID}}" data-token="{{$exam.ActiveToken}}" data-action="token-copy" role="button" tabindex="0" title="Klik untuk Salin Token">{{$exam.ActiveToken}}</code>
+      <button class="btn-icon btn-edit" data-exam-id="{{$exam.ID}}" data-token="{{$exam.Token}}" data-action="token-edit-open" title="Kustomisasi Token Awal" style="background:transparent;border:none;cursor:pointer;color:var(--color-text-muted);padding:2px;display:inline-flex;align-items:center;justify-content:center;transition:color 0.2s;margin-left:-2px;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-edit"/></svg></button>
+    </div>
+    <div class="token-interval-group">
+      <input type="number" class="token-interval-input" id="interval-{{$exam.ID}}" value="{{if $exam.TokenResetInterval}}{{$exam.TokenResetInterval}}{{else}}5{{end}}" min="1" placeholder="30" title="Interval reset token (menit)">
+      <span class="token-interval-label">menit</span>
+      <button class="btn-icon btn-save-interval" data-action="token-interval-save" data-exam-id="{{$exam.ID}}" title="Simpan Interval"><svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-check"/></svg></button>
+    </div>
+  </div>
+</div>
+</td>
+<td data-label="Status">
+{{$canToggle := or (eq $.admin_role "superadmin") (hasRole $.admin_role "operator") (eq $.admin_id $exam.CreatedBy) (and $exam.DelegatedTo (eq $.admin_id $exam.DelegatedTo))}}
+{{$tombTitle := "Nonaktif otomatis oleh sistem saat paket berakhir/berganti atau masa aktif akun habis"}}
+{{if $exam.TombstonedAt}}{{$tombTitle = printf "%s (%s)" $tombTitle $exam.TombstonedAt}}{{end}}
+{{if $canToggle}}
+{{if eq $exam.Status "active"}}
+<span class="status-badge status-active" id="status-{{$exam.ID}}" data-action="exam-toggle-status" data-exam-id="{{$exam.ID}}" tabindex="0" role="button" aria-pressed="true" aria-label="Ubah status ujian {{$exam.Name}}" title="Klik untuk menonaktifkan ujian">Aktif</span>
+{{else if $exam.Tombstoned}}
+<span class="status-badge status-tombstoned" id="status-{{$exam.ID}}" data-action="exam-toggle-status" data-exam-id="{{$exam.ID}}" tabindex="0" role="button" aria-pressed="false" aria-label="Aktifkan kembali ujian {{$exam.Name}}" title="{{$tombTitle}}. Klik untuk mengaktifkan kembali">Nonaktif Otomatis</span>
+{{else}}
+<span class="status-badge status-inactive" id="status-{{$exam.ID}}" data-action="exam-toggle-status" data-exam-id="{{$exam.ID}}" tabindex="0" role="button" aria-pressed="false" aria-label="Ubah status ujian {{$exam.Name}}" title="Klik untuk mengaktifkan ujian">Nonaktif</span>
+{{end}}
+{{else}}
+{{if eq $exam.Status "active"}}
+<span class="status-badge status-active" style="cursor:default;">Aktif</span>
+{{else if $exam.Tombstoned}}
+<span class="status-badge status-tombstoned" style="cursor:default;" title="{{$tombTitle}}">Nonaktif Otomatis</span>
+{{else}}
+<span class="status-badge status-inactive" style="cursor:default;">Nonaktif</span>
+{{end}}
+{{end}}
+{{if $exam.AutoApprove}}
+<span id="auto-approve-{{$exam.ID}}" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;font-size:0.65rem;color:var(--color-success-light);font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(var(--rgb-success),0.12);border:1px solid rgba(var(--rgb-success),0.3);vertical-align:middle;white-space:nowrap;" title="Auto-approve aktif — semua perangkat disetujui otomatis di server (tetap berlaku walau halaman pengawasan ditutup)"><svg class="icon-svg" style="width:10px;height:10px;"><use href="#hi-check"/></svg> Auto-approve</span>
+{{end}}
+</td>
+<td data-label="Pengawas" class="pengawas-cell">
+{{$pw := index $.exam_pengawas_map $exam.ID}}
+{{if $pw}}
+<span class="pengawas-badge" data-action="pengawas-popup-toggle" data-exam-id="{{$exam.ID}}" role="button" tabindex="0">
+{{index $pw 0}}
+{{if gt (len $pw) 1}}<span class="pengawas-more">+{{sub (len $pw) 1}}</span>{{end}}
+</span>
+<div class="pengawas-popup" id="pengawas-popup-{{$exam.ID}}">
+{{range $pw}}<div class="pengawas-popup-item">{{.}}</div>{{end}}
+</div>
+{{else}}
+<span style="font-size:0.8rem;color:var(--color-text-muted);">&mdash;</span>
+{{end}}
+</td>
+<td class="td-actions" data-label="">
+<div class="actions-group">
+<button class="btn-sm btn-questions btn-sm-compact" data-exam-id="{{$exam.ID}}" data-exam-name="{{$exam.Name}}" data-action="questions-open" title="Atur Soal & Kunci Jawaban" aria-label="Atur soal dan kunci jawaban"><svg class="icon-svg" aria-hidden="true"><use href="#hi-settings"/></svg></button>
+<div class="exam-action-dropdown">
+<button class="btn-sm btn-more btn-sm-compact" data-action="row-dropdown-toggle" data-exam-id="{{$exam.ID}}" title="Menu Tindakan Lainnya" aria-label="Tindakan lainnya" aria-haspopup="true" aria-expanded="false"><svg class="icon-svg" aria-hidden="true"><use href="#hi-chevron-down"/></svg></button>
+<div class="exam-action-dropdown-content" id="dropdown-content-{{$exam.ID}}">
+<a href="/admin/api/exams/{{$exam.ID}}/pdf" target="_blank" rel="noopener"><svg class="icon-svg"><use href="#hi-eye"/></svg> Lihat PDF</a>
+<a href="/admin/api/exams/{{$exam.ID}}/pdf?download=1"><svg class="icon-svg"><use href="#hi-download"/></svg> Download PDF</a>
+<button data-exam-id="{{$exam.ID}}" data-exam-name="{{$exam.Name}}" data-action="edit-exam-open"><svg class="icon-svg"><use href="#hi-edit"/></svg> Edit Nama &amp; PDF</button>
+{{if or (hasRole $.admin_role "operator") (eq $.admin_role "superadmin")}}
+<button data-exam-id="{{$exam.ID}}" data-action="delegate-exam-open"><svg class="icon-svg"><use href="#hi-users"/></svg> Delegasi Ujian</button>
+{{end}}
+{{if or (eq $.admin_role "superadmin") (hasRole $.admin_role "operator") (eq $.admin_id $exam.CreatedBy) (and $exam.DelegatedTo (eq $.admin_id $exam.DelegatedTo))}}
+<button data-exam-id="{{$exam.ID}}" data-exam-name="{{$exam.Name}}" data-action="exam-delete" class="dropdown-toggle-btn" style="color:var(--color-danger-bright);"><svg class="icon-svg"><use href="#hi-trash"/></svg> Hapus Ujian</button>
+{{end}}
+</div>
+</div>
+</div>
+</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+{{if gt .total_pages 1}}
+<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;flex-wrap:wrap;gap:12px;">
+<span style="font-size:13px;color:var(--color-text-muted);">{{len .exams}} dari {{.total_exams}} ujian</span>
+<div style="display:flex;gap:6px;align-items:center;">
+<a {{if gt .page 1}}href="?page={{sub .page 1}}{{.query_base}}"{{end}} class="btn-sm btn-toggle page-link-main {{if le .page 1}}disabled{{end}}" {{if le .page 1}}aria-disabled="true"{{end}}><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-chevron-left"/></svg> Sebelumnya</a>
+{{$p := .page}}{{$tp := .total_pages}}{{$qb := .query_base}}
+{{range $pagenum := $tp | seq}}
+{{if ge $pagenum (sub $p 2)}}
+{{if le $pagenum (add $p 2)}}
+<a href="?page={{$pagenum}}{{$qb}}" class="pagination-page-num {{if eq $pagenum $p}}page-current{{end}}" {{if eq $pagenum $p}}aria-current="page"{{end}}>{{$pagenum}}</a>
+{{end}}{{end}}{{end}}
+<a {{if lt .page .total_pages}}href="?page={{add .page 1}}{{.query_base}}"{{end}} class="btn-sm btn-toggle page-link-main {{if ge .page .total_pages}}disabled{{end}}" {{if ge .page .total_pages}}aria-disabled="true"{{end}}>Berikutnya <svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-chevron-right"/></svg></a>
+</div>
+</div>
+{{end}}
+{{end}}
+</section>
+</main>
+
+<!-- ===== Modals (self-contained; perilaku Escape/trap oleh Modal Manager admin-core.js) ===== -->
+
+<!-- Modal Ubah Password -->
+<div class="modal-overlay" id="changePasswordModal" role="dialog" aria-modal="true" aria-labelledby="changePasswordModalTitle">
+<div class="modal-card glass-card" style="max-width: 420px;">
+<div class="modal-header">
+<h3 id="changePasswordModalTitle"><svg class="icon-svg" style="vertical-align:middle;margin-top:-2px;"><use href="#hi-key"/></svg> Ubah Password</h3>
+<button class="modal-close" data-action="modal-close" data-modal-close="closeChangePasswordModal" aria-label="Tutup"><svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-x"/></svg></button>
+</div>
+<div class="modal-body">
+<form id="changePasswordForm">
+<input type="hidden" name="csrf_token" value="{{.csrf_token}}">
+<div class="form-group" style="margin-bottom: 16px;">
+<label class="required" for="currentPassword">Password Saat Ini</label>
+<div class="password-wrapper">
+<input type="password" id="currentPassword" required placeholder="Masukkan password lama">
+<button type="button" id="toggleCurPassword" class="password-toggle-btn" aria-label="Tampilkan/sembunyikan password" style="background:none; border:none; cursor:pointer; padding:4px; line-height:1;">
+  <svg class="icon-svg pw-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+   <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/>
+   <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+  </svg>
+</button>
+</div>
+</div>
+<div class="form-group" style="margin-bottom: 16px;">
+<label class="required" for="newPassword">Password Baru</label>
+<div class="password-wrapper">
+<input type="password" id="newPassword" required placeholder="Masukkan password baru (min. 8 karakter)" minlength="8">
+<button type="button" id="toggleNewPassword" class="password-toggle-btn" aria-label="Tampilkan/sembunyikan password" style="background:none; border:none; cursor:pointer; padding:4px; line-height:1;">
+  <svg class="icon-svg pw-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+   <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/>
+   <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+  </svg>
+</button>
+</div>
+</div>
+<div class="form-group" style="margin-bottom: 24px;">
+<label class="required" for="confirmNewPassword">Konfirmasi Password Baru</label>
+<div class="password-wrapper">
+<input type="password" id="confirmNewPassword" required placeholder="Ulangi password baru">
+<button type="button" id="toggleConfirmPassword" class="password-toggle-btn" aria-label="Tampilkan/sembunyikan password" style="background:none; border:none; cursor:pointer; padding:4px; line-height:1;">
+  <svg class="icon-svg pw-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+   <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/>
+   <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+  </svg>
+</button>
+</div>
+</div>
+<button type="submit" class="btn-upload" style="width: 100%;"><svg class="icon-svg" aria-hidden="true"><use href="#hi-check"/></svg> Simpan Password Baru</button>
+</form>
+</div>
+</div>
+</div>
+
+<!-- Modal Edit Ujian -->
+<div class="modal-overlay" id="editExamModal" role="dialog" aria-modal="true" aria-labelledby="editExamModalTitle">
+<div class="modal-card glass-card" style="max-width: 480px;">
+<div class="modal-header">
+<h3 id="editExamModalTitle"><svg class="icon-svg" style="vertical-align:middle;margin-top:-2px;"><use href="#hi-edit"/></svg> Edit Ujian (Nama &amp; PDF)</h3>
+<button class="modal-close" data-action="modal-close" data-modal-close="closeEditExamModal" aria-label="Tutup"><svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-x"/></svg></button>
+</div>
+<div class="modal-body">
+<form id="editExamForm" enctype="multipart/form-data">
+<input type="hidden" name="csrf_token" value="{{.csrf_token}}">
+<input type="hidden" id="editExamId">
+<div class="form-group" style="margin-bottom: 16px;">
+<label class="required" for="editExamName">Nama Ujian</label>
+<input type="text" id="editExamName" required placeholder="Contoh: UTS Matematika Kelas 10">
+</div>
+<div class="form-group" style="margin-bottom: 20px;">
+<label for="editPdfFile">File PDF Baru <span style="font-size: 11px; opacity: 0.7;">(Opsional)</span></label>
+<div class="file-input-wrapper">
+<input type="file" id="editPdfFile" accept="application/pdf" data-max-mb="{{.max_size_mb}}">
+<div class="file-input-display" id="editFileDisplay">
+<svg class="icon-svg" style="width:20px;height:20px;flex-shrink:0;"><use href="#hi-file"/></svg>
+<span class="file-text" id="editFileDisplayText">Pilih file PDF baru jika ingin merubah...</span>
+</div>
+</div>
+</div>
+<div class="upload-progress" id="editUploadProgress" style="display:none; margin-bottom: 16px;">
+<div class="progress-bar"><div class="progress-fill" id="editProgressFill"></div></div>
+<span class="progress-text" id="editProgressText">0%</span>
+</div>
+<button type="submit" class="btn-upload" id="btnEditExamSave" style="width: 100%;"><svg class="icon-svg" aria-hidden="true"><use href="#hi-check"/></svg> Simpan Perubahan</button>
+</form>
+</div>
+</div>
+</div>
+
+<!-- Modal Edit Token -->
+<div class="modal-overlay" id="editTokenModal" role="dialog" aria-modal="true" aria-labelledby="editTokenModalTitle">
+<div class="modal-card glass-card" style="max-width: 400px;">
+<div class="modal-header">
+<h3 id="editTokenModalTitle"><svg class="icon-svg" style="vertical-align:middle;margin-top:-2px;"><use href="#hi-edit"/></svg> Ubah Token Kustom</h3>
+<button class="modal-close" data-action="modal-close" data-modal-close="closeEditTokenModal" aria-label="Tutup"><svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-x"/></svg></button>
+</div>
+<div class="modal-body">
+<form id="editTokenForm">
+<input type="hidden" name="csrf_token" value="{{.csrf_token}}">
+<input type="hidden" id="editTokenExamId">
+<div class="form-group" style="margin-bottom: 20px;">
+<label class="required" for="editTokenInput">Token Kustom Baru (Tepat 8 Karakter)</label>
+<input type="text" id="editTokenInput" required maxlength="8" minlength="8" placeholder="Contoh: UN2026BK" style="text-transform: uppercase; font-size: 20px; text-align: center; letter-spacing: 4px; font-weight: bold; font-family: monospace;">
+</div>
+<button type="submit" class="btn-upload" style="width: 100%;"><svg class="icon-svg" aria-hidden="true"><use href="#hi-check"/></svg> Simpan Token Baru</button>
+</form>
+</div>
+</div>
+</div>
+
+<!-- Modal Delegasi Ujian -->
+<div class="modal-overlay" id="delegateExamModal" role="dialog" aria-modal="true" aria-labelledby="delegateExamModalTitle">
+<div class="modal-card glass-card" style="max-width: 480px;">
+<div class="modal-header">
+<h3 id="delegateExamModalTitle"><svg class="icon-svg" style="vertical-align:middle;margin-top:-2px;"><use href="#hi-users"/></svg> Delegasi Ujian</h3>
+<button class="modal-close" data-action="modal-close" data-modal-close="closeDelegateExamModal" aria-label="Tutup"><svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-x"/></svg></button>
+</div>
+<div class="modal-body">
+<input type="hidden" id="delegateExamId">
+
+<!-- Section: Transfer Ownership -->
+<div style="margin-bottom: 20px; padding: 12px 16px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); border-radius: 12px;">
+<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+<svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-link"/></svg>
+<div>
+<div style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem;">Tunjuk Guru</div>
+<div style="font-size: 0.75rem; color: var(--color-text-muted);">Pilih guru pengampu ujian. <span id="delegateCurrentOwner"></span></div>
+</div>
+</div>
+<div class="form-group" style="margin-bottom: 4px;">
+<select id="delegateOwnerSelect" style="width:100%;padding:10px 12px;background:rgba(255,255,255,0.04);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);font-size:14px;">
+<option value="">-- Tidak ada Guru --</option>
+</select>
+</div>
+</div>
+
+<!-- Section: Manage Pengawas -->
+<div style="margin-bottom: 16px; padding: 12px 16px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); border-radius: 12px;">
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+<div style="display: flex; align-items: center; gap: 8px;">
+<svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-eye"/></svg>
+<div>
+<div style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem;">Atur Pengawas</div>
+<div style="font-size: 0.75rem; color: var(--color-text-muted);">Centang pengawas yang akan ditugaskan di ujian ini.</div>
+</div>
+</div>
+</div>
+<div id="delegatePengawasList" style="margin-top: 6px;">
+<!-- Filled by JS -->
+</div>
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;">
+<button class="btn-sm btn-delete" data-action="modal-close" data-modal-close="closeDelegateExamModal">Batal</button>
+<button class="btn-upload" data-action="delegate-exam-confirm">Simpan</button>
+</div>
+</div>
+</div>
+</div>
+
+<!-- ===== Questions Modal (Atur Soal & Kunci Jawaban) ===== -->
+<div class="modal-overlay" id="questionsModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+<div class="modal-card glass-card" style="max-width: 780px;">
+<div class="modal-header">
+<h3 id="modalTitle"><svg class="icon-svg" style="vertical-align:middle;margin-top:-2px;"><use href="#hi-settings"/></svg> Atur Soal Ujian</h3>
+<button class="modal-close" data-action="modal-close" data-modal-close="closeQuestionsModal" aria-label="Tutup"><svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-x"/></svg></button>
+</div>
+<div class="modal-body" style="max-height:80vh;overflow-y:auto;">
+
+<!-- 1. Security Level Config -->
+<div class="security-level-config" style="margin-bottom:20px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--color-glass-border);border-radius:12px;">
+<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+<div style="display:flex;align-items:center;gap:8px;">
+<svg class="icon-svg" style="width:20px;height:20px;flex-shrink:0;"><use href="#hi-lock"/></svg>
+<div>
+<div style="font-weight:600;color:var(--color-text);font-size:0.95rem;">Mode Keamanan Ujian (Android)</div>
+<div style="font-size:0.8rem;color:var(--color-text-muted);">Menentukan apakah siswa bisa keluar aplikasi saat ujian berlangsung.</div>
+</div>
+</div>
+<div>
+<select id="examSecurityLevel" style="min-width:220px;margin:0;padding:8px 10px;background:rgba(255,255,255,0.04);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);font-size:13px;">
+<option value="low">Rendah — Bisa Keluar (Tanpa Submit)</option>
+<option value="medium">Sedang — Bisa Keluar (Auto-Submit)</option>
+<option value="high">Tinggi — TIDAK BISA Keluar (Wajib Submit)</option>
+</select>
+</div>
+</div>
+</div>
+
+<!-- 2. Student Access & Answer Keys Config -->
+<div class="student-access-config" style="margin-bottom:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--color-glass-border);border-radius:12px;">
+<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+<div style="display:flex;align-items:center;gap:8px;">
+<svg class="icon-svg" style="width:18px;height:18px;flex-shrink:0;"><use href="#hi-link"/></svg>
+<div>
+<div style="font-weight:600;color:var(--color-text);font-size:0.9rem;">Akses Halaman Siswa &amp; Kunci</div>
+<div style="font-size:0.75rem;color:var(--color-text-muted);">Halaman hasil untuk siswa dan tampilan kunci jawaban.</div>
+</div>
+</div>
+</div>
+<div id="studentAccessControls" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+<div style="color:var(--color-text-muted);font-size:0.82rem;padding:8px 0;">Memuat data akses...</div>
+</div>
+</div>
+
+<!-- 2b. Congratulations Message Config -->
+<div class="congrats-message-config" style="margin-bottom:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--color-glass-border);border-radius:12px;">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+<svg class="icon-svg" style="width:18px;height:18px;flex-shrink:0;"><use href="#hi-check"/></svg>
+<div>
+<div style="font-weight:600;color:var(--color-text);font-size:0.9rem;">Pesan Ucapan Selamat (Android)</div>
+<div style="font-size:0.75rem;color:var(--color-text-muted);">Ditampilkan di halaman tersendiri setelah siswa mengumpulkan jawaban di aplikasi Android. Kosongkan untuk memakai pesan bawaan.</div>
+</div>
+</div>
+<textarea id="examCongratsMessage" maxlength="500" rows="2" placeholder="Selamat! Jawaban Anda telah dikumpulkan. Semoga sukses!" style="width:100%;padding:10px 12px;border:1px solid var(--color-glass-border);border-radius:8px;background:rgba(255,255,255,0.04);color:var(--color-text);font-size:0.85rem;resize:vertical;box-sizing:border-box;"></textarea>
+<div style="font-size:0.72rem;color:var(--color-text-muted);margin-top:4px;">Maksimal 500 karakter. Hanya teks biasa (tidak mendukung HTML).</div>
+</div>
+
+<!-- 3. Panel Color Config -->
+<div class="panel-color-config" style="margin-bottom:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--color-glass-border);border-radius:12px;">
+<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+<div style="display:flex;align-items:center;gap:8px;">
+<svg class="icon-svg" style="width:18px;height:18px;flex-shrink:0;"><use href="#hi-dashboard"/></svg>
+<div>
+<div style="font-weight:600;color:var(--color-text);font-size:0.9rem;">Warna Panel Jawaban (Android)</div>
+<div style="font-size:0.75rem;color:var(--color-text-muted);">Warna panel lembar jawaban yang dilihat siswa di Android.</div>
+</div>
+</div>
+<div style="display:flex;align-items:center;gap:8px;">
+<input type="color" id="examPanelColor" value="#6366F1" style="width:36px;height:36px;border:none;border-radius:8px;cursor:pointer;background:transparent;">
+<input type="text" id="panelColorHex" value="#6366F1" maxlength="7" placeholder="#6366F1" style="width:80px;padding:6px 8px;border:1px solid var(--color-glass-border);border-radius:8px;background:rgba(255,255,255,0.04);color:var(--color-text);font-family:monospace;font-size:0.8rem;text-align:center;">
+</div>
+</div>
+<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
+<button type="button" class="btn-sm" style="background:var(--color-primary);color:var(--color-text-on-primary);border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;" data-action="panel-color-set" data-color="#6366F1">Indigo</button>
+<button type="button" class="btn-sm" style="background:var(--color-success);color:var(--color-text-on-primary);border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;" data-action="panel-color-set" data-color="#10B981">Emerald</button>
+<button type="button" class="btn-sm" style="background:#F43F5E;color:var(--color-text-on-primary);border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;" data-action="panel-color-set" data-color="#F43F5E">Rose</button>
+<button type="button" class="btn-sm" style="background:var(--color-warning);color:var(--color-text-on-primary);border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;" data-action="panel-color-set" data-color="#F59E0B">Amber</button>
+<button type="button" class="btn-sm" style="background:#06B6D4;color:var(--color-text-on-primary);border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;" data-action="panel-color-set" data-color="#06B6D4">Cyan</button>
+<button type="button" class="btn-sm" style="background:#64748B;color:var(--color-text-on-primary);border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;" data-action="panel-color-set" data-color="#64748B">Slate</button>
+</div>
+</div>
+
+<!-- 3. Exam Schedule Config -->
+<div class="exam-schedule-config" style="margin-bottom:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--color-glass-border);border-radius:12px;">
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
+<div style="display:flex;align-items:center;gap:8px;">
+<svg class="icon-svg" style="width:18px;height:18px;flex-shrink:0;"><use href="#hi-clock"/></svg>
+<div>
+<div style="font-weight:600;color:var(--color-text);font-size:0.9rem;">Jadwal Ujian</div>
+<div style="font-size:0.75rem;color:var(--color-text-muted);">Atur jam mulai dan selesai ujian.</div>
+</div>
+</div>
+<button type="button" class="btn-sm btn-delete" data-action="schedule-clear" style="font-size:11px;flex-shrink:0;">
+<svg class="icon-svg" style="width:12px;height:12px;"><use href="#hi-x"/></svg> Hapus Jadwal
+</button>
+</div>
+<div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;">
+<div style="display:flex;flex-direction:column;gap:2px;">
+<label for="examStartDate" style="font-size:0.7rem;color:var(--color-text-muted);font-weight:600;">Tgl Mulai</label>
+<input type="date" id="examStartDate" style="padding:6px 8px;border:1px solid var(--color-glass-border);border-radius:8px;background:rgba(255,255,255,0.04);color:var(--color-text);font-size:0.85rem;width:140px;">
+</div>
+<div style="display:flex;flex-direction:column;gap:2px;">
+<label for="examStartTime" style="font-size:0.7rem;color:var(--color-text-muted);font-weight:600;">Jam</label>
+<input type="time" id="examStartTime" style="padding:6px 8px;border:1px solid var(--color-glass-border);border-radius:8px;background:rgba(255,255,255,0.04);color:var(--color-text);font-size:0.85rem;width:110px;">
+</div>
+<svg class="icon-svg" style="width:18px;height:18px;color:var(--color-text-muted);flex-shrink:0;" aria-hidden="true"><use href="#hi-chevron-right"/></svg>
+<div style="display:flex;flex-direction:column;gap:2px;">
+<label for="examEndDate" style="font-size:0.7rem;color:var(--color-text-muted);font-weight:600;">Tgl Selesai</label>
+<input type="date" id="examEndDate" style="padding:6px 8px;border:1px solid var(--color-glass-border);border-radius:8px;background:rgba(255,255,255,0.04);color:var(--color-text);font-size:0.85rem;width:140px;">
+</div>
+<div style="display:flex;flex-direction:column;gap:2px;">
+<label for="examEndTime" style="font-size:0.7rem;color:var(--color-text-muted);font-weight:600;">Jam</label>
+<input type="time" id="examEndTime" style="padding:6px 8px;border:1px solid var(--color-glass-border);border-radius:8px;background:rgba(255,255,255,0.04);color:var(--color-text);font-size:0.85rem;width:110px;">
+</div>
+</div>
+</div>
+
+<!-- 4. Pengawas Config — hanya untuk operator/superadmin -->
+{{if or (hasRole .admin_role "operator") (eq .admin_role "superadmin")}}
+<div class="pengawas-config" style="margin-bottom:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--color-glass-border);border-radius:12px;">
+<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+<div style="display:flex;align-items:center;gap:8px;">
+<svg class="icon-svg" style="width:18px;height:18px;flex-shrink:0;"><use href="#hi-eye"/></svg>
+<div>
+<div style="font-weight:600;color:var(--color-text);font-size:0.9rem;">Pengawas Ujian</div>
+<div style="font-size:0.75rem;color:var(--color-text-muted);">Pilih pengawas dari instansi yang sama. Pengawas dapat melihat ujian ini.</div>
+</div>
+</div>
+</div>
+<div id="pengawasList" style="margin-top:10px;">
+<div style="color:var(--color-text-muted);font-size:0.82rem;padding:8px 0;">Memuat data pengawas...</div>
+</div>
+</div>
+{{end}}
+
+<!-- 5. Identity Fields Config -->
+<div class="identity-fields-config" style="margin-bottom:16px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--color-glass-border);border-radius:12px;">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+<div style="display:flex;align-items:center;gap:8px;">
+<svg class="icon-svg" style="width:18px;height:18px;flex-shrink:0;"><use href="#hi-users"/></svg>
+<div>
+<div style="font-weight:600;color:var(--color-text);font-size:0.9rem;">Identitas Siswa</div>
+<div style="font-size:0.75rem;color:var(--color-text-muted);">Data yang wajib diisi siswa sebelum memulai ujian di Android.</div>
+</div>
+</div>
+<button class="btn-sm" data-action="identity-field-add" style="height:30px;font-size:12px;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-plus"/></svg> Tambah Field</button>
+</div>
+<div id="identityFieldsList">
+<!-- Fields rendered by JS -->
+</div>
+<div style="margin-top:8px;font-size:0.75rem;color:var(--color-text-muted);text-align:right;">Field bertanda * wajib diisi siswa.</div>
+</div>
+
+<!-- 6. Questions Toolbar (matching Python structure) -->
+<div class="questions-toolbar" style="margin-bottom:16px;">
+<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+<div class="inline-group" style="display:flex;align-items:center;gap:6px;">
+<label for="generateQty" style="font-size:0.8rem;color:var(--color-text-secondary);">Jumlah:</label>
+<input type="number" id="generateQty" value="40" min="1" max="200" style="width:70px;padding:6px 8px;text-align:center;background:rgba(255,255,255,0.04);border:1px solid var(--color-glass-border);border-radius:6px;color:var(--color-text);font-size:13px;">
+<select id="generateType" style="padding:6px 8px;background:rgba(255,255,255,0.04);border:1px solid var(--color-glass-border);border-radius:6px;color:var(--color-text);font-size:13px;">
+<option value="single_choice">Pilihan Ganda</option>
+<option value="true_false">Benar / Salah</option>
+<option value="multiple_choice">PG Kompleks</option>
+<option value="matching">Menjodohkan</option>
+<option value="short_answer">Isian Singkat</option>
+</select>
+<button class="btn-sm" data-action="questions-generate" style="gap:4px;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-plus"/></svg> Generate</button>
+</div>
+<div class="inline-group" style="display:flex;align-items:center;gap:6px;">
+<button class="btn-sm" data-action="weights-set-all" style="gap:4px;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-settings"/></svg> Terapkan ke Semua Bobot</button>
+</div>
+<div class="xml-import-wrapper" style="display:flex;align-items:center;gap:6px;">
+<button class="btn-sm" data-action="ai-prompt-copy" style="gap:4px;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-clipboard"/></svg> Prompt AI</button>
+<input type="file" id="xmlFileInput" accept=".xml" style="display:none;">
+<button class="btn-sm" data-action="xml-import-browse" style="gap:4px;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-download"/></svg> Import XML</button>
+<button class="btn-sm" data-action="xml-export" style="gap:4px;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-upload"/></svg> Ekspor XML</button>
+</div>
+</div>
+</div>
+
+<!-- 7. Questions List -->
+<div class="questions-list-container" id="questionsList" style="margin-bottom:16px;">
+<div style="color:var(--color-text-muted);text-align:center;padding:16px;font-size:13px;">Memuat data soal...</div>
+</div>
+
+</div>
+<div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding:12px 24px;border-top:1px solid var(--color-glass-border);">
+<button class="btn-sm btn-delete" data-action="modal-close" data-modal-close="closeQuestionsModal">Batal</button>
+<button id="btnSaveQuestionsConfig" class="btn-upload" data-action="questions-save"><svg class="icon-svg"><use href="#hi-check"/></svg> Simpan Konfigurasi</button>
+</div>
+</div>
+</div>
+
+<!-- Batch 9 (kontrak lintas-agen): #toastContainer DIHAPUS dari halaman ini —
+     partials/nav.html satu-satunya sumber container toast (admin-core.js
+     membacanya via getElementById). -->
+
+<!-- Heroicons Sprite -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none;" aria-hidden="true">
+<symbol id="hi-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/></symbol>
+<symbol id="hi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4.5 12.75 6 6 9-13.5"/></symbol>
+<symbol id="hi-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+<symbol id="hi-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></symbol>
+<symbol id="hi-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/></symbol>
+<symbol id="hi-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></symbol>
+<symbol id="hi-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></symbol>
+<symbol id="hi-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></symbol>
+<symbol id="hi-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></symbol>
+<symbol id="hi-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15.75 19.5 8.25 12l7.5-7.5"/></symbol>
+<symbol id="hi-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></symbol>
+<symbol id="hi-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></symbol>
+<symbol id="hi-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+<symbol id="hi-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"/></symbol>
+<symbol id="hi-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+<symbol id="hi-exclamation" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></symbol>
+<symbol id="hi-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></symbol>
+<symbol id="hi-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/></symbol>
+<symbol id="hi-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18 18 6M6 6l12 12"/></symbol>
+<symbol id="hi-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></symbol>
+<symbol id="hi-results" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></symbol>
+<symbol id="hi-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"/></symbol>
+<symbol id="hi-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 0 1-4.242-4.242"/></symbol>
+<symbol id="hi-lock-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 10.5V6.75a4.5 4.5 0 1 1 9 0v3.75M3.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H3.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+<symbol id="hi-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 4.5v15m7.5-7.5h-15"/></symbol>
+<symbol id="hi-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184"/></symbol>
+<symbol id="hi-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"/></symbol>
+<symbol id="hi-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+<symbol id="hi-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z"/></symbol>
+<symbol id="hi-building-library" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11m16-11v11M8 14v.01M12 14v.01M16 14v.01M9 21v-4h6v4"/></symbol>
+</svg>
+
+<script src="/static/js/admin-core.js?v={{.version}}"></script>
+<script src="/static/js/admin.js?v={{.version}}"></script>
+<script>
+const ADMIN_ID = {{.admin_id}};
+const IS_PRIVILEGED = {{if or (eq .admin_role "superadmin") (hasRole .admin_role "operator")}}true{{else}}false{{end}};
+
+function confirmBulkDelete() {
+    const checkboxes = document.querySelectorAll('.exam-checkbox:checked');
+    if (checkboxes.length === 0) return;
+    const names = Array.from(checkboxes).map(function(cb) { return cb.getAttribute('data-name'); });
+    showConfirm('Hapus ' + checkboxes.length + ' ujian terpilih?', names.join('\n'), 'Ya, Hapus Semua', 'Batal')
+    .then(function(ok) { if (ok) bulkDeleteExams(); });
+}
+
+function searchExamsWithStatus() {
+    var query = document.getElementById('searchExam').value.trim();
+    var status = document.getElementById('statusFilter').value;
+    var params = new URLSearchParams(window.location.search);
+    if (query) params.set('search', query); else params.delete('search');
+    if (status) params.set('status', status); else params.delete('status');
+    params.set('page', '1');
+    window.location.href = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+}
+
+function clearSearch() {
+    document.getElementById('searchExam').value = '';
+    searchExamsWithStatus();
+}
+
+function togglePengawasPopup(event, examId) {
+    event.stopPropagation();
+    var popup = document.getElementById('pengawas-popup-' + examId);
+    if (!popup) return;
+    var isOpen = popup.classList.contains('show');
+    document.querySelectorAll('.pengawas-popup.show').forEach(function(el) {
+        el.classList.remove('show');
+    });
+    if (!isOpen) {
+        popup.classList.add('show');
+    }
+}
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.pengawas-cell')) {
+        document.querySelectorAll('.pengawas-popup.show').forEach(function(el) {
+            el.classList.remove('show');
+        });
+    }
+});
+
+// ===== R58: countdown kedaluwarsa akun ======================================
+// Pembulatan ke atas per-hari membuat "Kedaluwarsa hari ini" mustahil
+// tercapai (sisa 5 jam → terhitung "1 hari lagi"). Logika berbasis jam:
+// <1 jam tampil menit, <24 jam = "Kedaluwarsa hari ini", sisanya floor hari.
+function expiryCountdownHtml(diffMs) {
+    if (diffMs <= 0) {
+        return '<span style="color:var(--color-danger-light);font-weight:600;">Kedaluwarsa</span>';
+    }
+    if (diffMs < 60 * 60 * 1000) {
+        var mins = Math.max(1, Math.round(diffMs / 60000));
+        return '<span style="color:var(--color-danger-light);font-weight:700;">± ' + mins + ' menit lagi</span>';
+    }
+    if (diffMs < 24 * 60 * 60 * 1000) {
+        return '<span style="color:var(--color-warning-light);font-weight:600;">Kedaluwarsa hari ini</span>';
+    }
+    var days = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+    if (days <= 7) {
+        return '<span style="color:var(--color-danger-light);font-weight:600;">' + days + ' hari lagi</span>';
+    }
+    return '<span style="color:var(--color-success-light);font-weight:700;">' + days + ' hari lagi</span>';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var si = document.getElementById('searchExam');
+    var sf = document.getElementById('statusFilter');
+    if (si) {
+        si.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); searchExamsWithStatus(); } });
+    }
+    if (sf) {
+        var up = new URLSearchParams(window.location.search);
+        if (up.has('status')) sf.value = up.get('status');
+    }
+    var expiryEl = document.getElementById('expiryCountdown');
+    if (expiryEl) {
+        var expiresStr = expiryEl.getAttribute('data-expires');
+        if (expiresStr) {
+            var expiresDate = new Date(expiresStr);
+            if (isNaN(expiresDate.getTime())) {
+                expiresDate = new Date(expiresStr.replace(' ', 'T').split('.')[0] + 'Z');
+            }
+            if (!isNaN(expiresDate.getTime())) {
+                var now = new Date();
+                var diffMs = expiresDate - now;
+                expiryEl.innerHTML = expiryCountdownHtml(diffMs);
+            }
+        }
+    }
+
+    // ===== T21: migrasi handler inline on*= ke addEventListener/delegasi =====
+    // Perilaku identik dengan versi onchange/onsubmit/oninput sebelumnya,
+    // tapi CSP-safe dan terpusat di blok init halaman ini.
+    var changePasswordFormEl = document.getElementById('changePasswordForm');
+    if (changePasswordFormEl) changePasswordFormEl.addEventListener('submit', submitChangePassword);
+    var editExamFormEl = document.getElementById('editExamForm');
+    if (editExamFormEl) editExamFormEl.addEventListener('submit', submitEditExam);
+    var editTokenFormEl = document.getElementById('editTokenForm');
+    if (editTokenFormEl) editTokenFormEl.addEventListener('submit', submitEditToken);
+    var formEditInstansiEl = document.getElementById('formEditInstansi');
+    if (formEditInstansiEl) formEditInstansiEl.addEventListener('submit', saveEditInstansi);
+
+    var editPdfFileEl = document.getElementById('editPdfFile');
+    if (editPdfFileEl) {
+        editPdfFileEl.addEventListener('change', function() { handleEditFileChange(this); });
+    }
+    var xmlFileInputEl = document.getElementById('xmlFileInput');
+    if (xmlFileInputEl) xmlFileInputEl.addEventListener('change', importXMLQuestions);
+
+    // Sinkronisasi dua arah color picker <-> input hex warna panel jawaban.
+    var panelColorEl = document.getElementById('examPanelColor');
+    var panelHexEl = document.getElementById('panelColorHex');
+    if (panelColorEl && panelHexEl) {
+        panelColorEl.addEventListener('change', function() { panelHexEl.value = this.value; });
+        panelHexEl.addEventListener('input', function() { panelColorEl.value = this.value; });
+    }
+
+    // Delegasi change: checkbox pilih-semua, checkbox baris ujian, mode token,
+    // filter status. Argumen examId dibawa data-exam-id pada select.
+    document.addEventListener('change', function(e) {
+        var t = e.target;
+        if (!t || !t.classList) return;
+        if (t.id === 'selectAllExams' || t.id === 'selectAllExamsMobile'
+            || (t.closest && t.closest('.mobile-select-all-exams'))) {
+            toggleSelectAllExams(t);
+        } else if (t.classList.contains('exam-checkbox')) {
+            updateBulkActions();
+        } else if (t.classList.contains('token-mode-select')) {
+            onTokenModeChange(t, t.getAttribute('data-exam-id'));
+        } else if (t.id === 'statusFilter') {
+            searchExamsWithStatus();
+        }
+    });
+});
+
+// NOTE: toggleRowDropdown is intentionally NOT redefined here — admin.js
+// provides a viewport-aware version (adds drop-up / align-right so the menu
+// stays on-screen on phones). Redefining it here would shadow that and clip
+// the action menu off the right edge on mobile.
+document.addEventListener('click', function() { document.querySelectorAll('.exam-action-dropdown-content.show').forEach(function(e) { e.classList.remove('show'); }); });
+</script>
+
+<!-- Modal Ubah Instansi -->
+<div class="modal-overlay" id="editInstansiModal" role="dialog" aria-modal="true" aria-labelledby="editInstansiTitle" style="display:none;" data-action="modal-dismiss" data-modal-close="closeEditInstansiModal">
+  <div class="modal-card glass-card" style="max-width: 440px;">
+    <div class="modal-header" style="border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:12px;">
+      <h3 id="editInstansiTitle" style="margin:0;font-size:1.1rem;color:#fff;display:flex;align-items:center;gap:8px;">
+        <svg class="icon-svg" style="width:20px;height:20px;color:var(--color-accent-light);"><use href="#hi-building-library"/></svg>
+        Ubah Nama Instansi / Sekolah
+      </h3>
+      <button class="btn-close" data-action="modal-close" data-modal-close="closeEditInstansiModal" aria-label="Tutup modal ubah instansi" style="background:none;border:none;color:var(--color-text-placeholder);font-size:1.4rem;cursor:pointer;">&times;</button>
+    </div>
+    <form id="formEditInstansi" style="margin-top:16px;">
+      <div style="margin-bottom:20px;">
+        <label for="editInstansiInput" style="display:block;font-size:0.85rem;font-weight:600;color:var(--color-text-secondary);margin-bottom:8px;">
+          Nama Instansi / Sekolah <span style="color:var(--color-danger);">*</span>
+        </label>
+        <input type="text" id="editInstansiInput" required value="{{.admin_instansi}}" placeholder="Contoh: SMA Negeri 1 Jakarta" style="width:100%;padding:10px 12px;border-radius:8px;background:var(--glass-bg-strong);border:1px solid rgba(255,255,255,0.15);color:var(--color-text-on-primary);font-size:0.9rem;">
+        <span style="font-size:0.75rem;color:var(--color-text-muted);display:block;margin-top:6px;">
+          Perubahan nama instansi akan otomatis berlaku untuk seluruh akun guru/pengawas di sekolah Anda.
+        </span>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;">
+        <button type="button" class="btn btn-secondary" data-action="modal-close" data-modal-close="closeEditInstansiModal" style="padding:8px 16px;border-radius:8px;background:rgba(255,255,255,0.1);border:none;color:var(--color-text-on-primary);cursor:pointer;">Batal</button>
+        <button type="submit" id="btnSaveEditInstansi" class="btn btn-primary" style="padding:8px 16px;border-radius:8px;background:linear-gradient(135deg, var(--grad-btn-violet-start), var(--grad-btn-violet-end));border:none;color:var(--color-text-on-accent);font-weight:600;cursor:pointer;">
+          Simpan Perubahan
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function openEditInstansiModal() {
+  var modal = document.getElementById('editInstansiModal');
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('role', 'dialog');
+    // Escape-to-close & Tab focus-trap TIDAK dipasang di sini lagi —
+    // didelegasikan ke Global Modal Manager di admin-core.js (observer
+    // .modal-overlay yang menangani Escape, focus trap, scroll-lock,
+    // initial focus, dan restore fokus saat modal ditutup).
+  }
+}
+function closeEditInstansiModal() {
+  var modal = document.getElementById('editInstansiModal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+function saveEditInstansi(e) {
+  e.preventDefault();
+  var inp = document.getElementById('editInstansiInput');
+  var val = inp ? inp.value.trim() : '';
+  if (!val || val.length < 3 || val.toLowerCase() === 'personal') {
+    showToast('Silakan masukkan nama instansi/sekolah yang valid (min. 3 karakter).', 'error');
+    return;
+  }
+  var btn = document.getElementById('btnSaveEditInstansi');
+  var oldText = btn ? btn.innerText : 'Simpan Perubahan';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = 'Menyimpan...';
+  }
+
+  apiFetch('/admin/api/instansi/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instansi: val })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(res) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = oldText;
+    }
+    if (res.success) {
+      showToast(res.message || 'Nama Instansi berhasil diperbarui!', 'success');
+      closeEditInstansiModal();
+      setTimeout(function() { location.reload(); }, 1200);
+    } else {
+      showToast(res.message || 'Gagal mengubah nama instansi', 'error');
+    }
+  })
+  .catch(function(err) {
+    console.error(err);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = oldText;
+    }
+    showToast('Terjadi kesalahan jaringan', 'error');
+  });
+}
+
+// ===== R28-lanjutan: registrasi aksi delegasi milik skrip halaman ============
+// Fungsi-fungsi yang didefinisikan di atas (inline script) didaftarkan DI SINI;
+// fungsi milik admin.js didaftarkan di blok registrasi admin.js. Delegasi klik
+// global + registry Actions disediakan admin-core.js.
+if (typeof Actions !== 'undefined' && typeof Actions.register === 'function') {
+  Actions.register('instansi-open', function () { openEditInstansiModal(); });
+  Actions.register('instansi-code-copy', function (el) { copyCode(el.getAttribute('data-code')); });
+  Actions.register('server-url-copy', function (el) { copyCode(el.getAttribute('data-url')); });
+  Actions.register('search-clear', function () { clearSearch(); });
+  Actions.register('exams-search', function () { searchExamsWithStatus(); });
+  Actions.register('bulk-delete-confirm', function () { confirmBulkDelete(); });
+}
+</script>
+</body>
+</html>

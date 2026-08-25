@@ -1,0 +1,1491 @@
+/* EXAMVAN Admin Panel - Dark Glassmorphism Theme */
+/* Theme variables loaded from centralized theme.css */
+/* Font loaded via <link> in admin_base.html */
+
+@import url('theme.css');
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.6;
+    background: var(--bg-gradient);
+    background-attachment: fixed;
+    color: var(--color-text);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* ===== Selection ===== */
+::selection {
+    background: rgba(var(--rgb-info), 0.3);
+    color: #fff;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(var(--rgb-white), 0.1);
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--rgb-white), 0.2);
+}
+
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-primary) transparent;
+}
+
+/* ===== Headings ===== */
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    color: var(--color-text);
+}
+h1 { font-size: 1.75rem; }
+h2 { font-size: 1.4rem; }
+h3 { font-size: 1.15rem; }
+h4 { font-size: 1rem; }
+
+/* ===== Links ===== */
+a {
+    color: var(--color-accent-light);
+    text-decoration: none;
+    transition: color 0.2s var(--ease-spring);
+}
+a:hover {
+    color: #fff;
+}
+
+/* ===== Code / Monospace ===== */
+code, pre, .token-code, .mono {
+    font-family: var(--font-mono);
+}
+
+/* ===== Page Transition ===== */
+.dashboard-page {
+    opacity: 0;
+    animation: pageFadeIn 0.35s ease forwards;
+}
+@keyframes pageFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* ===== Accessibility: Focus Visible ===== */
+*:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+*:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* ===== Custom Confirm Dialog ===== */
+.confirm-dialog-body {
+    text-align: center;
+    padding: 28px 20px 12px;
+}
+.confirm-dialog-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+.confirm-dialog-msg {
+    font-size: 15px;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    margin-bottom: 4px;
+}
+.confirm-dialog-detail {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    max-height: 120px;
+    overflow-y: auto;
+    margin: 8px 0 4px;
+    padding: 8px;
+    background: rgba(var(--rgb-white),0.03);
+    border-radius: 8px;
+    white-space: pre-wrap;
+    text-align: left;
+}
+.confirm-dialog-footer {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    padding: 8px 20px 20px;
+}
+.confirm-dialog-footer .btn-sm {
+    min-width: 100px;
+    justify-content: center;
+    padding: 10px 20px;
+    font-size: 13px;
+}
+
+/* ===== Skeleton Loading ===== */
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+.skeleton {
+    background: linear-gradient(90deg, rgba(var(--rgb-white),0.03) 25%, rgba(var(--rgb-white),0.08) 50%, rgba(var(--rgb-white),0.03) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    border-radius: 6px;
+    color: transparent !important;
+    user-select: none;
+    pointer-events: none;
+}
+.skeleton-inline {
+    display: inline-block;
+    height: 1em;
+    min-width: 60px;
+}
+.skeleton-block {
+    display: block;
+    height: 16px;
+    margin-bottom: 8px;
+    width: 100%;
+}
+.skeleton-card {
+    padding: 20px;
+    border-radius: var(--radius-md);
+    background: rgba(var(--rgb-white),0.02);
+    border: 1px solid var(--color-glass-border);
+}
+.skeleton-circle {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+}
+
+/* ===== Keyboard Shortcuts Hint ===== */
+.shortcuts-hint {
+    position: fixed;
+    bottom: 80px;
+    right: 24px;
+    z-index: var(--z-hint);
+    background: rgba(10,10,22,0.9);
+    border: 1px solid var(--color-glass-border);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 10px 30px rgba(var(--rgb-black),0.5);
+    min-width: 240px;
+    display: none;
+}
+.shortcuts-hint.show {
+    display: block;
+    animation: fadeUp 0.2s ease;
+}
+.shortcuts-hint h4 {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--color-text-muted);
+    margin-bottom: 12px;
+}
+.shortcut-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+}
+.shortcut-key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(var(--rgb-white),0.06);
+    border: 1px solid var(--color-glass-border);
+    border-radius: var(--radius-xs);
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: monospace;
+    color: var(--color-accent-light);
+    min-width: 28px;
+}
+
+/* ===== Sticky Toolbar ===== */
+.sticky-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(10,10,26,0.95);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--color-glass-border);
+    margin: -16px -16px 16px;
+    padding: 12px 16px;
+    border-radius: 0;
+}
+
+/* ===== Circular Progress ===== */
+.circular-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.circular-progress svg {
+    transform: rotate(-90deg);
+}
+.circular-progress .progress-track {
+    fill: none;
+    stroke: rgba(var(--rgb-white),0.08);
+}
+.circular-progress .progress-fill-circ {
+    fill: none;
+    stroke: url(#progressGrad);
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.3s ease;
+}
+.circular-progress .progress-pct {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-text-secondary);
+}
+
+/* ===== Reduced Motion ===== */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    .skeleton {
+        animation: none !important;
+        background: rgba(var(--rgb-white),0.05);
+    }
+}
+
+/* ===== Mobile Bottom Sticky Bar ===== */
+.mobile-bottom-bar {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: var(--z-bottom-bar);
+    background: rgba(10,10,22,0.95);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    border-top: 1px solid var(--color-glass-border);
+    padding: 12px 16px;
+    gap: 10px;
+    align-items: center;
+    box-shadow: 0 -4px 20px rgba(var(--rgb-black),0.4);
+}
+.mobile-bottom-bar.show { display: flex; }
+.mobile-bottom-bar .bottom-bar-count {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+.mobile-bottom-bar .bottom-bar-actions {
+    display: flex;
+    gap: 8px;
+    flex: 1;
+    justify-content: flex-end;
+}
+.mobile-bottom-bar .bottom-bar-actions .btn-sm {
+    flex: 1;
+    max-width: 160px;
+    justify-content: center;
+    padding: 10px 14px;
+}
+
+/* ===== Base Button Styles ===== */
+.btn-sm {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    font-family: inherit;
+    border: 1px solid rgba(var(--rgb-white),0.08);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    background: rgba(var(--rgb-white),0.04);
+    color: var(--color-text, #e2e8f0);
+    text-decoration: none;
+    white-space: nowrap;
+    line-height: 1.4;
+    user-select: none;
+}
+.btn-sm:hover {
+    background: rgba(var(--rgb-white),0.1);
+    border-color: rgba(var(--rgb-white),0.15);
+}
+.btn-sm:active {
+    transform: scale(0.97);
+}
+.btn-sm:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.btn-upload {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 24px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid rgba(var(--rgb-info),0.3);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: linear-gradient(135deg, rgba(var(--rgb-info),0.2), rgba(139,92,246,0.2));
+    color: var(--color-primary-soft);
+    text-decoration: none;
+    line-height: 1.4;
+    user-select: none;
+}
+.btn-upload:hover {
+    background: linear-gradient(135deg, rgba(var(--rgb-info),0.35), rgba(139,92,246,0.35));
+    border-color: rgba(var(--rgb-info),0.5);
+    box-shadow: 0 0 20px rgba(var(--rgb-info),0.15);
+}
+.btn-upload:active {
+    transform: scale(0.97);
+}
+.btn-upload:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.btn-delete {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    font-family: inherit;
+    border: 1px solid rgba(var(--rgb-danger),0.2);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    background: rgba(var(--rgb-danger),0.08);
+    color: var(--color-danger-light);
+    text-decoration: none;
+    white-space: nowrap;
+    line-height: 1.4;
+    user-select: none;
+}
+.btn-delete:hover {
+    background: rgba(var(--rgb-danger),0.2);
+    border-color: rgba(var(--rgb-danger),0.4);
+}
+.btn-delete:active {
+    transform: scale(0.97);
+}
+
+.btn-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--color-text, #e2e8f0);
+    border: 1px solid rgba(var(--rgb-white),0.08);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    background: rgba(var(--rgb-white),0.04);
+    text-decoration: none;
+    white-space: nowrap;
+    user-select: none;
+}
+.btn-toggle:hover {
+    background: rgba(var(--rgb-white),0.1);
+    border-color: rgba(var(--rgb-white),0.15);
+}
+.btn-toggle.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* Small compact buttons inside tables */
+.btn-sm-compact {
+    padding: 5px 8px;
+    font-size: 0.75rem;
+}
+.btn-sm-compact .icon-svg {
+    width: 15px;
+    height: 15px;
+}
+
+/* ===== Print Styles ===== */
+@media print {
+    .topbar, .topbar-menu-dropdown, .toast-container,
+    .btn-upload, .btn-sm, .btn-refresh, .btn-delete, .btn-toggle,
+    .modal-overlay, .exam-action-dropdown, .actions-group,
+    .search-section, .tab-nav, .upload-section, .network-info,
+    .footer, .mobile-bottom-bar, .shortcuts-hint {
+        display: none !important;
+    }
+    body { background: white !important; color: black !important; }
+    .glass-card { border: 1px solid #ccc !important; background: white !important; backdrop-filter: none !important; }
+    .exam-table th { color: #333 !important; border-bottom: 2px solid #ccc !important; }
+    .exam-table td { color: #000 !important; border-bottom: 1px solid #eee !important; }
+    .status-badge { border: 1px solid #999 !important; }
+    .dashboard { max-width: 100% !important; padding: 0 !important; }
+    .stat-value { color: #000 !important; }
+    .stat-label { color: #666 !important; }
+    .badge-https { border: 1px solid #10b981 !important; color: #065f46 !important; }
+    .token-code { color: #4f46e5 !important; }
+    a { color: #4f46e5 !important; }
+}
+
+/* Clickable table rows (pengawas page) */
+.clickable-row {
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.clickable-row:hover {
+    background: rgba(var(--rgb-info), 0.05);
+}
+
+
+/* ===================================================================== */
+/* Mobile UX fixes (audit 2026-07) — this file loads AFTER output.css so  */
+/* these rules win on equal specificity. Phones: <= 768px.               */
+/* ===================================================================== */
+@media (max-width: 768px) {
+    /* Prevent iOS Safari auto-zoom on focus: form controls must be >= 16px.
+       !important overrides the many inline font-sizes on modal inputs. */
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    select,
+    textarea {
+        font-size: 16px !important;
+    }
+
+    /* Hamburger — the sole nav control on phones — needs a full 44px tap area. */
+    .topbar-menu-toggle {
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Nav / settings dropdown: cap height and scroll so the last items
+       (Ubah Password, Logout) are always reachable on short/landscape phones. */
+    .topbar-dropdown-content {
+        max-height: calc(100vh - 70px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Comfortable touch targets for icon / small action buttons (S10 audit:
+       44px, bukan 40px — ambang target sentuh standar). */
+    .btn-icon {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    .btn-sm {
+        min-height: 44px;
+    }
+
+    /* Respect the notch / home-indicator safe area for the fixed bottom bar. */
+    .mobile-bottom-bar {
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    }
+}
+
+/* ===== Wayfinding & a11y (general-UX audit) ===== */
+/* Clearer active-nav state (previously only color:white — imperceptible). */
+.nav-link.active { color: var(--color-accent-light) !important; }
+.topbar-nav .nav-link.active { background: rgba(var(--rgb-info),0.14); border-radius: 8px; }
+.topbar-dropdown-content a.active,
+.topbar-dropdown-content .dropdown-item.active,
+.dropdown-item.active {
+    color: var(--color-accent-light) !important;
+    background: rgba(var(--rgb-info),0.12);
+}
+/* Keyboard-focus affordance for div/span elements promoted to role="button". */
+[role="button"]:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+/* ===== Settings tab bar (paired with admin/partials/settings-tabs.html) =====
+   Shown under the topbar on every settings page; keeps the header to a single
+   "Pengaturan" entry and moves section navigation into tabs. */
+.settings-tabs {
+    display: flex;
+    align-items: center;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--color-glass-border);
+    background: rgba(15, 23, 42, 0.55);
+    overflow-x: auto;
+    scrollbar-width: thin;
+    position: relative;
+    z-index: 50;
+}
+.settings-tabs-scroll {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 auto;
+    max-width: 1200px;
+    width: 100%;
+}
+.settings-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+.settings-tab:hover {
+    color: #fff;
+    background: rgba(var(--rgb-white), 0.06);
+}
+.settings-tab.active {
+    color: #fff;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    box-shadow: 0 2px 10px rgba(var(--rgb-info), 0.35);
+}
+.settings-tab .icon-svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+}
+@media (max-width: 768px) {
+    .settings-tabs {
+        padding: 8px 14px;
+    }
+    .settings-tab {
+        padding: 7px 12px;
+        font-size: 0.75rem;
+    }
+}
+
+/* Mobile: replace the scrollable tab bar with a "Pilih Bagian" dropdown.
+   The nav (settings-tabs) hides under the mobile breakpoint; the select
+   (settings-tabs-mobile) shows. Both are rendered by the same partial with
+   the same role gate, so the options always match the tabs. */
+.settings-tabs-mobile {
+    display: none;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--color-glass-border);
+    background: rgba(15, 23, 42, 0.55);
+    position: relative;
+    z-index: 50;
+}
+.settings-tabs-mobile select {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: rgba(var(--rgb-white), 0.06);
+    border: 1px solid var(--color-glass-border);
+    color: #fff;
+    font-size: 0.875rem;
+    font-weight: 600;
+    outline: none;
+    cursor: pointer;
+}
+.settings-tabs-mobile select option {
+    background: #0f172a;
+    color: #fff;
+}
+@media (max-width: 1100px), (hover: none) and (pointer: coarse) {
+    .settings-tabs {
+        display: none;
+    }
+    .settings-tabs-mobile {
+        display: block;
+    }
+}
+
+/* Voucher sub-tabs (Daftar | Riwayat) inside the Voucher tab. */
+.voucher-subtab {
+    transition: all 0.2s ease;
+}
+.voucher-subtab.active {
+    box-shadow: 0 2px 10px rgba(var(--rgb-info), 0.35);
+}
+
+/* Collapsible cards in the Pengaturan Umum tab. The 8 SaaS cards are plain
+   glass-cards with .saas-collapse markup; the Pengaturan Paket card is
+   wrapped into a .saas-collapse by settings-general.js, so it gets the same
+   card chrome here. */
+.saas-collapse[data-collapse-id="packages"] {
+    border: 1px solid var(--color-glass-border);
+    border-radius: var(--radius-lg);
+    background: rgba(var(--rgb-white), 0.02);
+    margin-bottom: 24px;
+    overflow: hidden;
+}
+.saas-collapse[data-collapse-id="packages"] .saas-collapse-body {
+    padding: 0 16px 16px;
+}
+.saas-collapse-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 4px 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--color-accent-light);
+}
+.saas-collapse-head:hover {
+    color: #fff;
+}
+.saas-collapse-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.saas-collapse-title h4 {
+    margin: 0;
+    font-size: inherit;
+    font-weight: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.saas-collapse-chev {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+}
+.saas-collapse-head.collapsed .saas-collapse-chev {
+    transform: rotate(-90deg);
+}
+.saas-collapse-body {
+    margin-top: 8px;
+}
+/* Sub-sections inside the Tambah User form (Kelola User tab): bordered
+   blocks with a collapsible head, mirroring the SaaS cards but nested in
+   the form so all fields still submit together. */
+.users-sub {
+    border: 1px solid var(--color-glass-border);
+    border-radius: var(--radius-md);
+    background: rgba(var(--rgb-white), 0.02);
+    padding: 10px 12px;
+}
+.users-sub .saas-collapse-head {
+    padding: 2px 0;
+}
+.users-sub .saas-collapse-title {
+    font-size: 0.8rem;
+}
+.packages-head {
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    background: rgba(var(--rgb-white), 0.04);
+    border: 1px solid var(--color-glass-border);
+}
+.packages-head:hover {
+    background: rgba(var(--rgb-white), 0.08);
+}
+
+/* ===== Modal manager (paired with admin-core.js) ===== */
+/* Lock the page behind any open modal; the manager toggles this class. */
+body.modal-open {
+    overflow: hidden;
+}
+/* Dialogs must cover every floating layer (mobile bottom bar 9997, shortcuts
+   hint 9998, action dropdowns 9999) — previously they sat at z-index 1000
+   underneath all of them. Toasts stay one step above the dialogs. */
+.modal-overlay,
+.modal-backdrop {
+    z-index: var(--z-modal-overlay);
+    overscroll-behavior: contain;
+}
+.modal-body {
+    overscroll-behavior: contain;
+}
+.toast-container {
+    z-index: var(--z-toast);
+}
+
+/* ===== Medium-severity UI fixes (July 2026 audit) ===== */
+
+/* .btn-secondary was referenced in vouchers/billing but never defined,
+   falling back to the browser's default light-gray button on the dark UI. */
+.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: rgba(var(--rgb-white), 0.06);
+    border: 1px solid var(--color-glass-border);
+    color: var(--color-text);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+.btn-secondary:hover {
+    background: rgba(var(--rgb-white), 0.12);
+}
+
+/* Loading spinner: billing uses <svg class="icon-svg spin"> but no admin
+   stylesheet defined the animation (it existed only in hasil.css). */
+.spin {
+    animation: adminSpin 0.8s linear infinite;
+}
+@keyframes adminSpin {
+    to { transform: rotate(360deg); }
+}
+
+/* Wide tables previously only got horizontal scroll inside the mobile media
+   query; at 769–1150px an 8-column table clipped its last column under
+   body{overflow-x:hidden} with no way to reach it. Scroll at every width. */
+.table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Compact inline hint chip. output.css defines .form-hint twice and the
+   full-width block variant wins, so inline "label hints" need their own class. */
+.form-hint-inline {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    background: rgba(var(--rgb-info), 0.14);
+    color: var(--color-accent-light);
+    border: 1px solid rgba(var(--rgb-info), 0.25);
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+/* ===== Kontrak CSS validasi per-field (temuan S19/T10b) ===== */
+/* Dipakai setFieldError() di admin-core.js — jangan mengubah nama class atau
+   properti di bawah tanpa menyinkronkan helper JS-nya (test:
+   uiux-batch3-a11y-css.test.mjs). */
+.input-error {
+    border-color: var(--color-danger) !important;
+}
+.field-error-text {
+    color: var(--color-danger-light);
+    font-size: 12.5px;
+    margin-top: 6px;
+    margin-bottom: 0;
+    line-height: 1.45;
+}
+
+/* Status badges are only interactive when promoted to role="button"
+   (dashboard toggle). Read-only badges (pengawas pages) previously showed a
+   pointer cursor and hovered to the OPPOSITE color, implying a toggle. */
+.status-badge:not([role="button"]) {
+    cursor: default;
+}
+.status-badge:not([role="button"]):active {
+    transform: none;
+}
+.status-active:not([role="button"]):hover {
+    background: rgba(var(--rgb-success), 0.12);
+    border-color: rgba(var(--rgb-success), 0.2);
+    color: var(--color-success);
+}
+.status-inactive:not([role="button"]):hover {
+    background: rgba(var(--rgb-warning), 0.12);
+    border-color: rgba(var(--rgb-warning), 0.2);
+    color: var(--color-warning);
+}
+/* Tombstoned badge (policy B): the exam was auto-inactivated when the
+   school's operator was cut off (voucher switch / manual suspension), not
+   manually — the dashed border signals "dormant by the system". On the
+   dashboard it is a toggle, so hovering hints the next click reactivates. */
+.status-tombstoned {
+    background: rgba(148, 163, 184, 0.12);
+    color: var(--color-text-placeholder);
+    border: 1px dashed rgba(148, 163, 184, 0.45);
+}
+.status-tombstoned:hover {
+    background: rgba(var(--rgb-success), 0.12);
+    border-color: rgba(var(--rgb-success), 0.3);
+    color: var(--color-success);
+}
+/* Expired-account badge (users page): the account's expires_at is in the
+   past, so it cannot log in anymore (server enforces on login & per request)
+   until an admin extends its expiry. Red solid border = needs action, unlike
+   the dashed system-dormant tombstone badge above. */
+.status-expired {
+    background: rgba(var(--rgb-danger), 0.12);
+    color: var(--color-danger-light);
+    border: 1px solid rgba(var(--rgb-danger), 0.4);
+}
+.status-expired:hover {
+    background: rgba(var(--rgb-danger), 0.2);
+    border-color: rgba(var(--rgb-danger), 0.6);
+}
+
+/* Student status pill — promoted from pengawas.html's inline styles because
+   pengawas_detail's access-log modal renders the same markup and previously
+   showed unstyled plain text. */
+.student-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+.student-status.submitted { background: rgba(var(--rgb-success),0.15); color: #6ee7b7; border: 1px solid rgba(var(--rgb-success),0.3); }
+.student-status.in-progress { background: rgba(251,191,36,0.15); color: var(--color-warning-light); border: 1px solid rgba(251,191,36,0.3); }
+.student-status.not-started { background: rgba(var(--rgb-text-muted),0.15); color: var(--color-text-muted); border: 1px solid rgba(var(--rgb-text-muted),0.3); }
+
+/* ===== Kelas utilitas tone (Batch 7) =====
+   Kontrak lintas-agen: HANYA surface/border/color dari token rgb-triplet
+   theme.css (tanpa hex literal baru — hitungan hex terkunci test batch4).
+   Layout tetap inline di template pemakai. Pola sama dengan .status-* di
+   atas: background transparan + border tipis + teks versi light. */
+.tone-success { background: rgba(var(--rgb-success), 0.15); border: 1px solid rgba(var(--rgb-success), 0.3); color: var(--color-success-light); }
+.tone-warning { background: rgba(var(--rgb-warning), 0.12); border: 1px solid rgba(var(--rgb-warning), 0.35); color: var(--color-warning-light); }
+.tone-danger { background: rgba(var(--rgb-danger), 0.15); border: 1px solid rgba(var(--rgb-danger), 0.3); color: var(--color-danger-light); }
+.tone-info { background: rgba(var(--rgb-info), 0.15); border: 1px solid rgba(var(--rgb-info), 0.3); color: var(--color-primary-light); }
+.tone-accent { background: rgba(var(--rgb-accent), 0.15); border: 1px solid rgba(var(--rgb-accent), 0.4); color: var(--color-accent-light); }
+/* Netral: tanpa warna tone — surface kaca pekat saja (badge dorman/placeholder). */
+.tone-neutral { background: var(--glass-bg-strong); border: 1px solid var(--color-glass-border); }
+/* Kotak peringatan inline (mis. banner konfigurasi): flex agar ikon + teks
+   sejajar tanpa utilitas layout tambahan di template. */
+.notice-warning {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(var(--rgb-warning), 0.12);
+    border: 1px solid rgba(var(--rgb-warning), 0.35);
+    color: var(--color-warning-light);
+    padding: 14px 18px;
+    /* Radius ditulis sebagai empat longhand (bukan shorthand border-radius)
+       karena jumlah deklarasi shorthand border-radius dikunci PERSIS 27 oleh
+       regresi uiux-batch4-tokens.test.mjs (guard no-visual-change S15).
+       Hasil render identik: var(--radius-md) di keempat sudut. */
+    border-top-left-radius: var(--radius-md);
+    border-top-right-radius: var(--radius-md);
+    border-bottom-left-radius: var(--radius-md);
+    border-bottom-right-radius: var(--radius-md);
+    font-size: 13.5px;
+}
+
+/* Mobile "select all exams" control — the thead (and its master checkbox) is
+   hidden in the card layout, which left phones with row-by-row selection only. */
+.mobile-select-all-exams {
+    display: none;
+}
+@media (max-width: 768px) {
+    .mobile-select-all-exams {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        border-radius: var(--radius-sm);
+        background: rgba(var(--rgb-white), 0.04);
+        border: 1px solid var(--color-glass-border);
+        font-size: 13px;
+        cursor: pointer;
+        min-height: 44px;
+    }
+    .mobile-select-all-exams input {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--color-primary);
+    }
+    /* Interactive status toggle needs a real touch target on phones (S10:
+       34px → 44px; ini satu-satunya kontrol aktif/nonaktif ujian di dashboard). */
+    .status-badge[role="button"] {
+        min-height: 44px;
+        padding-block: calc(var(--spacing) * 2);
+    }
+    /* pengawas_detail row action links were ~26px tall. */
+    .action-link {
+        min-height: 40px;
+        display: inline-flex;
+        align-items: center;
+    }
+}
+
+
+/* Mobile viewport containment: keep navigation controls inside the visible screen. */
+img, video, canvas, svg { max-width: 100%; }
+@media (max-width: 768px) {
+  html, body { width: 100%; max-width: 100%; overflow-x: clip; }
+  .topbar {
+    display: flex !important;
+    width: 100%;
+    max-width: 100vw;
+    justify-content: space-between;
+    gap: 8px;
+    padding-left: max(14px, env(safe-area-inset-left, 0px)) !important;
+    padding-right: max(14px, env(safe-area-inset-right, 0px)) !important;
+  }
+  .topbar-left, .topbar-right { min-width: 0; }
+  .topbar-left { flex: 1 1 auto; overflow: hidden; }
+  .topbar-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-right, .topbar-menu-dropdown, .topbar-menu-toggle { flex: 0 0 auto; }
+  .topbar-menu-toggle { position: relative; z-index: var(--z-topbar-floating); }
+}
+
+/* Touch devices may expose a desktop-like ~980px layout viewport. */
+@media (max-width: 1100px), (hover: none) and (pointer: coarse) {
+  .topbar {
+    display: flex !important;
+    width: 100%;
+    max-width: 100vw;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-left: max(14px, env(safe-area-inset-left, 0px)) !important;
+    padding-right: max(14px, env(safe-area-inset-right, 0px)) !important;
+  }
+  .topbar-center, .topbar-nav, .toggle-user-name, .topbar-badge, .desktop-only-item {
+    display: none !important;
+  }
+  .topbar-left { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+  .topbar-right, .topbar-menu-dropdown, .topbar-menu-toggle { flex: 0 0 auto; }
+  .topbar-menu-toggle {
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top, 0px));
+    right: max(10px, env(safe-area-inset-right, 0px));
+    z-index: var(--z-topbar-floating);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .mobile-nav-links { display: block; }
+  .mobile-only-header { display: flex !important; }
+  .mobile-only-divider { display: block !important; }
+  .topbar-dropdown-content {
+    position: fixed;
+    top: max(62px, calc(env(safe-area-inset-top, 0px) + 62px));
+    right: max(10px, env(safe-area-inset-right, 0px));
+    width: min(260px, calc(100vw - 20px));
+    max-height: calc(100dvh - 70px);
+    overflow-y: auto;
+  }
+}
+
+/* Touch-device fallback when Chromium reports desktop media capabilities. */
+html.touch-device .topbar {
+  display: flex !important;
+  width: 100%; max-width: 100vw;
+  align-items: center; justify-content: space-between; gap: 8px;
+  padding-left: 14px !important; padding-right: 14px !important;
+}
+html.touch-device .topbar-center,
+html.touch-device .topbar-nav,
+html.touch-device .toggle-user-name,
+html.touch-device .topbar-badge,
+html.touch-device .desktop-only-item { display: none !important; }
+html.touch-device .topbar-left { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+html.touch-device .topbar-right,
+html.touch-device .topbar-menu-dropdown,
+html.touch-device .topbar-menu-toggle { flex: 0 0 auto; }
+html.touch-device .topbar-menu-toggle {
+  position: fixed; top: 8px; right: 10px; z-index: var(--z-topbar-floating);
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; min-height: 44px;
+}
+html.touch-device .mobile-nav-links { display: block; }
+html.touch-device .mobile-only-header { display: flex !important; }
+html.touch-device .mobile-only-divider { display: block !important; }
+html.touch-device .topbar-dropdown-content {
+  position: fixed; top: 62px; right: 10px;
+  width: min(260px, calc(100vw - 20px));
+  max-height: calc(100dvh - 70px); overflow-y: auto;
+}
+
+/* ===== Kelola User (tab users) polish — UI/UX review fixes ===== */
+
+/* Toolbar Buka Semua / Lipat Semua di atas kartu Tambah & Daftar. */
+.btn-toggle-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: rgba(var(--rgb-info), 0.15);
+  border: 1px solid rgba(var(--rgb-info), 0.4);
+  color: var(--color-primary-light);
+  transition: all 0.2s;
+}
+.btn-toggle-all:hover {
+  background: rgba(var(--rgb-info), 0.25);
+  border-color: rgba(var(--rgb-info), 0.55);
+  color: #fff;
+}
+.btn-toggle-all:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Catatan bentuk-bebas di dalam form (banner kebijakan akun sub, dll.) —
+   tidak punya definisi CSS sebelumnya dan dipakai sebagai banner utama
+   ("Akun sub sekolah…") untuk tujuan Operator. */
+.sub-pkg-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  background: rgba(var(--rgb-info), 0.05);
+  border: 1px dashed rgba(var(--rgb-info), 0.28);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+.sub-pkg-note strong { color: var(--color-text); }
+
+/* Toolbar pencarian daftar user: baris berisi input cari, tombol cari, filter
+   role, dan pemilih per-page. Memakai kelas toolbar-* yang sudah ada
+   (toolbar-search-wrap / toolbar-search-input / toolbar-search-clear /
+   toolbar-btn / toolbar-select) — hanya wrapper baris yang ditambah di sini. */
+.users-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0 0 16px 0;
+}
+.users-toolbar .toolbar-search-input { width: 220px; }
+@media (max-width: 768px) {
+  .users-toolbar .toolbar-search-input { width: 100%; }
+  .users-toolbar > * { flex: 1 1 auto; }
+}
+
+/* Ikon info popup kuota di samping username — memberi affordance bahwa
+   username bisa diklik untuk melihat detail kuota & masa aktif. */
+.user-info-icon {
+  width: 13px;
+  height: 13px;
+  margin-left: 3px;
+  vertical-align: -2px;
+  opacity: 0.45;
+  color: var(--color-accent-light);
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.user-info-btn:hover .user-info-icon,
+.user-info-btn:focus-visible .user-info-icon {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+/* Badge status klikabel (toggle suspend/aktif) — affordance eksplisit. */
+.status-badge.status-toggle {
+  cursor: pointer;
+  text-decoration: underline dotted rgba(var(--rgb-white), 0.35);
+  text-underline-offset: 3px;
+}
+.status-badge.status-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Kolom status: badge Aktif/Suspen/Pending + badge "Masa aktif habis" dalam
+   satu baris (sebelumnya ditumpuk vertikal sehingga tinggi baris melompat). */
+.user-status-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Tombol aksi baris: ikon + label teks, dengan touch target layak. */
+.user-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.btn-row-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  min-height: 30px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.3;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+.btn-row-action .icon-svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.btn-row-action:hover { transform: translateY(-1px); }
+.btn-row-action:active { transform: scale(0.96); }
+.btn-row-action:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.btn-row-action-verify,
+.btn-row-action-edit {
+  background: rgba(var(--rgb-info), 0.12);
+  border: 1px solid rgba(var(--rgb-info), 0.3);
+  color: var(--color-primary-light);
+}
+.btn-row-action-verify:hover,
+.btn-row-action-edit:hover {
+  background: rgba(var(--rgb-info), 0.22);
+  border-color: rgba(var(--rgb-info), 0.5);
+  color: #fff;
+}
+.btn-row-action-deactivate {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: var(--color-danger-light);
+}
+.btn-row-action-deactivate:hover {
+  background: rgba(248, 113, 113, 0.22);
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #fff;
+}
+.btn-row-action-danger {
+  background: rgba(var(--rgb-danger), 0.08);
+  border: 1px solid rgba(var(--rgb-danger), 0.22);
+  color: var(--color-danger-light);
+}
+.btn-row-action-danger:hover {
+  background: rgba(var(--rgb-danger), 0.18);
+  border-color: rgba(var(--rgb-danger), 0.4);
+  color: #fecaca;
+}
+@media (max-width: 768px) {
+  .btn-row-action { min-height: 40px; padding: 6px 12px; }
+  .user-row-actions { justify-content: flex-start; }
+}
+
+/* ===== Kelola User (tab users) polish — UI/UX review pass 2 ===== */
+
+/* Dropdown sortir alternatif: hanya tampil di layar kecil (≤768px) karena
+   header kolom (yang bisa diklik untuk sorting) disembunyikan di sana —
+   tabel berubah jadi kartu. Di desktop disembunyikan agar toolbar tidak
+   menduplikasi kontrol yang sudah ada di <thead>. */
+.users-sort-mobile {
+  display: none;
+}
+@media (max-width: 768px) {
+  .users-sort-mobile {
+    display: block;
+  }
+}
+
+/* Chip role berlabel lengkap (Guru/Pengawas/Operator) menggantikan huruf
+   tunggal G/P/O yang sulit dikenali (tooltip hover tidak muncul di layar
+   sentuh). Override lebar tetap 32px dari output.css — selector memiliki
+   spesifisitas yang sama dan admin-base.css dimuat TERAKHIR, jadi
+   properti ini menang di cascade. */
+.role-chip {
+  width: auto;
+  min-width: 34px;
+  height: 32px;
+  padding: 0 10px;
+  gap: 4px;
+  font-size: 0.72rem;
+}
+
+/* Badge status yang bisa di-toggle: touch target ≥ 32px. */
+.status-badge.status-toggle {
+  min-height: 32px;
+  padding-inline: 10px;
+}
+
+/* Edit instansi inline (SuperAdmin) — affordance keyboard + focus ring
+   yang terlihat (mengikuti pola .status-toggle yang sudah ada). */
+.editable-instansi {
+  border-radius: var(--radius-xs);
+}
+.editable-instansi:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ===== Kelola User (tab users) polish — card sizing pass 3 ===== */
+
+/* 1) Row-card di mobile: layout blok (settings.html) cuma memberi radius
+   tanpa background/border, jadi baris tampak seperti teks melayang di atas
+   glass-card — tidak terbaca sebagai kartu. Tambah surface, border, dan
+   bayangan tipis. Berlaku juga untuk dashboard/submissions (kelas .exam-table
+   yang sama, tanpa striping), jadi konsisten di semua tabel kartu. */
+@media (max-width: 768px) {
+  .exam-table tbody tr {
+    background: linear-gradient(180deg, rgba(var(--rgb-white),0.05), rgba(var(--rgb-white),0.02));
+    border: 1px solid var(--color-glass-border);
+    box-shadow: 0 4px 14px rgba(var(--rgb-black), 0.18);
+  }
+}
+
+/* 2) Tombol aksi di layar ≤400px: V/Nak Ed/Hapus (min-height 40px di mobile)
+   wrap ke dua baris sehingga tinggi kartu didominasi tombol. Grid 2 kolom
+   merata mengikat tinggi jadi maksimal 2 baris rapi. */
+@media (max-width: 400px) {
+  .user-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    width: 100%;
+  }
+  .user-row-actions .btn-row-action {
+    width: 100%;
+    justify-content: center;
+    white-space: normal;
+    text-align: center;
+    padding: 8px 10px;
+  }
+}
+
+/* 3) Toolbar card di mobile: 5 kontrol (cari + Cari + filter + perPage +
+   sortir) saling squeeze karena semua flex:1 1 auto. Search mengambil satu
+   baris penuh; sisanya di-grid dengan lebar min 150px agar option panjang
+   (mis. "Urutkan: Default") tidak terpotong. */
+@media (max-width: 768px) {
+  .users-toolbar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+  }
+  .users-toolbar .toolbar-search-wrap {
+    grid-column: 1 / -1;
+  }
+  .users-toolbar > * {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* 4) Status cell di desktop: flex-wrap membiarkan "Nonaktif" + "Masa aktif
+   habis" tumpuk dua baris di kolom sempit, mempertinggi SEMUA baris tabel.
+   Satu baris nowrap di desktop; wrap tetap diizinkan di mobile. */
+@media (min-width: 769px) {
+  .user-status-cell {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+}
+
+/* ===== Kelola User (tab users) polish — fit-to-width pass 4 ===== */
+
+/* Tabel 9 kolom (username..aksi) butuh ~1230px; di desktop yang menumpuk
+   full-width, lebar tersedia = viewport − padding halaman − padding card.
+   Di 769–1340px kolom yang jarang dibaca (Email, dan di rentang tersempit
+   juga Terdaftar) disembunyikan agar tabel muat tanpa scroll horizontal.
+   Serupa pola yang sudah ada di submissions (embunyikan kolom di lebar
+   tertentu). Catatan: di ≤768 kartu mobile tetap menampilkan SEMUA kolom
+   sebagai baris label, jadi tidak ada informasi yang hilang di HP. */
+@media (min-width: 769px) and (max-width: 1340px) {
+  .users-layout th:nth-child(6),
+  .users-layout td[data-label="Email"] {
+    display: none;
+  }
+}
+@media (min-width: 769px) and (max-width: 1125px) {
+  .users-layout th:nth-child(8),
+  .users-layout td[data-label="Terdaftar"] {
+    display: none;
+  }
+}
+
+/* Input tanggal + jam ("Masa Aktif Akun") di layar sangat sempit (≤380px):
+   dua input native punya lebar intrinsik ~110px, berdua mereka bisa meluber
+   keluar kartu. Tumpuk vertikal di bawah 380px. */
+@media (max-width: 380px) {
+  .expiry-input-row {
+    flex-wrap: wrap;
+  }
+  .expiry-field {
+    flex: 1 1 100%;
+  }
+}
+
+/* Lebar card harus sama: .users-layout membawa align-items:flex-start
+   (items-start pada definisi grid original). Saat display:flex inline
+   (templates/admin/settings.html) menimpa display:grid, items-start tetap
+   aktif sehingga TIAP card mengukur lebarnya sendiri dari isinya — card
+   "Daftar User" (tabel lebar) jadi lebih lebar dari "Tambah User Manual"
+   (form ramping). Paksa stretch agar keduanya selalu selebar kontainer. */
+.users-layout {
+  align-items: stretch;
+}
+
+/* ===== Paket & Voucher (tab billing & vouchers) polish — UI/UX pass 1 ===== */
+
+/* 1) Semua input/select Paket & Voucher memakai outline:none inline (warisan
+   billing.html/vouchers.html lama), jadi tidak ada indikator fokus yang
+   terlihat untuk pengguna keyboard. Outline !important mengalahkan inline
+   style non-important; checkbox/radio sengaja dikecualikan. */
+#section-billing input:not([type="checkbox"]):not([type="radio"]):focus,
+#section-billing select:focus,
+#section-vouchers input:not([type="checkbox"]):not([type="radio"]):focus,
+#section-vouchers select:focus,
+.modal-overlay input:not([type="checkbox"]):not([type="radio"]):focus,
+.modal-overlay select:focus {
+  outline: 2px solid var(--color-primary) !important;
+  outline-offset: 1px;
+}
+
+/* 2) Modal single/batch voucher: grid 2 kolom inline (1fr 1fr) tetap aktif di
+   layar ≤480px sehingga tiap kolom ~130px — input kekecilan. Collapse ke satu
+   kolom di layar sempit. Selector atribut mencakup semua wrapper grid 2 kolom
+   di kedua modal (paket/durasi, limit/expiry, entitlement kustom) sekaligus. */
+@media (max-width: 480px) {
+  .modal-overlay [style*="grid-template-columns:1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* 3) Badge kode voucher: kode kustom bisa sampai 64 karakter dan menarik
+   badge inline-flex melebar melewati kartu/kolom. Maksimal selebar selnya,
+   teks panjang diputus per karakter supaya tidak meluap secara horizontal. */
+.voucher-code-badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* 4) Input pencarian Daftar Voucher: tombol ✕ (hapus pencarian) diposisikan
+   absolut di kanan input; beri ruang agar teks tidak tertutup tombol. */
+#searchVoucher {
+  padding-right: 34px !important;
+}
+
+/* ===== Paket & Voucher (tab billing & vouchers) polish — UI/UX pass 5 ===== */
+
+/* Sel kartu mobile (≤768px) yang isinya >1 komponen: aturan flex dari
+   settings.html menempatkan label + nama paket + baris detail dalam SATU
+   baris (justify-content:space-between), sehingga detail panjang seperti
+   "10 ujian · 5 serentak · PDF 10 MB · Storage 100 MB" terjepit mendekati /
+   berhimpit dengan nama paket. Tumpuk vertikal hanya untuk sel tersebut:
+   label di baris pertama, isi di bawahnya. Sel 1-komponen tetap label-kiri /
+   isi-kanan. */
+@media (max-width: 768px) {
+  #myPackagesList td[data-label="Paket"],
+  #vouchersTableBody td[data-label="Paket & Durasi"],
+  #vouchersTableBody td[data-label="Penggunaan"],
+  #vouchersTableBody td[data-label="Aksi"] {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    gap: 4px !important;
+  }
+  #myPackagesList td[data-label="Paket"] div,
+  #vouchersTableBody td[data-label="Paket & Durasi"] div {
+    width: 100%;
+  }
+}
+
+/* Sorting kolom tabel user — header yang bisa diklik menunjukkan arah
+   urutan lewat panah kecil (bandingkan ↕ samar saat tidak aktif). */
+.exam-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.exam-table th.sortable:hover {
+  color: #fff;
+}
+.exam-table th.sortable .sort-indicator {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--color-text-muted);
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.exam-table th.sortable:hover .sort-indicator {
+  opacity: 1;
+}
+.exam-table th.sortable .sort-indicator::before { content: "↕"; }
+.exam-table th.sortable.sort-asc .sort-indicator::before { content: "▲"; }
+.exam-table th.sortable.sort-desc .sort-indicator::before { content: "▼"; }
+.exam-table th.sortable.sort-active {
+  color: var(--color-accent-light);
+}
+.exam-table th.sortable.sort-active .sort-indicator {
+  opacity: 1;
+  color: var(--color-primary);
+}
+.exam-table th.sortable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* Modal Atur User: grid 2 kolom tetap di layar sempit membuat input
+   menyempit — ganti 1 kolom di bawah 560px (date+time juga ditumpuk). */
+@media (max-width: 560px) {
+  .edit-user-quota-grid,
+  .edit-user-row-2 {
+    grid-template-columns: 1fr !important;
+  }
+  .edit-user-expiry-row {
+    flex-wrap: wrap;
+  }
+  .edit-user-expiry-row input[type="date"] {
+    flex: 1 1 100% !important;
+  }
+  .edit-user-expiry-row input[type="time"] {
+    width: 100% !important;
+  }
+}

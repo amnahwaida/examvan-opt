@@ -1,0 +1,1042 @@
+@import url('theme.css');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+font-family: var(--font-sans);
+background: var(--bg-gradient);
+background-attachment: fixed;
+color: var(--color-text);
+min-height: 100vh;
+min-height: 100dvh;
+display: flex;
+flex-direction: column;
+-webkit-font-smoothing: antialiased;
+overflow-x: hidden;
+color-scheme: dark;
+}
+
+/* Animated background orbs */
+.bg-orbs {
+position: fixed;
+inset: 0;
+z-index: 0;
+pointer-events: none;
+overflow: hidden;
+}
+.bg-orb {
+position: absolute;
+border-radius: 50%;
+filter: blur(100px);
+opacity: 0.3;
+animation: orbFloat 12s ease-in-out infinite;
+}
+.bg-orb-1 {
+width: 500px; height: 500px;
+background: var(--color-primary);
+top: -150px; left: -100px;
+}
+.bg-orb-2 {
+width: 400px; height: 400px;
+background: var(--color-accent);
+bottom: -120px; right: -100px;
+animation-delay: -4s;
+}
+.bg-orb-3 {
+width: 300px; height: 300px;
+background: var(--color-accent-light);
+top: 50%; left: 50%;
+transform: translate(-50%, -50%);
+animation-delay: -8s;
+opacity: 0.15;
+}
+
+@keyframes orbFloat {
+0%, 100% { transform: translate(0,0) scale(1); }
+33% { transform: translate(30px, -20px) scale(1.05); }
+66% { transform: translate(-20px, 30px) scale(0.95); }
+}
+
+/* Header */
+.header {
+position: relative;
+z-index: 10;
+padding: 16px 24px;
+display: flex;
+align-items: center;
+justify-content: space-between;
+border-bottom: 1px solid var(--color-glass-border);
+background: rgba(9, 9, 14, 0.6);
+-webkit-backdrop-filter: blur(20px);
+backdrop-filter: blur(20px);
+}
+.header-left {
+display: flex;
+align-items: center;
+gap: 12px;
+}
+.header-divider {
+width: 1px;
+height: 24px;
+background: var(--color-glass-border);
+margin: 0 4px;
+}
+.header-logo {
+width: 36px; height: 36px;
+background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+border-radius: 10px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-weight: 900;
+font-size: 16px;
+color: var(--color-text-on-primary);
+box-shadow: 0 4px 20px var(--color-primary-glow);
+flex-shrink: 0;
+}
+.header-title {
+font-size: 1.1rem;
+font-weight: 700;
+background: linear-gradient(135deg, var(--color-text), var(--color-text-secondary));
+-webkit-background-clip: text;
+-webkit-text-fill-color: transparent;
+background-clip: text;
+}
+/* S8: badge informatif "Hasil Ujian" — ambang bawah 12px; kompensasi lewat
+   padding lebih rapat, bukan mengecilkan font. */
+.header-badge {
+font-size: 0.75rem;
+padding: 2px 8px;
+border-radius: 20px;
+background: rgba(var(--rgb-info), 0.15);
+border: 1px solid rgba(var(--rgb-info), 0.3);
+color: var(--color-primary-light);
+font-weight: 600;
+letter-spacing: 0.5px;
+}
+
+/* Main content */
+.main {
+position: relative;
+z-index: 1;
+width: 100%;
+flex: 1 0 auto;
+max-width: 1100px;
+margin: 0 auto;
+padding: 28px 20px 50px;
+scroll-margin-top: 80px;
+}
+
+/* Exam hero */
+.exam-hero {
+background: var(--color-glass);
+backdrop-filter: blur(24px);
+-webkit-backdrop-filter: blur(24px);
+border: 1px solid var(--color-glass-border);
+border-radius: 16px;
+padding: 28px;
+margin-bottom: 20px;
+animation: fadeUp 0.5s ease;
+position: relative;
+overflow: hidden;
+}
+.exam-hero::before {
+content: '';
+position: absolute;
+top: 0; left: 0; right: 0;
+height: 3px;
+background: linear-gradient(90deg, var(--color-primary), var(--color-accent), var(--color-accent-light));
+}
+.exam-hero h1 {
+font-size: 1.5rem;
+font-weight: 800;
+margin-bottom: 8px;
+background: linear-gradient(135deg, #fff, #cbd5e1);
+-webkit-background-clip: text;
+-webkit-text-fill-color: transparent;
+background-clip: text;
+}
+.exam-meta {
+display: flex;
+flex-wrap: wrap;
+gap: 12px;
+margin-top: 16px;
+}
+.exam-meta-item {
+display: flex;
+align-items: center;
+gap: 8px;
+font-size: 0.82rem;
+color: var(--color-text-secondary);
+background: rgba(var(--rgb-white),0.04);
+padding: 6px 12px;
+border-radius: 10px;
+border: 1px solid rgba(var(--rgb-white),0.06);
+}
+
+/* Tab navigation */
+.tab-nav {
+display: flex;
+gap: 8px;
+margin-bottom: 20px;
+animation: fadeUp 0.6s ease;
+}
+.tab-btn {
+padding: 10px 20px;
+border-radius: 12px;
+border: 1px solid var(--color-glass-border);
+background: rgba(var(--rgb-white),0.03);
+color: var(--color-text-muted);
+font-size: 0.85rem;
+font-weight: 600;
+cursor: pointer;
+transition: all 0.3s ease;
+display: flex;
+align-items: center;
+gap: 8px;
+}
+.tab-btn:hover {
+background: rgba(var(--rgb-white),0.06);
+color: var(--color-text-secondary);
+border-color: rgba(var(--rgb-white),0.12);
+}
+.tab-btn.active {
+background: rgba(var(--rgb-info), 0.15);
+border-color: rgba(var(--rgb-info), 0.4);
+color: var(--color-primary-light);
+}
+
+/* Search */
+.search-section {
+background: var(--color-glass);
+backdrop-filter: blur(24px);
+-webkit-backdrop-filter: blur(24px);
+border: 1px solid var(--color-glass-border);
+border-radius: 14px;
+padding: 16px 20px;
+margin-bottom: 16px;
+animation: fadeUp 0.7s ease;
+}
+.search-row {
+display: flex;
+gap: 12px;
+align-items: center;
+flex-wrap: wrap;
+}
+.search-input-wrapper {
+position: relative;
+flex: 1;
+min-width: 200px;
+}
+.search-input {
+padding: 10px 32px 10px 14px;
+border-radius: 12px;
+border: 1px solid var(--color-glass-border);
+background: rgba(var(--rgb-white),0.05);
+color: var(--color-text);
+font-size: 0.85rem;
+outline: none;
+transition: all 0.3s;
+width: 100%;
+}
+.search-input:focus {
+border-color: var(--color-primary);
+box-shadow: 0 0 0 3px var(--color-primary-glow);
+background: rgba(var(--rgb-white),0.08);
+}
+.search-input::placeholder { color: var(--color-text-muted); }
+
+/* Search clear */
+.search-clear-btn {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+position: absolute;
+right: 8px;
+top: 50%;
+transform: translateY(-50%);
+width: 26px;
+height: 26px;
+border: none;
+background: transparent;
+color: var(--color-text-muted);
+cursor: pointer;
+padding: 0;
+font-size: 13px;
+border-radius: 6px;
+transition: all 0.2s ease;
+z-index: 1;
+}
+.search-clear-btn:hover {
+background: rgba(var(--rgb-white), 0.1);
+color: var(--color-text-secondary);
+}
+
+/* Glass card (override output.css untuk halaman hasil) */
+.glass-card {
+background: var(--color-glass);
+backdrop-filter: blur(24px);
+-webkit-backdrop-filter: blur(24px);
+border: 1px solid var(--color-glass-border);
+border-radius: 16px;
+padding: 24px;
+animation: fadeUp 0.7s ease;
+/* S103 (adopsi-b): token elevasi theme.css --shadow-card sebelumnya mati
+   (0 pemakai). Glass card adalah pemakaian alaminya. */
+box-shadow: var(--shadow-card);
+}
+
+/* Results table */
+.results-table {
+width: 100%;
+border-collapse: collapse;
+font-size: 0.82rem;
+}
+.results-table thead th {
+padding: 12px 14px;
+text-align: left;
+font-size: 0.75rem; /* S8: dulu 0.7rem */
+font-weight: 700;
+text-transform: uppercase;
+letter-spacing: 0.8px;
+color: var(--color-text-muted);
+border-bottom: 1px solid var(--color-glass-border);
+background: rgba(15, 15, 30, 0.9);
+-webkit-backdrop-filter: blur(10px);
+backdrop-filter: blur(10px);
+z-index: 2;
+}
+.results-table tbody tr {
+border-bottom: 1px solid rgba(var(--rgb-white),0.04);
+transition: all 0.2s;
+cursor: pointer;
+}
+.results-table tbody tr:hover { background: rgba(var(--rgb-info), 0.06); }
+/* T25 (ronde 8): baris dirender sebagai kontrol custom (tabindex=0 +
+   role="button") dan browser tidak menggambar outline default untuk <tr> —
+   tanpa rule ini pengguna keyboard tak bisa melihat baris terfokus
+   (WCAG 2.4.7). */
+.results-table tbody tr[role="button"]:focus-visible {
+outline: 2px solid var(--color-primary-light);
+outline-offset: -2px;
+}
+.results-table tbody tr.expanded {
+background: rgba(var(--rgb-info), 0.08);
+border-bottom-color: transparent;
+}
+.results-table tbody td { padding: 12px 14px; vertical-align: middle; }
+
+/* Score badge */
+.score-badge {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+min-width: 52px;
+padding: 5px 12px;
+border-radius: 20px;
+font-weight: 700;
+font-size: 0.82rem;
+}
+/* S101: warna TEKS badge migrasi ke varian terang (tint latar tetap).
+   Kalibrasi ronde 10 (R128, ukuran presisi reviewer independen, rumus WCAG:
+   L = 0.2126R + 0.7152G + 0.0722B dengan kanal ternormalisasi-sRGB yang
+   dilinearisasi s <= 0.03928 ? s/12.92 : ((s+0.055)/1.055)^2.4; rasio =
+   (Lterang + 0.05) / (Lgelap + 0.05); latar efektif = glass rgb(11,11,22)
+   di-blend tint warna sendiri alpha 0.15):
+   --color-success-light aktual #34d399 = 8.34:1 (BUKAN #6ee7b7 ≈ 10.8 —
+   token fiktif pada komentar lama), --color-danger-bright #f87171 = 6.19:1
+   (bukan 6.25). Semua PASS AA — vonis tidak berubah. */
+.score-high {
+background: rgba(16, 185, 129, 0.15);
+color: var(--color-success-light);
+border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.score-mid {
+background: rgba(245, 158, 11, 0.15);
+color: var(--color-warning);
+border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.score-low {
+background: rgba(239, 68, 68, 0.15);
+color: var(--color-danger-bright); /* S101+R128: base #ef4444 ≈ 4.45:1 < ambang AA; bright #f87171 = 6.19:1 */
+border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.score-none {
+background: rgba(100, 116, 139, 0.15);
+color: var(--color-text-muted);
+border: 1px solid rgba(100, 116, 139, 0.2);
+font-weight: 500;
+}
+
+/* Detail row */
+.detail-row { display: none; }
+.detail-row.show { display: table-row; }
+.detail-row td {
+padding: 0 !important;
+border-bottom: 1px solid rgba(var(--rgb-info), 0.15);
+}
+.detail-content {
+padding: 16px 20px;
+background: rgba(var(--rgb-info), 0.03);
+border-top: 1px solid rgba(var(--rgb-info), 0.1);
+}
+
+/* Detail info grid (identity fields + time info) */
+.detail-info-grid {
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+gap: 16px;
+margin-bottom: 16px;
+}
+.detail-info-section {
+background: rgba(var(--rgb-white), 0.02);
+border: 1px solid rgba(var(--rgb-white), 0.06);
+border-radius: 10px;
+padding: 14px 16px;
+}
+.detail-info-heading {
+font-size: 0.75rem; /* S8: dulu 0.72rem */
+font-weight: 700;
+text-transform: uppercase;
+letter-spacing: 0.5px;
+color: var(--color-text-muted);
+margin-bottom: 12px;
+display: flex;
+align-items: center;
+gap: 6px;
+}
+.detail-info-items {
+display: flex;
+flex-direction: column;
+gap: 8px;
+}
+.detail-identity-item {
+display: flex;
+justify-content: space-between;
+align-items: center;
+padding: 6px 0;
+border-bottom: 1px solid rgba(var(--rgb-white), 0.04);
+}
+.detail-identity-item:last-child { border-bottom: none; }
+.detail-identity-label {
+font-size: 0.75rem;
+color: var(--color-text-muted);
+font-weight: 500;
+}
+.detail-identity-value {
+font-size: 0.82rem;
+color: var(--color-text);
+font-weight: 600;
+text-align: right;
+}
+
+/* Answer grid */
+/* S9 (desktop): daftar jawaban tetap panel ringkas 380px, TAPI indikator
+   ada-lanjutan wajib jelas — scrollbar selalu tampak (track berwarna, thumb
+   kontras; Firefox via scrollbar-color). Fade-mask statis di tepi bawah sengaja
+   TIDAK dipakai: ia juga memudam baris terakhir saat konten muat penuh,
+   memberi sinyal palsu "masih ada lanjutan". Di mobile (<768px) batas ini
+   dilepas total — lihat blok responsive di bawah. */
+.answer-grid {
+display: flex;
+flex-direction: column;
+gap: 6px;
+max-height: 380px;
+overflow-y: auto;
+padding-right: 8px;
+scrollbar-width: thin;
+/* Pengecualian Batch 8: baris scrollbar di blok ini SENGAJA tetap memakai
+   rgba putih literal (bukan var(--rgb-white)) karena uiux-batch3-hasil-css
+   menguras nilai alpha thumb dengan regex digit literal; var() membuat alpha
+   tak terbaca dan test Batch 3 merah. Nilai visual identik. */
+scrollbar-color: rgba(255,255,255,0.35) rgba(255,255,255,0.08);
+}
+.answer-grid::-webkit-scrollbar { width: 10px; background: rgba(var(--rgb-white),0.06); }
+.answer-grid::-webkit-scrollbar-thumb {
+background: rgba(255,255,255,0.3); border-radius: 5px;
+}
+.answer-grid::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.45); }
+.answer-item {
+display: flex;
+align-items: center;
+gap: 10px;
+padding: 8px 12px;
+border-radius: 8px;
+background: rgba(var(--rgb-white),0.02);
+border: 1px solid rgba(var(--rgb-white),0.04);
+transition: all 0.2s;
+}
+.answer-item.correct {
+border-left: 3px solid var(--color-success);
+background: rgba(16, 185, 129, 0.04);
+}
+.answer-item.incorrect {
+border-left: 3px solid var(--color-danger);
+background: rgba(239, 68, 68, 0.04);
+}
+.answer-item.partial {
+border-left: 3px solid var(--color-warning);
+background: rgba(245, 158, 11, 0.04);
+}
+.answer-item.unanswered {
+border-left: 3px solid var(--color-text-muted);
+opacity: 0.6;
+}
+.q-num {
+min-width: 40px;
+text-align: center;
+font-weight: 700;
+font-size: 0.78rem;
+color: var(--color-text-muted);
+background: rgba(var(--rgb-white),0.05);
+padding: 3px 8px;
+border-radius: 6px;
+}
+.q-student-ans, .q-correct-ans { flex: 1; font-size: 0.82rem; overflow-wrap: anywhere; word-break: break-word; }
+.q-student-ans { color: var(--color-text); font-weight: 500; }
+.q-correct-ans { color: var(--color-text-secondary); }
+.q-status {
+min-width: 85px;
+text-align: right;
+font-size: 0.78rem;
+font-weight: 600;
+}
+.q-status.correct { color: var(--color-success); }
+.q-status.incorrect { color: var(--color-danger); }
+.q-status.partial { color: var(--color-warning); }
+
+.detail-header {
+display: flex;
+justify-content: space-between;
+align-items: center;
+padding: 0 6px 10px 6px;
+border-bottom: 1px solid rgba(var(--rgb-white),0.06);
+margin-bottom: 10px;
+}
+.detail-header-labels {
+display: flex;
+gap: 12px;
+font-size: 0.75rem; /* S8: dulu 0.65rem — label kolom jawaban informatif */
+font-weight: 700;
+text-transform: uppercase;
+letter-spacing: 0.5px;
+color: var(--color-text-muted);
+}
+
+/* Score summary */
+.score-summary-bar {
+display: flex;
+justify-content: space-between;
+align-items: center;
+margin-top: 14px;
+padding-top: 10px;
+border-top: 1px solid rgba(var(--rgb-white),0.06);
+flex-wrap: wrap;
+gap: 8px;
+}
+.score-summary-stats { display: flex; gap: 14px; font-size: 0.78rem; }
+.score-summary-total { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; }
+
+/* Stats */
+.stats-row {
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+gap: 10px;
+margin-top: 14px;
+}
+.stat-mini {
+text-align: center;
+padding: 12px;
+border-radius: 12px;
+background: rgba(var(--rgb-white),0.03);
+border: 1px solid rgba(var(--rgb-white),0.06);
+}
+.stat-mini-value { font-size: 1.4rem; font-weight: 800; display: block; }
+.stat-mini-label {
+font-size: 0.75rem; /* S8: dulu 0.65rem — label statistik informatif */
+color: var(--color-text-muted);
+text-transform: uppercase;
+letter-spacing: 0.5px;
+margin-top: 4px;
+display: block;
+}
+
+/* Empty state */
+.empty-state { text-align: center; padding: 50px 20px; color: var(--color-text-muted); }
+.empty-icon { font-size: 2.5rem; margin-bottom: 14px; opacity: 0.5; }
+
+/* Key cards */
+.key-card {
+background: rgba(var(--rgb-white),0.02);
+border: 1px solid rgba(var(--rgb-white),0.05);
+border-radius: 12px;
+padding: 14px;
+display: flex;
+flex-direction: column;
+gap: 8px;
+transition: all 0.3s ease;
+}
+.key-card:hover {
+background: rgba(var(--rgb-info), 0.05);
+border-color: rgba(var(--rgb-info), 0.2);
+transform: translateY(-2px);
+}
+.key-card-header { display: flex; justify-content: space-between; align-items: center; }
+.key-card-number {
+font-weight: 800; font-size: 0.9rem;
+color: var(--color-accent-light);
+background: rgba(var(--rgb-info), 0.15);
+padding: 3px 10px; border-radius: 8px;
+}
+/* S8: "Bobot: N" informatif — font naik ke ambang 12px, kompensasi padding rapat */
+.key-card-weight {
+font-size: 0.75rem; color: var(--color-text-muted);
+background: rgba(var(--rgb-white),0.04);
+padding: 1px 6px; border-radius: 6px;
+}
+
+/* Loading */
+.loading-spinner {
+display: inline-block; width: 24px; height: 24px;
+border: 3px solid rgba(var(--rgb-white),0.08);
+border-top-color: var(--color-primary);
+border-radius: 50%;
+animation: spin 0.8s linear infinite;
+vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text {
+display: flex; align-items: center; justify-content: center;
+gap: 8px; color: var(--color-text-muted);
+text-align: center; padding: 40px; font-size: 0.85rem;
+}
+
+/* S35: feedback loading paginasi/pencarian — area tabel diredupkan, klik
+   dimatikan (guard anti-dobel-klik visual di atas guard resultsLoading),
+   dan spinner kecil menandai fetch berjalan (bukan muat awal). */
+#resultsSection.is-loading {
+opacity: 0.55;
+pointer-events: none;
+transition: opacity 0.15s ease;
+}
+#resultsSection.is-loading .table-wrapper::after {
+content: '';
+display: block;
+width: 18px; height: 18px;
+margin: 14px auto 4px;
+border: 2px solid rgba(var(--rgb-white),0.08);
+border-top-color: var(--color-primary);
+border-radius: 50%;
+animation: spin 0.8s linear infinite;
+}
+
+/* S35: region aria-live visually hidden (pengumuman "Menampilkan X–Y dari Z"). */
+.sr-only-results {
+position: absolute; width: 1px; height: 1px;
+padding: 0; margin: -1px; overflow: hidden;
+clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Back nav */
+.back-nav {
+display: inline-flex; align-items: center; gap: 6px;
+padding: 7px 14px; border-radius: 8px;
+background: rgba(var(--rgb-white),0.03);
+border: 1px solid var(--color-glass-border);
+color: var(--color-text-secondary);
+font-size: 0.78rem; font-weight: 600;
+text-decoration: none; transition: all 0.2s ease; cursor: pointer;
+flex-shrink: 0;
+}
+.back-nav:hover {
+background: rgba(var(--rgb-info), 0.1);
+border-color: rgba(var(--rgb-info), 0.3);
+color: var(--color-primary-light);
+}
+
+/* Helpers */
+.td-center { text-align: center; }
+.td-center-secondary { text-align: center; font-size: 0.82rem; color: var(--color-text-secondary); }
+.student-name { font-weight: 600; color: var(--color-text); }
+.rank-num { font-weight: 800; font-size: 0.82rem; color: var(--color-text-muted); }
+.rank-num.rank-1 { color: var(--color-warning); }
+.rank-num.rank-2 { color: #e2e8f0; }
+.rank-num.rank-3 { color: #d97706; }
+/* S8: ikon chevron — ukuran render dikunci inline 14px (aria-hidden) oleh
+   template; font-size tetap dinaikkan ke ambang agar aturan tunggal berlaku
+   bila ikon suatu saat diganti glyph teks. */
+.expand-icon {
+font-size: 0.75rem; color: var(--color-text-muted);
+transition: transform 0.3s; display: inline-block;
+}
+.expanded .expand-icon { transform: rotate(180deg); }
+
+/* No results */
+.no-results {
+ text-align: center;
+ padding: 40px 20px;
+ color: var(--color-text-muted);
+}
+.no-results-icon {
+ margin-bottom: 12px;
+ color: var(--color-text-muted);
+}
+
+/* ===== Pagination ===== */
+.pagination-wrapper {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ flex-wrap: wrap;
+ gap: 12px;
+ padding: 16px 4px 4px 4px;
+ border-top: 1px solid var(--color-glass-border);
+ margin-top: 16px;
+}
+.pagination-info {
+ font-size: 0.78rem;
+ color: var(--color-text-muted);
+ font-weight: 500;
+}
+.pagination-controls {
+ display: flex;
+ align-items: center;
+ gap: 4px;
+}
+.pagination-btn {
+ display: inline-flex;
+ align-items: center;
+ justify-content: center;
+ width: 36px;
+ height: 36px;
+ border: 1px solid var(--color-glass-border);
+ border-radius: 10px;
+ background: rgba(var(--rgb-white),0.03);
+ color: var(--color-text-secondary);
+ cursor: pointer;
+ transition: all 0.2s ease;
+ font-size: 0.85rem;
+}
+.pagination-btn:hover:not(:disabled) {
+ background: rgba(var(--rgb-info), 0.1);
+ border-color: rgba(var(--rgb-info), 0.3);
+ color: var(--color-primary-light);
+}
+.pagination-btn:disabled {
+ opacity: 0.3;
+ cursor: not-allowed;
+}
+.pagination-pages {
+ display: flex;
+ align-items: center;
+ gap: 2px;
+}
+.pagination-page-btn {
+ display: inline-flex;
+ align-items: center;
+ justify-content: center;
+ min-width: 36px;
+ height: 36px;
+ border: 1px solid transparent;
+ border-radius: 10px;
+ background: transparent;
+ color: var(--color-text-secondary);
+ cursor: pointer;
+ transition: all 0.2s ease;
+ font-size: 0.82rem;
+ font-weight: 500;
+ padding: 0 6px;
+}
+.pagination-page-btn:hover {
+ background: rgba(var(--rgb-white),0.05);
+ border-color: var(--color-glass-border);
+ color: var(--color-text);
+}
+.pagination-page-btn.active {
+ background: rgba(var(--rgb-info), 0.15);
+ border-color: rgba(var(--rgb-info), 0.4);
+ color: var(--color-primary-light);
+ font-weight: 700;
+}
+.pagination-ellipsis {
+ display: inline-flex;
+ align-items: center;
+ justify-content: center;
+ width: 28px;
+ height: 36px;
+ color: var(--color-text-muted);
+ font-size: 0.9rem;
+ letter-spacing: 1px;
+}
+
+@media (max-width: 768px) {
+.pagination-wrapper {
+ flex-direction: column;
+ align-items: center;
+ gap: 10px;
+}
+.pagination-info {
+ font-size: 0.75rem; /* S8: dulu 0.72rem */
+ text-align: center;
+}
+.pagination-controls {
+ flex-wrap: wrap;
+ justify-content: center;
+}
+.pagination-page-btn {
+ min-width: 40px;
+ height: 40px;
+ font-size: 0.78rem;
+}
+.pagination-btn {
+ width: 40px;
+ height: 40px;
+}
+.pagination-pages { gap: 6px; }
+}
+
+/* Footer */
+.footer {
+text-align: center; padding: 24px 20px;
+color: var(--color-text-muted); font-size: 0.75rem; /* S8: footer dulu 0.72rem */
+position: relative; z-index: 1; flex: 0 0 auto;
+}
+
+@keyframes fadeUp {
+from { opacity: 0; transform: translateY(12px); }
+to { opacity: 1; transform: translateY(0); }
+}
+
+/* === Responsive === */
+@media (max-width: 768px) {
+.main { padding: 16px 12px 36px; }
+.exam-hero { padding: 20px 16px; }
+.exam-hero h1 { font-size: 1.15rem; }
+.exam-meta { gap: 8px; }
+.exam-meta-item { font-size: 0.78rem; padding: 5px 10px; flex: 1; min-width: calc(50% - 8px); }
+.tab-nav { flex-wrap: wrap; }
+.tab-btn { padding: 8px 14px; font-size: 0.78rem; flex: 1; justify-content: center; }
+.search-row { flex-direction: column; }
+.search-input { font-size: 16px; padding: 10px 32px 10px 12px; }
+.glass-card { padding: 14px; }
+.header { padding: 12px 16px; }
+.header-title { font-size: 0.95rem; }
+.header-divider { display: none; }
+/* S8: badge "Hasil Ujian" informatif — dulu 0.55rem (≈8.8px, anchor temuan);
+   font naik ke ambang 12px, kompensasi lewat padding lebih rapat. */
+.header-badge { font-size: 0.75rem; padding: 1px 6px; }
+.stats-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.stat-mini { padding: 8px; }
+.stat-mini-value { font-size: 1.2rem; }
+.stat-mini-label { font-size: 0.75rem; letter-spacing: 0.25px; } /* S8: dulu 0.6rem — kompensasi letter-spacing rapat */
+
+.results-table thead { display: none; }
+.results-table, .results-table tbody {
+  display: block;
+  width: 100%;
+}
+/* Main rows layout (not detail rows) */
+.results-table tbody tr:not(.detail-row) {
+  display: grid !important;
+  grid-template-columns: 32px 1fr auto 24px !important;
+  grid-template-rows: auto auto !important;
+  gap: 4px 10px !important;
+  padding: 12px 14px !important;
+  align-items: center !important;
+  margin-bottom: 10px !important;
+  position: relative !important;
+  width: 100% !important;
+  border-radius: 12px !important;
+  background: rgba(var(--rgb-white), 0.02) !important;
+  border: 1px solid rgba(var(--rgb-white), 0.06) !important;
+}
+.results-table tbody tr.detail-row {
+  display: none !important;
+}
+.results-table tbody tr.detail-row.show {
+  display: block !important;
+  width: 100% !important;
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  margin-top: -8px !important;
+  margin-bottom: 12px !important;
+}
+.results-table tbody tr.detail-row td {
+  display: block !important;
+  width: 100% !important;
+  padding: 0 !important;
+}
+
+/* Hide data-labels since layout is clean and self-explanatory */
+.results-table tbody td::before {
+  display: none !important;
+}
+
+/* Rank column */
+.results-table tbody td[data-label="#"] {
+  grid-column: 1 !important;
+  grid-row: 1 / span 2 !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 0 !important;
+}
+
+/* Name column */
+.results-table tbody td[data-label="Nama"] {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  display: block !important;
+  padding: 0 !important;
+}
+
+/* Duration column */
+.results-table tbody td[data-label="Durasi"] {
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  display: block !important;
+  padding: 0 !important;
+  text-align: left !important;
+}
+
+/* Score column */
+.results-table tbody td[data-label="Nilai"] {
+  grid-column: 3 !important;
+  grid-row: 1 / span 2 !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  padding: 0 !important;
+}
+
+/* Expand icon column */
+.results-table tbody td[data-label=""] {
+  grid-column: 4 !important;
+  grid-row: 1 / span 2 !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 0 !important;
+}
+
+.detail-content { padding: 12px 14px; }
+.detail-info-grid { grid-template-columns: 1fr; gap: 10px; }
+.detail-info-section { padding: 10px 12px; }
+.detail-header { display: none; }
+/* S9 (mobile): hapus scroll-trap — tanpa max-height/overflow, daftar jawaban
+   mengembang penuh dan HALAMAN yang scroll (satu momentum sentuh, tidak ada
+   area gulir tersarang yang membuat siswa mengira daftar sudah habis). */
+.answer-grid {
+max-height: none;
+overflow: visible;
+padding-right: 0;
+}
+.answer-item { padding: 6px 10px; gap: 6px; flex-wrap: wrap; }
+.q-num { min-width: 36px; font-size: 0.75rem; } /* S8: dulu 0.72rem — kompensasi min-width */
+.q-status { min-width: auto; text-align: left; font-size: 0.75rem; } /* S8: dulu 0.72rem */
+}
+
+@media (max-width: 480px) {
+.exam-meta-item { font-size: 0.75rem; padding: 4px 8px; }
+.stat-mini-value { font-size: 1.1rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+/* R117 + S112 (koreksi ronde 10): klaim lama "kaskade spesifisitas sama
+   sudah menang" KELIRU. Cap di bawah TIDAK menang sendirian — universal
+   selector ber-spesifisitas 0 kalah dari shorthand kelas .loading-spinner
+   (spesifisitas 0,1,0; "animation: spin … infinite" di :600 dan ::after
+   paginasi di :626). Cap iterasi efektif justru BERKAT backstop bertanda
+   penting lintas-file yang ikut dimuat halaman hasil:
+     - public-desktop.css, blok prefers-reduced-motion:
+       animation-iteration-count: 1 dengan tanda penting;
+     - public-mobile.css, blok prefers-reduced-motion:
+       animation: none dengan tanda penting (shorthand menolkan seluruh
+       longhand animation-*, termasuk iteration-count).
+   DEPENDENSI LINTAS-FILE: halaman hasil wajib terus memuat kedua layer CSS
+   publik itu; guard S112 (uiux-batch16-guard.test.mjs) mengunci keduanya.
+   Bila dependensi load berubah suatu hari, tambahkan tanda penting pada
+   deklarasi di bawah agar self-contained. */
+*, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; animation-iteration-count: 1; }
+.bg-orb { animation: none !important; opacity: 0.15; }
+}
+
+/* ===== July 2026 UI audit fixes ===== */
+
+/* .table-wrapper was referenced in the markup but never defined, so wide
+   tables clipped invisibly under body{overflow-x:hidden} at 768-1100px. */
+.table-wrapper {
+overflow-x: auto;
+-webkit-overflow-scrolling: touch;
+}
+
+/* Long unbroken names must wrap instead of stretching their grid track and
+   pushing the score badge off the card edge. */
+.student-name { overflow-wrap: anywhere; }
+
+@media (max-width: 768px) {
+.results-table tbody td[data-label="Nama"] { min-width: 0 !important; }
+/* The detail column headers are hidden on mobile, which left the two answer
+   values unlabeled (worse when both are masked as "•••"). Prefix each value
+   with a compact label instead. */
+.q-student-ans::before {
+content: "Jawaban: ";
+color: var(--color-text-muted);
+font-size: 0.75rem; /* S8: dulu 0.68rem — label informatif */
+font-weight: 600;
+}
+.q-correct-ans::before {
+content: "Kunci: ";
+color: var(--color-text-muted);
+font-size: 0.75rem; /* S8: dulu 0.68rem — label informatif */
+font-weight: 600;
+}
+}
+
+/* Teachers print/save this page; the dark-theme palette would otherwise
+   produce near-white text on white paper. */
+/* R20: selector dulu salah (.search-card/.pagination tidak eksis di markup).
+   Kelas nyata: .search-section & .pagination-wrapper; .header-badge ikut
+   disembunyikan agar cetak bersih. */
+@media print {
+body {
+background: #fff !important;
+color: #111827 !important;
+}
+.bg-orbs, .bg-orb, .back-nav, .tab-nav, .header-badge, .search-section, .pagination-wrapper, .skip-link { display: none !important; }
+.exam-hero, .glass-card, .results-table tbody tr {
+background: #fff !important;
+border-color: #d1d5db !important;
+box-shadow: none !important;
+}
+.exam-hero *, .glass-card *, .results-table * {
+color: #111827 !important;
+text-shadow: none !important;
+}
+/* R43: baris detail jawaban terbuka dibatasi 380px + scroll di layar —
+   saat cetak batas ini memotong dokumen tanpa indikasi lanjutan. */
+.answer-grid {
+max-height: none !important;
+overflow: visible !important;
+}
+.detail-row { page-break-inside: avoid; }
+/* S96: judul & elemen ber-gradien memakai -webkit-text-fill-color: transparent
+   (:102 .header-title, :156 .exam-hero h1) — tanpa reset ini properti vendor
+   itu lolos ke media cetak dan teks tercetak KOSONG di kertas. Deklarasi
+   polos cukup: blok print datang belakangan (kaskade menang, plafon
+   important S71 tetap). color diwarisi dari body print (#111827). */
+.header-title, .exam-hero h1 {
+background: none;
+-webkit-text-fill-color: initial;
+}
+}
+
+/* R106 (ronde 9): touch target disamakan dengan standar repo 44px
+   (admin-base.css:514-522) — dulu 38-42px. */
+@media (max-width: 768px) {
+.search-clear-btn { width: 44px; height: 44px; }
+.back-nav { min-height: 44px; }
+.tab-btn { min-height: 44px; }
+.pagination-btn { min-width: 44px; min-height: 44px; }
+}

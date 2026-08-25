@@ -1,0 +1,412 @@
+{{/*
+  EXAMVAN Pengawas Monitoring Page — Self-Contained
+  Template variables:
+    .admin_user, .admin_role, .active_page, .version, .csrf_token
+*/}}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ {{template "admin/partials/head.html" dict "version" .version "csrf_token" .csrf_token "title" "Pengawasan Ujian"}}
+</head>
+<body class="dashboard-page">
+
+{{template "admin/partials/nav.html" dict "active_page" .active_page "admin_role" .admin_role "admin_user" .admin_user "csrf_token" .csrf_token "needs_instansi" .needs_instansi}}
+
+<main class="dashboard" id="mainContent">
+ <h1 class="sr-only">Pengawasan Ujian</h1>
+
+ <!-- Stats Cards -->
+ <section class="stats-grid" id="pengawasStats">
+  <div class="stat-card stat-total">
+   <div class="stat-icon"><svg class="icon-svg" style="width:24px;height:24px;"><use href="#hi-dashboard"/></svg></div>
+   <div class="stat-info">
+    <span class="stat-value" id="statTotalExam">0</span>
+    <span class="stat-label">Ujian Diawasi</span>
+   </div>
+  </div>
+  <div class="stat-card stat-active">
+   <div class="stat-icon"><svg class="icon-svg" style="width:24px;height:24px;color:var(--color-success-light);"><use href="#hi-eye"/></svg></div>
+   <div class="stat-info">
+    <span class="stat-value" id="statActiveExam">0</span>
+    <span class="stat-label">Sedang Berlangsung</span>
+   </div>
+  </div>
+  <div class="stat-card stat-inactive">
+   <div class="stat-icon"><svg class="icon-svg" style="width:24px;height:24px;color:var(--color-warning-light);"><use href="#hi-users"/></svg></div>
+   <div class="stat-info">
+    <span class="stat-value" id="statTotalStudents">0</span>
+    <span class="stat-label">Total Siswa</span>
+   </div>
+  </div>
+  <div class="stat-card stat-submitted">
+   <div class="stat-icon"><svg class="icon-svg" style="width:24px;height:24px;color:#60a5fa;"><use href="#hi-check"/></svg></div>
+   <div class="stat-info">
+    <span class="stat-value" id="statSubmitted">0</span>
+    <span class="stat-label">Terkumpul</span>
+   </div>
+  </div>
+ </section>
+
+ <!-- Exam Cards -->
+ <section class="glass-card" style="margin-top: 24px;">
+  <div class="table-header flex items-center justify-between mb-5 flex-wrap gap-3">
+   <!-- R19: seksi naik h3→h2 agar hierarki h1→h2 tidak melompat;
+        font-size inline 1.1rem dari h3 lama dipertahankan (visual identik). -->
+   <h2 style="font-size: 1.1rem; color: var(--color-primary-light); display: flex; align-items: center; gap: 8px;">
+    <svg class="icon-svg" style="color:var(--color-primary-light);"><use href="#hi-eye"/></svg> Ujian yang Saya Awasi
+   </h2>
+   <div class="table-toolbar">
+    <div class="toolbar-search-wrap">
+     <input type="text" id="pengawasSearch" class="toolbar-search-input" placeholder="Cari nama ujian, token, pembuat..." aria-label="Cari ujian">
+
+    </div>
+    <button class="toolbar-btn toolbar-btn-search" data-action="load-pengawas-exams"><svg class="icon-svg"><use href="#hi-search"/></svg> Cari</button>
+    <button class="toolbar-btn toolbar-btn-refresh" data-action="load-pengawas-exams" aria-label="Muat ulang daftar" title="Muat ulang"><svg class="icon-svg"><use href="#hi-refresh"/></svg></button>
+   </div>
+  </div>
+  <div id="pengawasExamList" style="display:flex;flex-direction:column;gap:16px;">
+   <div style="text-align:center;padding:40px;color:var(--color-text-secondary);">Memuat data...</div>
+  </div>
+  <div id="pengawasPagination" class="pagination-wrapper" style="display:none;"></div>
+ </section>
+</main>
+
+<!-- Heroicons Sprite -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none;" aria-hidden="true">
+<symbol id="hi-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/></symbol>
+<symbol id="hi-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></symbol>
+<symbol id="hi-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+<symbol id="hi-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></symbol>
+<symbol id="hi-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></symbol>
+<symbol id="hi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4.5 12.75 6 6 9-13.5"/></symbol>
+<symbol id="hi-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></symbol>
+</svg>
+
+<style>
+.exam-monitor-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--color-glass-border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  transition: border-color 0.2s;
+}
+.exam-monitor-card:hover {
+  border-color: rgba(var(--rgb-info),0.3);
+}
+.exam-monitor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.exam-monitor-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.exam-monitor-meta {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.exam-monitor-progress {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.progress-bar-container {
+  flex: 1;
+  min-width: 100px;
+  height: 8px;
+  background: var(--glass-bg-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+.progress-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.student-list-toggle {
+  font-size: 0.8rem;
+  color: var(--color-primary-light);
+  cursor: pointer;
+  background: none;
+  border: 1px solid rgba(var(--rgb-info),0.3);
+  border-radius: 8px;
+  padding: 4px 12px;
+  transition: background 0.2s;
+}
+.student-list-toggle:hover {
+  background: rgba(var(--rgb-info),0.1);
+}
+/* Batch 15 (R114): blok .student-table/.student-status/.log-*/.log-modal-* dihapus —
+   kelas-kelas itu hanya dipakai modal riwayat akses di halaman detail yang
+   punya definisi sendiri (pengawas_detail.html). Baris .log-entry.logout::before
+   dipertahankan karena dijaga uiux-batch12-pengawasan-nav.test.mjs. */
+.log-entry.logout::before { background:var(--color-danger-bright);border-color:var(--color-danger-bright); }
+</style>
+
+<script src="/static/js/admin-core.js?v={{.version}}"></script>
+<script src="/static/js/admin.js?v={{.version}}"></script>
+<script>
+/* ===== Pengawas Monitoring ===== */
+
+var PENG_CURRENT_PAGE = 1;
+
+function loadPengawasExams(page) {
+    var el = document.getElementById('pengawasExamList');
+    if (!el) return;
+
+    if (page !== undefined) PENG_CURRENT_PAGE = page;
+    var search = document.getElementById('pengawasSearch') ? document.getElementById('pengawasSearch').value.trim() : '';
+
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--color-text-secondary);">Memuat data ujian...</div>';
+
+    var url = '/admin/api/pengawas/exams?page=' + PENG_CURRENT_PAGE + '&per_page=10';
+    if (search) url += '&search=' + encodeURIComponent(search);
+
+    apiFetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            if (!res || !res.success) {
+                el.innerHTML = '<div style="text-align:center;padding:40px;color:#fca5a5;">Gagal memuat data' +
+                    ' <div style="margin-top:12px;"><button type="button" class="btn-sm btn-primary" data-action="load-pengawas-exams">Coba Lagi</button></div></div>';
+                return;
+            }
+            var exams = res.exams || [];
+            if (res.stats) {
+                setText('statTotalExam', res.stats.total_exams);
+                setText('statActiveExam', res.stats.active_exams);
+                setText('statTotalStudents', res.stats.total_students);
+                setText('statSubmitted', res.stats.total_submitted);
+            } else {
+                updateStats(exams);
+            }
+
+            if (exams.length === 0) {
+                var msg = res.is_privileged
+                    ? 'Belum ada ujian yang tersedia.'
+                    : 'Belum ada ujian yang ditugaskan kepada Anda sebagai pengawas.';
+                if (search) msg = 'Pencarian tidak ditemukan.';
+                el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--color-text-secondary);">' + msg + '</div>';
+                renderPagination(res);
+                return;
+            }
+
+            var html = '';
+            for (var i = 0; i < exams.length; i++) {
+                var ex = exams[i];
+                var total = ex.total_students || 0;
+                var sub = ex.submitted_count || 0;
+                var pct = total > 0 ? Math.round(sub / total * 100) : 0;
+                var barColor = pct >= 100 ? 'var(--color-success-light)' : (pct > 0 ? '#60a5fa' : 'var(--color-text-muted)');
+                // Three-state badge: a tombstoned exam (auto-inactivated by
+                // policy B when the school operator was cut off) reads
+                // "Nonaktif Otomatis" instead of a bare "Nonaktif" so the
+                // operator is not left wondering why the exam is dormant.
+                // Label kanonik sama dengan dashboard (S24).
+                var statusHtml;
+                if (ex.status === 'active') {
+                    statusHtml = '<span class="status-badge status-active">Aktif</span>';
+                } else if (ex.tombstoned) {
+                    // Batch 10 (R46): timestamp diformat satu-pintu & string
+                    // atribut lolos dua layer escaping (HTML + JS).
+                    var tombTitle = 'Nonaktif otomatis oleh sistem saat paket berakhir/berganti atau masa aktif akun habis' + (ex.tombstoned_at ? ' (' + formatDateTimeID(ex.tombstoned_at) + ')' : '');
+                    statusHtml = '<span class="status-badge status-tombstoned" title="' + escapeHtml(jsEscape(tombTitle)) + '">Nonaktif Otomatis</span>';
+                } else {
+                    statusHtml = '<span class="status-badge status-inactive">Nonaktif</span>';
+                }
+                // R31/R28: satu pintu format waktu — start/end UTC mentah
+                // diformat formatDateTimeID (admin-core.js); null → '—'.
+                var sched = (ex.start_time && ex.end_time)
+                    ? (formatDateTimeID(ex.start_time) + ' - ' + formatDateTimeID(ex.end_time))
+                    : '—';
+
+                var startedBadge = ex.exam_started_at
+                    ? '<span style="font-size:0.65rem;color:rgba(var(--rgb-success),0.8);padding:2px 6px;border-radius:4px;background:rgba(var(--rgb-success),0.1);border:1px solid rgba(var(--rgb-success),0.2);"><svg class="icon-svg" style="width:10px;height:10px;"><use href="#hi-check"/></svg> Sedang Diawasi</span>'
+                    : '<span style="font-size:0.65rem;color:rgba(var(--rgb-warning),0.8);padding:2px 6px;border-radius:4px;background:rgba(var(--rgb-warning),0.1);border:1px solid rgba(var(--rgb-warning),0.2);">Belum Mulai Pengawasan</span>';
+                var modeBadge = ex.token_mode === 'static'
+                    ? '<span style="font-size:0.7rem;color:#60a5fa;font-weight:600;background:rgba(59,130,246,0.1);padding:1px 4px;border-radius:4px;border:1px solid rgba(59,130,246,0.2);">Statis</span>'
+                    : '<span style="font-size:0.7rem;color:#c084fc;font-weight:600;background:rgba(var(--rgb-accent),0.1);padding:1px 4px;border-radius:4px;border:1px solid rgba(var(--rgb-accent),0.2);">Dinamis</span>';
+                // Server-side auto-approve badge: makes the flag visible from
+                // the list so a teacher notices it is still on before reusing
+                // the exam for the next session.
+                var autoBadge = ex.auto_approve
+                    ? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:0.65rem;color:var(--color-success-light);font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(var(--rgb-success),0.12);border:1px solid rgba(var(--rgb-success),0.3);white-space:nowrap;" title="Auto-approve aktif — semua perangkat disetujui otomatis di server (tetap berlaku walau halaman pengawasan ditutup)"><svg class="icon-svg" style="width:10px;height:10px;"><use href="#hi-check"/></svg> Auto-approve</span>'
+                    : '';
+                html += '<div class="exam-monitor-card" id="exam-card-' + ex.id + '" style="cursor:pointer;" role="button" tabindex="0" data-action="open-pengawas-detail" data-exam-id="' + ex.id + '"' +
+                    ' aria-label="' + escapeHtml(jsEscape('Buka detail pengawasan ujian: ' + ex.name)) + '">' +
+                    '<div class="exam-monitor-header">' +
+                        '<div>' +
+                            '<div class="exam-monitor-title">' + esc(ex.name) + ' ' + startedBadge + '</div>' +
+                            '<div class="exam-monitor-meta">' +
+                                '<span style="display:inline-flex;align-items:center;gap:4px;">Mode Token: ' + modeBadge + '</span>' +
+                                '<span>Jadwal: ' + sched + '</span>' +
+                                '<span>Pembuat: ' + esc(ex.creator_name) + '</span>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div style="display:flex;align-items:center;gap:8px;">' +
+                            autoBadge +
+                            statusHtml +
+                            '<svg class="icon-svg" style="width:16px;height:16px;color:var(--color-primary-light);"><use href="#hi-chevron-right"/></svg>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="exam-monitor-progress">' +
+                        '<div class="progress-bar-container">' +
+                            '<div class="progress-bar-fill" style="width:' + pct + '%;background:' + barColor + ';"></div>' +
+                        '</div>' +
+                        '<span class="progress-text" style="color:' + barColor + ';">' + sub + '/' + total + ' (' + pct + '%)</span>' +
+                        '<a href="/admin/pengawas/' + ex.id + '" class="student-list-toggle" style="text-decoration:none;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-eye"/></svg> Pantau</a>' +
+                    '</div>' +
+                '</div>';
+            }
+            el.innerHTML = html;
+            renderPagination(res);
+        })
+        .catch(function() {
+            el.innerHTML = '<div style="text-align:center;padding:40px;color:#fca5a5;">Gagal menghubungi server' +
+                ' <div style="margin-top:12px;"><button type="button" class="btn-sm btn-primary" data-action="load-pengawas-exams">Coba Lagi</button></div></div>';
+        });
+}
+
+function renderPagination(res) {
+    var pagEl = document.getElementById('pengawasPagination');
+    if (!pagEl) return;
+    if (!res.total_pages || res.total_pages <= 1) { pagEl.style.display = 'none'; return; }
+
+    // Batch 12 (R73): sinkron dengan per_page=10 di loadPengawasExams.
+    var perPage = 10;
+    var rangeStart = (res.page - 1) * perPage + 1;
+    var rangeEnd = Math.min(res.page * perPage, res.total);
+
+    // Batch 12 (R73, ekor R56): info paginasi memakai rentang offset —
+    // "Menampilkan 21–30 dari 25 ujian", bukan jumlah baris halaman aktif.
+    var html = '<div class="pagination-wrapper">' +
+        '<span class="pagination-info">Menampilkan ' + rangeStart + '&ndash;' + rangeEnd + ' dari ' + res.total + ' ujian</span>' +
+        '<div class="pagination-links">';
+
+    if (res.page > 1) {
+        html += '<button type="button" class="pagination-page-num" data-action="load-pengawas-page" data-page="1" style="cursor:pointer;" aria-label="Halaman pertama">&laquo;</button>' +
+            '<button type="button" class="pagination-page-num" data-action="load-pengawas-page" data-page="' + (res.page - 1) + '" style="cursor:pointer;" aria-label="Halaman sebelumnya">&lsaquo;</button>';
+    }
+
+    var start = Math.max(1, res.page - 2);
+    var end = Math.min(res.total_pages, res.page + 2);
+    for (var p = start; p <= end; p++) {
+        html += '<button type="button" class="pagination-page-num' + (p === res.page ? ' page-current' : '') + '" data-action="load-pengawas-page" data-page="' + p + '" style="cursor:pointer;"' + (p === res.page ? ' aria-current="page"' : '') + '>' + p + '</button>';
+    }
+
+    if (res.page < res.total_pages) {
+        html += '<button type="button" class="pagination-page-num" data-action="load-pengawas-page" data-page="' + (res.page + 1) + '" style="cursor:pointer;" aria-label="Halaman berikutnya">&rsaquo;</button>' +
+            '<button type="button" class="pagination-page-num" data-action="load-pengawas-page" data-page="' + res.total_pages + '" style="cursor:pointer;" aria-label="Halaman terakhir">&raquo;</button>';
+    }
+
+    html += '</div></div>';
+    pagEl.innerHTML = html;
+    pagEl.style.display = 'block';
+}
+
+function updateStats(exams) {
+    var total = exams.length, active = 0, students = 0, submitted = 0;
+    for (var i = 0; i < exams.length; i++) {
+        var e = exams[i];
+        if (e.status === 'active') active++;
+        students += e.total_students || 0;
+        submitted += e.submitted_count || 0;
+    }
+    setText('statTotalExam', total);
+    setText('statActiveExam', active);
+    setText('statTotalStudents', students);
+    setText('statSubmitted', submitted);
+}
+
+function setText(id, val) { var e = document.getElementById(id); if (e) e.textContent = val; }
+
+function esc(s) {
+    if (!s) return '—';
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+}
+
+// ===== Batch 7 (R28): delegasi data-action =====
+// Kartu monitor & pagination pindah ke delegasi; handler kartu mundur bila
+// klik berasal dari anchor bersarang (link "Pantau") — href anchor yang
+// menavigasi, setara stopPropagation inline yang dihapus.
+(function() {
+  if (typeof Actions === 'undefined') return;
+  Actions.register('load-pengawas-exams', function() { if (typeof loadPengawasExams === 'function') loadPengawasExams(); });
+  Actions.register('open-pengawas-detail', function(el, ev) {
+    var t = ev && ev.target;
+    while (t && t !== el) {
+      if (String(t.tagName).toUpperCase() === 'A') return;
+      t = t.parentNode;
+    }
+    var id = el.getAttribute('data-exam-id');
+    if (!id) return;
+    window.location = '/admin/pengawas/' + id;
+  });
+  Actions.register('load-pengawas-page', function(el) {
+    var p = parseInt(el.getAttribute('data-page'), 10);
+    if (isNaN(p)) return;
+    if (typeof loadPengawasExams === 'function') loadPengawasExams(p);
+  });
+})();
+// ===== end Batch 7 (R28) =====
+
+// Batch 15 (R115): kartu role="button" membungkus link "Pantau" — klik link
+// dihentikan di fase capture agar delegasi aksi kartu tidak terpicu dobel;
+// navigasi tetap oleh href anchor. Blok terpisah dari registrasi R28 di atas
+// agar ekstraksi suite perilaku lama tetap self-contained.
+(function() {
+  document.addEventListener('click', function(ev) {
+    var t = ev.target;
+    while (t && t !== document) {
+      if (t.nodeType === 1 && String(t.tagName).toUpperCase() === 'A' &&
+          String(t.className).indexOf('student-list-toggle') !== -1) {
+        ev.stopPropagation();
+        return;
+      }
+      t = t.parentNode;
+    }
+  }, true);
+})();
+
+/* Auto-load on page ready */
+(function() {
+    loadPengawasExams();
+})();
+
+/* Live-search: hasil diperbarui saat mengetik (debounce 300ms di helper
+   bersama initLiveSearch, admin-core.js); Enter tetap langsung mencari.
+   Bila helper belum tersedia (admin-core.js versi lama), pakai fallback
+   keydown Enter sederhana seperti perilaku lama. */
+(function() {
+    var input = document.getElementById('pengawasSearch');
+    if (!input || input.dataset.liveSearchWired) return;
+    input.dataset.liveSearchWired = '1';
+    if (typeof initLiveSearch === 'function') {
+        // Batch 11 (S60): reset ke halaman 1 agar pencarian dari page > 1
+        // tidak menampilkan hasil kosong palsu.
+        initLiveSearch(document.getElementById('pengawasSearch'), function() { loadPengawasExams(1); });
+    } else {
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); loadPengawasExams(1); }
+        });
+    }
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,2291 @@
+{{/*
+  EXAMVAN Pengawas Detail — Self-Contained
+  Template variables:
+    .exam, .admin_user, .admin_role, .active_page, .version, .csrf_token,
+    .creator_name, .delegated_name, .pengawas_list
+*/}}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ {{template "admin/partials/head.html" dict "version" .version "csrf_token" .csrf_token "title" "Detail Pengawasan"}}
+</head>
+<body class="dashboard-page">
+{{template "admin/partials/nav.html" dict "active_page" .active_page "admin_role" .admin_role "admin_user" .admin_user "csrf_token" .csrf_token "needs_instansi" .needs_instansi}}
+
+<!-- T14: #toastContainer pindah ke partials/nav.html (satu sumber untuk semua
+     halaman admin) — duplikat per-halaman dihapus. -->
+
+<main class="dashboard" id="mainContent">
+
+ <!-- Confirm Approval Modal -->
+  <div id="confirmApprovalModal" class="modal-overlay" style="display:none;" data-action="close-confirm-approval-modal" role="dialog" aria-modal="true" aria-labelledby="confirmApprovalTitle">
+   <div class="modal-card" style="max-width: 420px;">
+   <div class="modal-header">
+    <h3 style="font-size:1.1rem;color:var(--color-primary-light);display:flex;align-items:center;gap:8px;" id="confirmApprovalTitle">
+     <svg class="icon-svg"><use href="#hi-shield-check"/></svg> Konfirmasi
+    </h3>
+    <button class="modal-close" data-action="close-confirm-approval-modal" aria-label="Tutup"><svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-x"/></svg></button>
+   </div>
+   <div class="modal-body" style="padding: 16px 24px 24px;">
+    <p id="confirmApprovalText" style="color:var(--color-text-secondary);line-height:1.5;margin-bottom:24px;font-size:14px;"></p>
+    <div style="display:flex;gap:12px;justify-content:flex-end;">
+     <button class="btn-modal-cancel" data-action="close-confirm-approval-modal">Batal</button>
+     <button id="confirmApprovalBtn">Konfirmasi</button>
+    </div>
+   </div>
+  </div>
+ </div>
+
+ <!-- Access Log Modal -->
+  <div id="accessLogModal" class="modal-overlay" style="display:none;" data-action="close-access-log-modal" role="dialog" aria-modal="true" aria-labelledby="accessLogTitle">
+   <div class="modal-card" style="max-width: 620px;">
+   <div class="modal-header">
+    <h3 id="accessLogTitle" style="font-size:1.1rem;color:var(--color-primary-light);display:flex;align-items:center;gap:8px;"><svg class="icon-svg"><use href="#hi-device"/></svg> Riwayat Akses Perangkat</h3>
+    <button class="modal-close" data-action="close-access-log-modal" aria-label="Tutup"><svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-x"/></svg></button>
+   </div>
+   <div class="modal-body" id="accessLogBody" style="padding: 0 24px 24px; max-height: 75vh; overflow-y: auto;">
+    <div style="text-align:center;padding:40px;color:var(--color-text-secondary);">Memuat...</div>
+   </div>
+  </div>
+ </div>
+
+ <!-- Audit Log Modal -->
+  <div id="auditLogModal" class="modal-overlay" style="display:none;" data-action="close-audit-log-modal" role="dialog" aria-modal="true" aria-labelledby="auditLogTitle">
+   <div class="modal-card" style="max-width: 640px;">
+   <div class="modal-header">
+    <h3 id="auditLogTitle" style="font-size:1.1rem;color:var(--color-primary-light);display:flex;align-items:center;gap:8px;"><svg class="icon-svg"><use href="#hi-clipboard"/></svg> Riwayat Audit Pengaturan</h3>
+    <button class="modal-close" data-action="close-audit-log-modal" aria-label="Tutup"><svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-x"/></svg></button>
+   </div>
+   <div class="modal-body" id="auditLogBody" style="padding: 0 24px 24px; max-height: 75vh; overflow-y: auto;">
+    <div style="text-align:center;padding:40px;color:var(--color-text-secondary);">Memuat...</div>
+   </div>
+  </div>
+ </div>
+
+ <!-- ========== EXAM HEADER CARD ========== -->
+ <section class="pd-header-card">
+  <div class="pd-header-top">
+   <a href="/admin/pengawas" class="pd-back-btn">
+    <svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-chevron-left"/></svg>
+    <span>Kembali</span>
+   </a>
+   {{if .exam.ExamStartedAt}}
+   <span class="pd-status-pill pd-status-live">
+    <span class="pd-pulse"></span> Sedang Diawasi
+   </span>
+   {{else}}
+   <span class="pd-status-pill pd-status-idle">
+    <svg class="icon-svg" style="width:12px;height:12px;"><use href="#hi-key"/></svg> Belum Dimulai
+   </span>
+   {{end}}
+  </div>
+
+  <h1 class="pd-exam-title">{{.exam.Name}}</h1>
+
+  <!-- Info Grid -->
+  <div class="pd-info-grid">
+   <div class="pd-info-item pd-token-card">
+    <svg class="icon-svg pd-info-icon"><use href="#hi-key"/></svg>
+    <div style="flex:1;">
+     <span class="pd-info-label">Token Aktif ({{if eq .token_mode "static"}}Statis{{else}}Dinamis{{end}})</span>
+     {{if .exam.ExamStartedAt}}
+     <div class="pd-token-row">
+      <span class="pd-info-value pd-token-value" id="pdActiveToken">{{.exam.ActiveToken}}</span>
+      {{if ne .token_mode "static"}}
+      <button class="pd-token-regen-btn" data-action="regenerate-active-token" title="Generate Token Baru Sekarang" aria-label="Generate token baru sekarang">
+       <svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-refresh"/></svg>
+      </button>
+      {{end}}
+      <button class="pd-token-copy-btn" data-action="copy-active-token" title="Salin Token" aria-label="Salin token">
+       <svg class="icon-svg" style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9.75a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184"/></svg>
+      </button>
+     </div>
+     {{else}}
+     <span class="pd-info-value pd-token-hidden">Tersembunyi &mdash; mulai pengawasan dahulu</span>
+     {{end}}
+     <div class="pd-token-countdown" id="pdTokenCountdown"></div>
+    </div>
+   </div>
+   <div class="pd-info-item">
+    <svg class="icon-svg pd-info-icon" style="color:var(--color-accent-emerald);"><use href="#hi-check"/></svg>
+    <div>
+     <span class="pd-info-label">Status</span>
+     <span class="pd-info-value">
+      {{if eq .exam.Status "active"}}
+      <span class="status-badge status-active" style="font-size:0.72rem;">Aktif</span>
+      {{else if .exam.TombstonedAt}}
+      <span class="status-badge status-tombstoned" style="font-size:0.72rem;" title="Nonaktif otomatis oleh sistem saat paket berakhir/berganti atau masa aktif akun habis ({{formatExamTime .exam.TombstonedAt}} WIB)">Nonaktif Otomatis</span>
+      {{else}}
+      <span class="status-badge status-inactive" style="font-size:0.72rem;">Nonaktif</span>
+      {{end}}
+     </span>
+    </div>
+   </div>
+   {{if and .exam.StartTime .exam.EndTime}}
+   <div class="pd-info-item">
+    <svg class="icon-svg pd-info-icon" style="color:var(--color-warning);"><use href="#hi-refresh"/></svg>
+    <div>
+     <span class="pd-info-label">Jadwal</span>
+     <span class="pd-info-value">{{formatExamTime .exam.StartTime}} &mdash; {{formatExamTime .exam.EndTime}}</span>
+    </div>
+   </div>
+   {{end}}
+  </div>
+
+  <!-- Personnel -->
+  <div class="pd-personnel">
+   <div class="pd-personnel-item">
+    <span class="pd-personnel-label">Pembuat Soal</span>
+    <span class="pd-personnel-value">{{.creator_name}}</span>
+   </div>
+   <div class="pd-personnel-divider"></div>
+   <div class="pd-personnel-item">
+    <span class="pd-personnel-label">Guru</span>
+    <span class="pd-personnel-value">{{.delegated_name}}</span>
+   </div>
+   <div class="pd-personnel-divider"></div>
+   <div class="pd-personnel-item">
+    <span class="pd-personnel-label">Pengawas</span>
+    <span class="pd-personnel-value">{{range $i, $p := .pengawas_list}}{{if $i}}, {{end}}{{if $p.Name}}{{$p.Name}} ({{$p.Username}}){{else}}{{$p.Username}}{{end}}{{else}}-{{end}}</span>
+   </div>
+  </div>
+
+  <!-- Actions Bar -->
+  <div class="pd-actions-bar">
+   <div class="pd-main-action">
+    {{if .exam.ExamStartedAt}}
+    <button class="pd-control-btn pd-control-stop" id="btnStopPengawasDetail" data-action="stop-pengawas-detail" data-exam-id="{{.exam.ID}}" {{if not .can_control_settings}}disabled title="Hanya pembuat/guru yang dapat menghentikan pengawasan" style="opacity: 0.65; cursor: not-allowed;"{{end}}>
+     <svg class="icon-svg" style="width:16px;height:16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+     Hentikan Pengawasan
+    </button>
+    {{else}}
+    <button class="pd-control-btn pd-control-start" id="btnStartPengawasDetail" data-action="start-pengawas-detail" data-exam-id="{{.exam.ID}}" {{if not .can_control_settings}}disabled title="Hanya pembuat/guru yang dapat memulai pengawasan" style="opacity: 0.65; cursor: not-allowed;"{{end}}>
+     <svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-play"/></svg>
+     Mulai Pengawasan
+    </button>
+    {{end}}
+   </div>
+  </div>
+ </section>
+
+ <!-- ========== STATS CARDS ========== -->
+ <section class="pd-stats-grid" id="detailStats">
+  <div class="pd-stat-card">
+   <div class="pd-stat-icon" style="background:rgba(var(--rgb-info),0.12);color:var(--color-primary-light);">
+    <svg class="icon-svg" style="width:22px;height:22px;"><use href="#hi-users"/></svg>
+   </div>
+   <div class="pd-stat-body">
+    <span class="pd-stat-value" id="statTotal">0</span>
+    <span class="pd-stat-label">Total Perangkat</span>
+   </div>
+  </div>
+  <div class="pd-stat-card">
+   <div class="pd-stat-icon" style="background:rgba(var(--rgb-warning),0.12);color:var(--color-warning-light);">
+    <svg class="icon-svg" style="width:22px;height:22px;"><use href="#hi-eye"/></svg>
+   </div>
+   <div class="pd-stat-body">
+    <span class="pd-stat-value" id="statActive">0</span>
+    <span class="pd-stat-label">Mengerjakan</span>
+   </div>
+  </div>
+  <div class="pd-stat-card">
+   <div class="pd-stat-icon" style="background:rgba(var(--rgb-success),0.12);color:var(--color-success-light);">
+    <svg class="icon-svg" style="width:22px;height:22px;"><use href="#hi-check"/></svg>
+   </div>
+   <div class="pd-stat-body">
+    <span class="pd-stat-value" id="statSubmitted">0</span>
+    <span class="pd-stat-label">Terkumpul</span>
+   </div>
+  </div>
+  <div class="pd-stat-card">
+   <div class="pd-stat-icon" style="background:rgba(var(--rgb-text-muted),0.12);color:var(--color-text-muted);">
+    <svg class="icon-svg" style="width:22px;height:22px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+   </div>
+   <div class="pd-stat-body">
+    <span class="pd-stat-value" id="statNotStarted">0</span>
+    <span class="pd-stat-label">Belum Mulai</span>
+   </div>
+  </div>
+ </section>
+ <!-- ========== APPROVALS TABLE ========== -->
+ <section class="pd-table-card" id="approvalSection" style="margin-bottom:20px; border-color:rgba(var(--rgb-warning),0.4);">
+  <div class="pd-table-header" style="border-bottom-color:rgba(var(--rgb-warning),0.1);">
+    <h2 class="pd-table-title" style="color:var(--color-warning-light);">
+     <svg class="icon-svg"><use href="#hi-users"/></svg> Antrean Peserta (Menunggu Persetujuan)
+    </h2>
+   <div class="pd-table-toolbar">
+    <label class="pd-toggle-switch" title="Terima Otomatis — menyetujui siswa di server secara otomatis; tetap aktif walau halaman ini ditutup" style="margin-right:12px;">
+     <input type="checkbox" id="autoAcceptToggle" aria-label="Terima otomatis semua peserta yang meminta izin masuk">
+     <span class="pd-toggle-slider"></span>
+    </label>
+    <span id="aaLastChanged" class="aa-audit-hint" style="display:none;"></span>
+    <button class="pd-toolbar-btn" data-action="show-audit-log" title="Riwayat Audit — semua perubahan pengaturan auto-approve (siapa, kapan)" aria-label="Lihat riwayat audit pengaturan" style="width:auto;padding:0 12px;gap:6px;color:var(--color-warning-light);background:rgba(var(--rgb-warning),0.1);margin-right:10px;font-size:0.72rem;font-weight:700;">
+     <svg class="icon-svg" style="width:15px;height:15px;"><use href="#hi-clipboard"/></svg>
+     <span>Riwayat Audit</span>
+    </button>
+    <button class="pd-toolbar-btn" data-action="load-approvals" title="Muat Ulang Antrean" aria-label="Muat ulang antrean persetujuan" style="color:var(--color-warning-light); background:rgba(var(--rgb-warning),0.1);">
+     <svg class="icon-svg"><use href="#hi-refresh"/></svg>
+    </button>
+   </div>
+  </div>   <div class="pd-table-responsive">
+   <table class="pd-table" id="approvalTable">
+    <thead>
+     <tr>
+      <th>No</th>
+      <th>ID Perangkat</th>
+      <th>Siswa</th>
+      <th>Waktu Minta Izin</th>
+      <th style="text-align:right;">Aksi</th>
+     </tr>
+    </thead>
+    <tbody id="approvalBody">
+     <tr><td colspan="5" class="pd-table-empty">Belum ada antrean peserta...</td></tr>
+    </tbody>
+   </table>
+  </div>
+  <div id="approvalOverflowNote" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(var(--rgb-warning),0.08);border:1px solid rgba(var(--rgb-warning),0.25);color:var(--color-warning-light);font-size:0.78rem;line-height:1.5;"></div>
+ </section>
+
+ <!-- ========== STUDENT TABLE ========== -->
+ <section class="pd-table-card">
+  <div class="pd-table-header">
+   <h2 class="pd-table-title">
+    <svg class="icon-svg"><use href="#hi-device"/></svg> Monitoring Perangkat
+   </h2>
+   <div class="pd-table-toolbar">
+    <select id="statusFilter" class="pd-status-select" aria-label="Filter status siswa">
+     <option value="">Semua Status</option>
+     <option value="in_progress">Sedang Mengerjakan</option>
+     <option value="submitted">Terkumpul</option>
+     <option value="not_started">Belum Mulai</option>
+    </select>
+    <div class="pd-search-wrap">
+     <svg class="icon-svg pd-search-icon"><use href="#hi-search"/></svg>
+      <input type="text" id="pengawasSearch" class="pd-search-input" placeholder="Cari nama, ID perangkat..." aria-label="Cari peserta">
+    </div>
+    <span id="lastUpdatedLabel" style="font-size:11px;color:var(--color-text-muted);white-space:nowrap;align-self:center;"></span>
+    <!-- S85 (ronde 8): region live TERPISAH untuk perubahan jumlah antrean.
+         Stempel jam di atas sengaja VISUAL-ONLY (tanpa aria-live) — jam polling
+         yang berubah tiap 5–12 detik menenggelamkan pengumuman penting. -->
+    <span id="queueLiveRegion" role="status" aria-live="polite" class="sr-only"></span>
+    <button class="pd-toolbar-btn" data-action="load-detail" title="Muat Ulang" aria-label="Muat ulang data peserta">
+     <svg class="icon-svg"><use href="#hi-refresh"/></svg>
+    </button>
+   </div>
+  </div>
+  <div class="pd-table-responsive">
+   <table class="pd-table" id="submissionTable">
+    <thead>
+     <tr>
+      <th>No</th>
+      <th>ID Perangkat</th>
+      <th>Status</th>
+      <th>Mulai</th>
+      <th>Upaya</th>
+      <th>Aksi</th>
+     </tr>
+    </thead>
+    <tbody id="submissionBody">
+     <tr><td colspan="6" class="pd-table-empty">Memuat data...</td></tr>
+    </tbody>
+   </table>
+  </div>
+  <div id="subPagination" class="pagination-wrapper" style="display:none;"></div>
+ </section>
+</main>
+
+<!-- ========== STYLES ========== -->
+<style>
+/* --- Header Card --- */
+.pd-header-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+  margin-bottom: 20px;
+  backdrop-filter: blur(12px);
+  animation: pdFadeIn 0.4s var(--ease-spring);
+}
+@keyframes pdFadeIn {
+  from { opacity:0; transform:translateY(12px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.pd-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.pd-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-glass-border);
+  background: transparent;
+  transition: all 0.2s var(--ease-spring);
+}
+.pd-back-btn:hover {
+  color: var(--color-primary-light);
+  border-color: rgba(var(--rgb-info),0.3);
+  background: rgba(var(--rgb-info),0.06);
+}
+.pd-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 5px 14px;
+  border-radius: 20px;
+  letter-spacing: 0.02em;
+}
+.pd-status-live {
+  background: rgba(var(--rgb-success),0.12);
+  color: var(--color-success-light);
+  border: 1px solid rgba(var(--rgb-success),0.25);
+}
+.pd-status-idle {
+  background: rgba(var(--rgb-warning),0.12);
+  color: var(--color-warning-light);
+  border: 1px solid rgba(var(--rgb-warning),0.25);
+}
+.pd-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-success-light);
+  animation: pdPulse 1.6s infinite;
+}
+@keyframes pdPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--rgb-success),0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(var(--rgb-success),0); }
+}
+.pd-exam-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--color-text);
+  margin: 0 0 16px;
+  line-height: 1.3;
+  font-family: var(--font-display);
+}
+
+/* --- Info Grid --- */
+.pd-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.pd-info-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-sm);
+}
+.pd-info-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--color-primary-light);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.pd-info-label {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+.pd-info-value {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.pd-token-value {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  color: var(--color-primary-light);
+  letter-spacing: 1px;
+  user-select: all;
+  font-weight: 800;
+  transition: all 0.3s var(--ease-spring);
+}
+.pd-token-value.pd-token-flash {
+  color: var(--color-accent-emerald);
+  text-shadow: 0 0 12px rgba(var(--rgb-success),0.4);
+}
+.pd-token-hidden {
+  font-style: italic;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+.pd-token-card {
+  border-color: rgba(var(--rgb-info),0.2);
+  background: linear-gradient(135deg, var(--color-bg-secondary) 0%, rgba(var(--rgb-info),0.04) 100%);
+}
+.pd-token-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.pd-token-regen-btn, .pd-token-copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--color-glass-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.2s var(--ease-spring);
+  flex-shrink: 0;
+}
+.pd-token-regen-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary-light);
+  background: rgba(var(--rgb-info),0.1);
+  transform: rotate(90deg);
+}
+.pd-token-copy-btn:hover {
+  border-color: var(--color-accent-emerald);
+  color: var(--color-accent-emerald);
+  background: rgba(var(--rgb-success),0.1);
+}
+.pd-token-countdown {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pd-token-countdown .pd-countdown-bar {
+  flex: 1;
+  height: 3px;
+  background: var(--glass-bg-strong);
+  border-radius: 2px;
+  overflow: hidden;
+  max-width: 120px;
+}
+.pd-token-countdown .pd-countdown-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+}
+
+/* --- Personnel --- */
+.pd-personnel {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+}
+.pd-personnel-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pd-personnel-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pd-personnel-value {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-primary-light);
+}
+.pd-personnel-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--color-glass-border);
+}
+
+/* --- Actions Bar --- */
+.pd-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pd-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-spring);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pd-action-link {
+  background: rgba(var(--rgb-info),0.08);
+  color: var(--color-primary-light);
+  border-color: rgba(var(--rgb-info),0.25);
+}
+.pd-action-link:hover { background: rgba(var(--rgb-info),0.15); border-color: rgba(var(--rgb-info),0.4); }
+.pd-action-active {
+  background: rgba(var(--rgb-success),0.1);
+  color: var(--color-success-light);
+  border-color: rgba(var(--rgb-success),0.3);
+}
+.pd-action-active:hover { background: rgba(var(--rgb-success),0.18); }
+.pd-action-danger {
+  background: rgba(var(--rgb-danger),0.1);
+  color: var(--color-danger-bright);
+  border-color: rgba(var(--rgb-danger),0.3);
+}
+.pd-action-danger:hover { background: rgba(var(--rgb-danger),0.18); }
+.pd-action-warning {
+  background: rgba(var(--rgb-warning),0.1);
+  color: var(--color-warning-light);
+  border-color: rgba(var(--rgb-warning),0.3);
+}
+.pd-action-warning:hover { background: rgba(var(--rgb-warning),0.18); }
+.pd-action-muted {
+  background: rgba(var(--rgb-text-muted),0.1);
+  color: var(--color-text-muted);
+  border-color: rgba(var(--rgb-text-muted),0.3);
+}
+.pd-action-muted:hover { background: rgba(var(--rgb-text-muted),0.18); }
+
+/* --- Control Buttons (Start/Stop) --- */
+.pd-main-action { display: flex; gap: 8px; }
+.pd-control-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 10px 22px;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  transition: all 0.2s var(--ease-spring);
+  box-shadow: var(--shadow-sm);
+}
+.pd-control-start {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+}
+.pd-control-start:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(var(--rgb-info),0.35);
+}
+.pd-control-stop {
+  background: linear-gradient(135deg, var(--color-danger) 0%, #dc2626 100%);
+}
+.pd-control-stop:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(var(--rgb-danger),0.35);
+}
+.pd-control-btn:disabled {
+  opacity: 0.6;
+  transform: none !important;
+  cursor: not-allowed;
+}
+
+/* --- Stats Grid --- */
+.pd-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+  animation: pdFadeIn 0.5s var(--ease-spring) 0.1s both;
+}
+.pd-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(12px);
+  transition: border-color 0.2s, transform 0.2s;
+}
+.pd-stat-card:hover {
+  border-color: rgba(var(--rgb-info),0.2);
+  transform: translateY(-2px);
+}
+.pd-stat-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+.pd-stat-body {
+  display: flex;
+  flex-direction: column;
+}
+.pd-stat-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--color-text);
+  line-height: 1.1;
+  font-family: var(--font-display);
+}
+.pd-stat-label {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+/* --- Table Card --- */
+.pd-table-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  backdrop-filter: blur(12px);
+  animation: pdFadeIn 0.5s var(--ease-spring) 0.2s both;
+}
+.pd-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.pd-table-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-primary-light);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.pd-table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pd-status-select {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-glass-border);
+  color: var(--color-text);
+  font-size: 0.8rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  height: 36px;
+}
+.pd-status-select:focus {
+  border-color: var(--color-primary);
+}
+.pd-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pd-search-icon {
+  position: absolute;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+.pd-search-input {
+  padding: 8px 12px 8px 32px;
+  font-size: 0.8rem;
+  border: 1px solid var(--color-glass-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  outline: none;
+  width: 220px;
+  transition: border-color 0.2s;
+}
+.pd-search-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-glow);
+}
+.pd-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--color-glass-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.pd-toolbar-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary-light);
+  background: rgba(var(--rgb-info),0.06);
+}
+
+/* --- Table --- */
+.pd-table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.pd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.pd-table th {
+  text-align: left;
+  padding: 12px 14px;
+  border-bottom: 2px solid var(--color-glass-border);
+  color: var(--color-text-muted);
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.pd-table td {
+  padding: 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  vertical-align: middle;
+}
+.pd-table tbody tr {
+  transition: background 0.15s;
+}
+.pd-table tbody tr:hover {
+  background: rgba(var(--rgb-info),0.04);
+}
+.pd-table-empty {
+  text-align: center;
+  padding: 48px !important;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+/* Table cell styles */
+.mac-cell {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--color-primary-light);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(var(--rgb-info),0.2);
+  transition: all 0.15s;
+  display: inline-block;
+}
+.mac-cell:hover {
+  background: rgba(var(--rgb-info),0.1);
+  border-color: rgba(var(--rgb-info),0.4);
+}
+.status-badge-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-primary-light);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(var(--rgb-info),0.2);
+  transition: all 0.15s;
+  /* T24 (ronde 8): elemen kini <button type="button"> (bukan <a> tanpa href
+     yang mati untuk keyboard) — reset gaya UA tombol agar tampilan sama. */
+  background: transparent;
+  font-family: inherit;
+}
+.action-link:hover {
+  background: rgba(var(--rgb-info),0.1);
+  border-color: rgba(var(--rgb-info),0.4);
+}
+
+/* --- Modal Styles --- */
+.btn-modal-cancel {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-glass-border);
+  transition: all 0.2s;
+}
+.btn-modal-cancel:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.btn-modal-approve {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--color-primary);
+  color: #fff;
+  border: 1px solid var(--color-primary);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  transition: all 0.2s;
+}
+.btn-modal-approve:hover {
+  background: var(--color-primary-light);
+  transform: translateY(-1px);
+}
+.btn-modal-reject {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--color-danger);
+  color: #fff;
+  border: 1px solid var(--color-danger);
+  box-shadow: 0 4px 12px rgba(var(--rgb-danger), 0.3);
+  transition: all 0.2s;
+}
+.btn-modal-reject:hover {
+  background: var(--color-danger-bright);
+  transform: translateY(-1px);
+}
+
+.log-modal-header-info { display:flex;flex-direction:column;gap:12px;margin-bottom:16px; }
+.log-device-row { display:flex;align-items:center;gap:10px;background:var(--color-bg-secondary);border:1px solid var(--color-glass-border);border-radius:var(--radius-sm);font-size:0.8rem;padding:12px 16px; }
+.access-log-timeline { position:relative;padding-left:28px;margin-top:8px; }
+.access-log-timeline::before { content:'';position:absolute;left:10px;top:8px;bottom:8px;width:2px;background:var(--color-glass-border); }
+.log-entry { position:relative;padding:12px 14px 12px 18px;border-left:2px solid transparent;margin-bottom:8px;background:var(--color-bg-secondary);border-radius:var(--radius-sm);border:1px solid var(--color-glass-border);transition:border-color 0.2s; }
+.log-entry:hover { border-color:rgba(var(--rgb-info),0.2); }
+.log-entry::before { content:'';position:absolute;left:-22px;top:16px;width:10px;height:10px;border-radius:50%;border:2px solid;background:var(--color-bg); }
+.log-entry.login::before { background:var(--color-success-light);border-color:var(--color-success-light); }
+.log-entry.heartbeat::before { background:#60a5fa;border-color:#60a5fa; }
+.log-entry.logout::before { background:var(--color-danger-bright);border-color:var(--color-danger-bright); }
+.log-entry .log-time { font-size:0.72rem;color:var(--color-text-muted);font-family:var(--font-mono);margin-top:2px; }
+.log-entry .log-event { font-size:0.85rem;font-weight:700;color:var(--color-text); }
+.log-entry .log-detail { font-size:0.72rem;color:var(--color-text-muted);margin-top:2px; }
+.log-identity { display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding:8px 12px;background:var(--color-bg);border:1px solid var(--color-glass-border);border-radius:6px;font-size:0.72rem; }
+.log-identity span { color:var(--color-text-secondary);white-space:nowrap; }
+.log-identity strong { color:var(--color-text); }
+.no-logs { text-align:center;padding:32px;color:var(--color-text-muted);font-size:0.85rem; }
+.audit-log-timeline { position:relative;padding-left:28px;margin-top:8px; }
+.audit-log-timeline::before { content:'';position:absolute;left:10px;top:8px;bottom:8px;width:2px;background:var(--color-glass-border); }
+.audit-log-entry.enable::before { background:var(--color-success-light);border-color:var(--color-success-light); }
+.audit-log-entry.disable::before { background:var(--color-danger-bright);border-color:var(--color-danger-bright); }
+.audit-log-entry .log-actor { display:flex;align-items:center;gap:6px;margin-top:2px;font-size:0.72rem;color:var(--color-text-muted); }
+.audit-log-entry .log-actor strong { color:var(--color-text); }
+
+/* --- Responsive --- */
+@media (max-width: 1024px) {
+  .pd-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+  .pd-header-card { padding: 16px 18px; }
+  .pd-exam-title { font-size: 1.2rem; }
+  .pd-info-grid { grid-template-columns: 1fr; }
+  .pd-personnel { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .pd-personnel-divider { width: 100%; height: 1px; }
+  .pd-actions-bar { flex-direction: column; align-items: stretch; }
+  .pd-main-action { justify-content: stretch; }
+  .pd-control-btn { width: 100%; justify-content: center; }
+  .pd-stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .pd-stat-card { padding: 14px; gap: 10px; }
+  .pd-stat-icon { width: 38px; height: 38px; }
+  .pd-stat-value { font-size: 1.2rem; }
+  .pd-table-card { padding: 16px; }
+  .pd-table-header { flex-direction: column; align-items: stretch; }
+  .pd-table-toolbar { justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .pd-status-select { flex: 1 1 120px; width: 100%; }
+  .pd-search-wrap { flex: 2 1 160px; width: 100%; }
+  .pd-search-input { width: 100%; }
+  /* Comfortable tap target for approve/reject + let long identity values wrap. */
+  .pd-action-btn { min-height: 40px; }
+  .log-identity span { white-space: normal; overflow-wrap: anywhere; }
+
+  /* Card-based layout for table */
+  .pd-table, .pd-table tbody, .pd-table tr, .pd-table td {
+    display: block !important;
+    width: 100% !important;
+  }
+  .pd-table thead { display: none !important; }
+  .pd-table tbody tr {
+    position: relative !important;
+    margin-bottom: 14px !important;
+    padding: 14px 16px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    border-radius: 12px !important;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--color-glass-border);
+  }
+  .pd-table td {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 5px 0 !important;
+    border: none !important;
+    font-size: 0.8rem !important;
+    text-align: left !important;
+  }
+  .pd-table td.pd-table-empty {
+    justify-content: center !important;
+  }
+  .pd-table td::before {
+    content: attr(data-label) !important;
+    font-weight: 700 !important;
+    font-size: 0.68rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+    color: var(--color-text-muted) !important;
+  }
+  .pd-table td[data-label="ID Perangkat"] {
+    display: block !important;
+    padding: 0 0 6px 0 !important;
+    border-bottom: 1px dashed var(--color-glass-border) !important;
+    margin-bottom: 4px !important;
+  }
+  .pd-table td[data-label="ID Perangkat"]::before { content: none !important; }
+  .pd-table td[data-label="ID Perangkat"] a { font-size: 1rem !important; }
+  
+  .pd-table td[data-label="Aksi"] {
+    justify-content: flex-end !important;
+    border-top: 1px solid var(--color-glass-border) !important;
+    margin-top: 6px !important;
+    padding-top: 10px !important;
+  }
+  .pd-table td[data-label="Aksi"]::before { content: none !important; }
+}
+@media (max-width: 480px) {
+  .pd-stats-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pd-stat-card { padding: 12px 10px; }
+  .pd-stat-value { font-size: 1.1rem; }
+  .pd-stat-label { font-size: 0.65rem; }
+  /* Batch 12 (R76): label Izinkan/Tolak tetap terbaca di ponsel kecil —
+     hemat ruang lewat padding, bukan mengecilkan font. */
+  .pd-action-btn { font-size: 0.75rem; padding: 4px 6px; }
+  .pd-control-btn { font-size: 0.8rem; padding: 10px 16px; }
+}
+/* --- Toggle Switch --- */
+.pd-toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+}
+.pd-toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.pd-toggle-slider {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: var(--color-glass-border);
+  transition: .3s var(--ease-spring);
+  border-radius: 24px;
+}
+.pd-toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s var(--ease-spring);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.pd-toggle-switch input:checked + .pd-toggle-slider {
+  background-color: var(--color-primary);
+}
+.pd-toggle-switch input:checked + .pd-toggle-slider:before {
+  transform: translateX(20px);
+}
+/* Batch 15 (S106): input toggle berukuran 0×0 tak bisa menampung indikator
+   fokus — outline digambar pada slider di sebelahnya agar posisi fokus
+   keyboard pada kontrol keselamatan ini selalu terlihat. */
+#autoAcceptToggle:focus-visible + .pd-toggle-slider {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: 2px;
+}
+/* --- Auto-approve audit hint (who last toggled the flag, when) --- */
+.aa-audit-hint {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  margin-right: 8px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-glass-border);
+}
+.aa-audit-hint::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  flex-shrink: 0;
+}
+@media (max-width: 768px) {
+  .aa-audit-hint { white-space: normal; }
+}
+</style>
+
+<script src="/static/js/admin-core.js?v={{.version}}"></script>
+<script src="/static/js/admin.js?v={{.version}}"></script>
+<!-- T8: logika murni diff antrean izin (serializeApprovals/computeApprovalRowOps).
+     Harus terload SEBELUM script inline di bawah yang memakainya. -->
+<script src="/static/js/pengawas-detail.js?v={{.version}}"></script>
+<script>
+var EXAM_ID = {{.exam.ID}};
+var SUB_PAGE = 1;
+
+function startExamPengawasDetail(examId) {
+    showConfirm(
+        'Mulai pengawasan untuk ujian ini?',
+        'Ini akan memperbarui waktu mulai pengawasan.',
+        'Ya, Mulai',
+        'Batal'
+    ).then(function(confirmed) {
+        if (!confirmed) return;
+        var btn = document.getElementById('btnStartPengawasDetail');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-refresh"/></svg> Memulai...'; }
+        apiFetch('/admin/api/exams/' + examId + '/start', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                if (res.success) {
+                    showToast('Pengawasan berhasil dimulai', 'success');
+                    setTimeout(function() { window.location.reload(); }, 1000);
+                } else {
+                    showToast(res.message || 'Gagal memulai pengawasan', 'error');
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-play"/></svg> Mulai Pengawasan'; }
+                }
+            })
+            .catch(function(err) {
+                console.error('Fetch error:', err);
+                showToast('Gagal menghubungi server. Periksa koneksi.', 'error');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-play"/></svg> Mulai Pengawasan'; }
+            });
+    });
+}
+
+function stopExamPengawasDetail(examId) {
+    showConfirm(
+        'Hentikan pengawasan untuk ujian ini?',
+        'Ini akan mengubah status ujian menjadi nonaktif.',
+        'Ya, Hentikan',
+        'Batal'
+    ).then(function(confirmed) {
+        if (!confirmed) return;
+        var btn = document.getElementById('btnStopPengawasDetail');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-refresh"/></svg> Menghentikan...'; }
+        apiFetch('/admin/api/exams/' + examId + '/stop', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                if (res.success) {
+                    showToast('Pengawasan dihentikan', 'success');
+                    setTimeout(function() { window.location.reload(); }, 1000);
+                } else {
+                    showToast(res.message || 'Gagal menghentikan pengawasan', 'error');
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<svg class="icon-svg" style="width:16px;height:16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Hentikan Pengawasan'; }
+                }
+            })
+            .catch(function(err) {
+                console.error('Fetch error:', err);
+                showToast('Gagal menghubungi server. Periksa koneksi.', 'error');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<svg class="icon-svg" style="width:16px;height:16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Hentikan Pengawasan'; }
+            });
+    });
+}
+
+// Anti-overlap guard: never start a new approvals fetch while one is still in
+// flight — on a slow link the 5s interval (or a manual refresh) would otherwise
+// stack requests and let an older response overwrite a newer one. A call that
+// arrives mid-flight is remembered once and re-run after the current one
+// settles, so user actions (manual refresh, post-decision reload) are never
+// silently dropped.
+var approvalLoading = false;
+var approvalRerunPending = false;
+// T8: guard skip-if-same + state render antrean.
+// approvalLastSerialized = sidik jari payload render SUKSES terakhir; bila poll
+// berikutnya menghasilkan serialisasi identik, tbody sama sekali tidak disentuh
+// (tap Izinkan/Tolak tidak bisa mendarat di DOM yang baru diganti).
+// approvalRowsLive = penanda tbody sedang berisi baris data (bukan notice).
+// approvalActionBusy = aksi Izinkan/Tolak sedang in-flight → render antrean
+// ditunda via approvalRerunPending agar tombol yang sedang ditekan tak hilang.
+var approvalLastSerialized = null;
+var approvalRowsLive = false;
+var approvalRowsCache = [];
+var approvalActionBusy = false;
+// Batch 12 (R75): de-dup toast gagal antrean izin — poll tiap 5 detik tidak
+// boleh men-spam toast yang sama. Pola once seperti notifyAuthExpired: flag
+// di-set saat toast error dikirim, dan di-reset saat poll kembali sukses
+// agar kegagalan BARU setelah masa sehat tetap terlihat.
+var approvalsErrorToasted = false;
+
+// Notice (empty/error/closed) SELALU menimpa baris data — snapshot wajib
+// divalidasi di sini agar poll berikutnya dengan payload sama tidak salah
+// "skip" dan layar mentok di notice.
+// Batch 15 (R112): SEMUA cabang notice wajib mengumumkan lewat live region —
+// announceText dipaksa hadir di setiap pemanggil renderApprovalNotice agar
+// screen reader tidak ditinggal basi saat gerbang tertutup/gagal/catch.
+function renderApprovalNotice(html, announceText) {
+    var tbody = document.getElementById('approvalBody');
+    if (!tbody) return;
+    tbody.innerHTML = html;
+    approvalLastSerialized = null;
+    approvalRowsLive = false;
+    approvalRowsCache = [];
+    if (announceText) {
+        var live = document.getElementById('queueLiveRegion');
+        if (live && live.textContent !== announceText) live.textContent = announceText;
+    }
+}
+
+function loadApprovals() {
+    // S36: polling diam saat tab tersembunyi — hemat fetch & render. Panggilan
+    // eksplisit pengguna (aksi Izinkan/Tolak, kembali ke tab) selalu terjadi
+    // saat tab terlihat, jadi guard ini hanya memadamkan tick interval.
+    if (document.hidden) return;
+    var tbody = document.getElementById('approvalBody');
+    var section = document.getElementById('approvalSection');
+    if (!tbody || !section) return;
+
+    if (approvalLoading) { approvalRerunPending = true; return; }
+    // T8: selama aksi Izinkan/Tolak berjalan, tunda render — jangan ganti DOM
+    // tempat guru baru saja menekan tombol. Panggilan ini diingat dan diulang
+    // setelah aksi selesai (jalur .finally setApproval memicu rerun).
+    if (approvalActionBusy) { approvalRerunPending = true; return; }
+    approvalLoading = true;
+
+    // Paginated: the server returns at most `limit` oldest pending rows; a
+    // spam-flooded queue stays responsive instead of dumping every row here.
+    apiFetch('/admin/api/pengawas/exams/' + EXAM_ID + '/approvals?limit=200', { headers: { 'Accept': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            // R75: poll sukses menghidupkan kembali izin toast kegagalan baru.
+            if (res && res.success) approvalsErrorToasted = false;
+            var note = document.getElementById('approvalOverflowNote');
+            if (note) {
+                if (res && res.success && res.total > (res.data ? res.data.length : 0)) {
+                    note.style.display = 'block';
+                    note.textContent = 'Antrean berisi ' + res.total + ' perangkat. Menampilkan ' + res.data.length + ' terlama — selesaikan yang tampil untuk memuat sisanya.';
+                } else {
+                    note.style.display = 'none';
+                }
+            }
+            // T8: guard skip-if-same dievaluasi SEBELUM penulisan DOM apa pun
+            // pada jalur sukses — bila payload identik dengan render sukses
+            // terakhir, jangan sentuh tbody sama sekali (cukup perbarui stempel).
+            // Aman dipanggil walau res gagal: serializeApprovals menerima
+            // null/undefined, dan snapshot tak pernah live saat tbody berisi
+            // notice (selalu divalidasi oleh renderApprovalNotice).
+            var serialized = PengawasDetailQueue.serializeApprovals(res ? res.data : null);
+            if (approvalRowsLive && approvalLastSerialized === serialized) {
+                markUpdated();
+                return;
+            }
+            if (!res || !res.success) {
+                // An exam that is no longer live (stopped/ended) rejects the
+                // queue read — show a calm "closed" state instead of spamming
+                // an error toast from the 5s poll.
+                var gateMsg = (res && res.message) || '';
+                if (gateMsg.indexOf('Ujian tidak aktif') === 0 || gateMsg.indexOf('Waktu ujian telah berakhir') === 0) {
+                    renderApprovalNotice('<tr><td colspan="5" class="pd-table-empty" style="color:var(--color-text-muted);">Antrean izin ditutup — ujian tidak aktif atau telah berakhir.</td></tr>', 'Antrean izin ditutup — ujian tidak aktif atau telah berakhir.');
+                    return;
+                }
+                // Gagal memuat antrean — jangan samarkan sebagai antrean kosong.
+                // R75: satu toast per episode gagal; tick 5 detik berikutnya
+                // cukup memperbarui notice tanpa menumpuk toast.
+                if (!approvalsErrorToasted) {
+                    approvalsErrorToasted = true;
+                    showToast((res && res.message) || 'Gagal memuat antrean izin perangkat', 'error');
+                }
+                renderApprovalNotice('<tr><td colspan="5" class="pd-table-empty" style="color:var(--color-danger-light);">Gagal memuat antrean. Coba lagi.</td></tr>', 'Gagal memuat antrean izin perangkat.');
+                return;
+            }
+            if (!res.data || res.data.length === 0) {
+                announceQueueCount(0);
+                if (document.getElementById('autoAcceptToggle') && document.getElementById('autoAcceptToggle').checked) {
+                    renderApprovalNotice('<tr><td colspan="5" class="pd-table-empty" style="color:var(--color-text-muted);"><div class="pd-pulse" style="display:inline-block;margin-right:8px;background:var(--color-success-light);"></div> Auto-approve aktif — peserta disetujui otomatis di server...</td></tr>');
+                } else {
+                    renderApprovalNotice('<tr><td colspan="5" class="pd-table-empty" style="color:var(--color-text-muted);">Belum ada antrean peserta saat ini.</td></tr>');
+                }
+                return;
+            }
+            // T8: coba update per-baris (add/update/remove by mac_address) agar
+            // baris yang tidak berubah TIDAK dibuat ulang — fokus/hover/tap
+            // pengguna pada tombol lain tetap utuh. Replace penuh hanya sebagai
+            // fallback bila diff tak terpetakan (atau render pertama).
+            announceQueueCount(res.data.length);
+            var appliedInPlace = false;
+            if (approvalRowsLive && approvalRowsCache.length > 0) {
+                var diff = PengawasDetailQueue.computeApprovalRowOps(approvalRowsCache, res.data);
+                if (diff.type === 'ops' && applyApprovalRowOps(diff.ops)) {
+                    appliedInPlace = true;
+                }
+            }
+            if (!appliedInPlace) {
+                var html = '';
+                for (var i = 0; i < res.data.length; i++) {
+                    html += buildApprovalRowHTML(res.data[i], i);
+                }
+                tbody.innerHTML = html;
+            }
+            approvalLastSerialized = serialized;
+            approvalRowsLive = true;
+            approvalRowsCache = res.data;
+            markUpdated();
+        })
+        .catch(function(err) {
+            console.error('Fetch approvals error:', err);
+            // Without this, a failed first load was indistinguishable from an
+            // empty queue. Only replace placeholder text, never real rows.
+            // R112: cabang catch juga mengumumkan lewat live region.
+            if (tbody && /Belum ada antrean|Memuat/.test(tbody.textContent)) {
+                renderApprovalNotice('<tr><td colspan="5" class="pd-table-empty" style="color:var(--color-danger-light);">Gagal memuat antrean — mencoba lagi otomatis...</td></tr>', 'Gagal memuat antrean izin — mencoba lagi otomatis.');
+            }
+        })
+        .finally(function() {
+            approvalLoading = false;
+            if (approvalRerunPending) {
+                approvalRerunPending = false;
+                loadApprovals();
+            }
+        });
+}
+
+// T8: markup satu baris antrean — dipakai baik oleh render penuh maupun
+// penyisipan per-baris (applyApprovalRowOps). Baris membawa identitas
+// mac_address pada atribut data-mac agar bisa dimutasi in-place.
+function buildApprovalRowHTML(a, i) {
+    var t = a.created_at ? localizeUTC(a.created_at) : '—';
+    var studentInfo = escapeHtml(a.student_name);
+    if (!studentInfo || studentInfo === '—') studentInfo = '<em style="color:var(--color-text-muted);">Tidak diketahui (Anonim)</em>';
+
+    // Revamped table row design matching the premium theme
+    return '<tr data-mac="' + escapeHtml(a.mac_address) + '" style="transition: all 0.2s; border-bottom: 1px solid rgba(var(--rgb-warning),0.1);">' +
+        '<td data-label="No">' + (i + 1) + '</td>' +
+        '<td data-label="ID Perangkat">' +
+            '<div style="display:inline-flex; align-items:center; gap:6px; background:rgba(var(--rgb-info),0.1); color:var(--color-primary-bright); padding:4px 8px; border-radius:6px; font-family:var(--font-mono); font-size:0.75rem; font-weight:600; border:1px solid rgba(var(--rgb-info),0.2);">' +
+                '<svg class="icon-svg" style="width:12px;height:12px;"><use href="#hi-device"/></svg> ' + escapeHtml(a.mac_address) +
+            '</div>' +
+        '</td>' +
+        '<td data-label="Siswa" style="font-weight:600;">' + studentInfo + '</td>' +
+        '<td data-label="Waktu Minta Izin" style="font-size:0.8rem; color:var(--color-text-secondary);">' +
+            '<div style="display:flex; align-items:center; gap:4px;">' +
+                '<svg class="icon-svg" style="width:12px;height:12px;"><use href="#hi-clock"/></svg> ' + t +
+            '</div>' +
+        '</td>' +
+        '<td data-label="Aksi" style="text-align:right;">' +
+            '<div style="display:flex; justify-content:flex-end; gap:8px;">' +
+                '<button class="pd-action-btn pd-action-active" data-action="set-approval" data-mac="' + escapeHtml(a.mac_address) + '" data-status="approved" style="border-radius:8px; font-weight:600;">' +
+                    '<svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-check"/></svg> Izinkan' +
+                '</button>' +
+                '<button class="pd-action-btn pd-action-danger" data-action="set-approval" data-mac="' + escapeHtml(a.mac_address) + '" data-status="rejected" style="border-radius:8px; font-weight:600;">' +
+                    '<svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-x"/></svg> Tolak' +
+                '</button>' +
+            '</div>' +
+        '</td>' +
+    '</tr>';
+}
+
+function findApprovalRowByMac(tbody, mac) {
+    var rows = tbody.querySelectorAll('tr[data-mac]');
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute('data-mac') === mac) return rows[i];
+    }
+    return null;
+}
+
+// T8: terapkan operasi per-baris hasil computeApprovalRowOps tanpa menimpa
+// tbody. Kontrak urutan dari modul: semua remove dulu, lalu update, lalu add
+// terurut index menaik (index mengacu posisi FINAL) — penyisipan cukup jalan
+// sekali dari kiri ke kanan.
+function applyApprovalRowOps(ops) {
+    var tbody = document.getElementById('approvalBody');
+    if (!tbody) return false;
+    var applied = 0;
+    // Tahap 1: hapus baris yang hilang dari payload baru.
+    for (var r = 0; r < ops.length; r++) {
+        var rop = ops[r];
+        if (rop.op !== 'remove') continue;
+        var dead = findApprovalRowByMac(tbody, rop.id);
+        if (dead && dead.parentNode) {
+            dead.parentNode.removeChild(dead);
+            applied++;
+        }
+    }
+    var liveRows = function() { return tbody.querySelectorAll('tr[data-mac]'); };
+    // Tahap 2+3: update in-place lalu sisipkan baris baru by index menaik.
+    for (var u = 0; u < ops.length; u++) {
+        var op = ops[u];
+        if (op.op !== 'update' && op.op !== 'add') continue;
+        var fresh = document.createElement('template');
+        fresh.innerHTML = buildApprovalRowHTML(op.item, op.index);
+        var newRow = fresh.content.firstElementChild;
+        if (!newRow) continue;
+        if (op.op === 'update') {
+            var stale = findApprovalRowByMac(tbody, op.id);
+            if (!stale) continue;
+            tbody.insertBefore(newRow, stale);
+            stale.parentNode.removeChild(stale);
+        } else {
+            var rows = liveRows();
+            if (op.index < rows.length) {
+                tbody.insertBefore(newRow, rows[op.index]);
+            } else {
+                tbody.appendChild(newRow);
+            }
+        }
+        applied++;
+    }
+    return applied > 0;
+}
+
+// R31: nama siswa dari baris antrean (cache polling) untuk feedback toast —
+// pengawas menyetujui perangkat orangnya, bukan MAC-nya.
+function findApprovalStudentName(macAddress) {
+    if (!macAddress) return '';
+    var rows = approvalRowsCache || [];
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i] && rows[i].mac_address === macAddress) return rows[i].student_name || '';
+    }
+    return '';
+}
+
+// Batch 10 (S50): label identitas untuk teks modal konfirmasi —
+// "<nama> (<mac>)" atau "(Anonim) (<mac>)" bila nama tak tersedia di cache.
+function formatApprovalStudentLabel(macAddress) {
+    var name = findApprovalStudentName(macAddress);
+    var macHtml = escapeHtml(macAddress || '');
+    return '<strong>' + (name ? escapeHtml(name) : '(Anonim)') + '</strong> (' + macHtml + ')';
+}
+
+function setApproval(macAddress, status, skipConfirm) {
+    if (!skipConfirm) {
+        showConfirmApprovalModal(macAddress, status);
+        return;
+    }
+    // apiFetch menyuntik X-CSRF-Token otomatis untuk method POST.
+    // T8: selama aksi berjangan, polling antrean ditunda (approvalRerunPending)
+    // agar baris/tombol yang sedang berinteraksi tidak diganti di tengah tap.
+    approvalActionBusy = true;
+    apiFetch('/admin/api/pengawas/exams/' + EXAM_ID + '/approvals/' + encodeURIComponent(macAddress), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ status: status })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+        if (res.success) {
+            // R24: penolakan yang BERHASIL adalah konfirmasi, bukan kegagalan —
+            // toast netral 'info', bukan merah 'error'.
+            // R31: sertakan nama siswa (dari baris antrean) agar jelas
+            // perangkat siapa yang diizinkan/ditolak; tanpa nama → generik.
+            var studentName = findApprovalStudentName(macAddress);
+            var verb = status === 'approved' ? 'diizinkan' : 'ditolak';
+            showToast(
+                studentName ? ('Perangkat ' + studentName + ' ' + verb) : ('Perangkat ' + verb),
+                status === 'approved' ? 'success' : 'info'
+            );
+            loadApprovals();
+            // Also refresh the device monitoring table so a revoke ("Tolak")
+            // from that table gives immediate feedback.
+            loadDetail(undefined, true);
+        } else {
+            showToast(res.message || 'Gagal menyimpan persetujuan', 'error');
+        }
+    })
+    .catch(function(err) {
+        showToast('Terjadi kesalahan jaringan', 'error');
+    })
+    .finally(function() {
+        // T8: state aksi selalu dibersihkan — termasuk saat network error —
+        // lalu jalankan render antrean yang tertunda selama aksi in-flight.
+        approvalActionBusy = false;
+        if (approvalRerunPending) {
+            approvalRerunPending = false;
+            loadApprovals();
+        }
+    });
+}
+
+// Small "data is live" cue: stamp the time of the last successful refresh so
+// a stale screen is distinguishable from a live one.
+function markUpdated() {
+    var el = document.getElementById('lastUpdatedLabel');
+    if (!el) return;
+    // Batch 12 (S69): stempel kesegaran data. Format HH:MM:SS dipertahankan
+    // (detik bermakna untuk polling 5-12 dtk; formatDateTimeID tak punya
+    // detik) — catatan: memakai jam perangkat sampai server menyertakan
+    // timestamp respons; selisih jam perangkat konsisten di seluruh kolom.
+    var d = new Date();
+    var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+    el.textContent = 'Diperbarui ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+// S85 (ronde 8): umumkan perubahan jumlah antrean izin lewat #queueLiveRegion
+// (role="status"). Hanya menulis saat angka BERUBAH — tick polling dengan
+// payload sama tidak boleh menghasilkan pengumuman berulang.
+function announceQueueCount(count) {
+    var el = document.getElementById('queueLiveRegion');
+    if (!el) return;
+    var prev = parseInt(el.dataset.count, 10);
+    if (!isNaN(prev) && prev === count) return;
+    el.dataset.count = String(count);
+    el.textContent = count === 0
+        ? 'Tidak ada permintaan izin yang menunggu.'
+        : count + ' permintaan izin menunggu.';
+}
+
+// Anti-overlap guard for loadDetail: same rationale as loadApprovals — the
+// 12s silent refresh must not pile up requests (and out-of-order responses)
+// when the network is slow. SUB_PAGE is updated before the guard so a
+// pagination click that arrives mid-flight is honored by the re-run, and the
+// table is only cleared for a call that actually starts a fetch (a queued call
+// never wipes the current rows).
+var detailLoading = false;
+var detailRerunPending = false;
+
+// Batch 15 (R116): interval halaman submissions dipusatkan di satu konstanta.
+// Pemakaian memakai guard typeof agar fungsi tetap hidup bila diekstrak
+// terpisah oleh suite perilaku (uiux-batch11) tanpa deklarasi modul ini.
+var SUBS_PER_PAGE = 20;
+// Batch 15 (S94): sidik jari HTML render sukses terakhir — tick polling dengan
+// payload identik tidak menulis ulang tbody (fokus/tap/screen reader selamat).
+// Direset ke null oleh jalur notice/error agar payload berikutnya selalu
+// dirender ulang.
+var subsLastHtml = null;
+// Batch 15 (R113): snapshot submissions pindah dari atribut DOM data-subs
+// (di-JSON.stringify tiap tick) ke variabel modul — showAccessLog membaca
+// dari sini.
+var subsSnapshot = [];
+
+// S94: kunci fokus stabil untuk pemulihan setelah rebuild tbody —
+// identitas elemen aktif diturunkan dari atribut data-action + identitas
+// barisnya (data-mac / data-submission-id), bukan posisi indeks.
+function getSubsFocusKey() {
+    var ae = document.activeElement;
+    var tbody = document.getElementById('submissionBody');
+    if (!ae || !tbody || !tbody.contains(ae)) return null;
+    var el = ae;
+    while (el && el !== tbody && !el.getAttribute('data-action')) el = el.parentNode;
+    if (!el || el === tbody) return null;
+    return {
+        action: el.getAttribute('data-action'),
+        mac: el.getAttribute('data-mac') || '',
+        sid: el.getAttribute('data-submission-id') || ''
+    };
+}
+
+function restoreSubsFocus(key) {
+    if (!key) return;
+    var tbody = document.getElementById('submissionBody');
+    if (!tbody || !tbody.querySelector) return;
+    var sel = '[data-action="' + key.action + '"]';
+    if (key.mac) sel += '[data-mac="' + key.mac + '"]';
+    if (key.sid) sel += '[data-submission-id="' + key.sid + '"]';
+    var target = tbody.querySelector(sel);
+    if (target && target.focus) {
+        target.focus();
+    } else {
+        // S111 (Batch 17): baris hilang dari daftar (dicabut/disetujui/filter
+        // berubah) — jangan biarkan fokus jatuh ke <body> tanpa kabar.
+        tbody.tabIndex = -1;
+        tbody.focus();
+        var live = document.getElementById('queueLiveRegion');
+        if (live) {
+            live.textContent = 'Baris yang difokuskan tidak lagi tersedia di daftar pengumpulan.';
+        }
+    }
+}
+
+function loadDetail(page, silent) {
+    var tbody = document.getElementById('submissionBody');
+    if (!tbody) return;
+    if (page !== undefined) SUB_PAGE = page;
+
+    if (detailLoading) { detailRerunPending = true; return; }
+    detailLoading = true;
+
+    // On silent auto-refresh, keep the current rows in place (no loading flash).
+    if (!silent) tbody.innerHTML = '<tr><td colspan="6" class="pd-table-empty">Memuat data...</td></tr>';
+
+    var search = document.getElementById('pengawasSearch') ? document.getElementById('pengawasSearch').value.trim() : '';
+    var status = document.getElementById('statusFilter') ? document.getElementById('statusFilter').value : '';
+    var url = '/admin/api/pengawas/exams/' + EXAM_ID + '/submissions?page=' + SUB_PAGE + '&per_page=' + ((typeof SUBS_PER_PAGE === 'number') ? SUBS_PER_PAGE : 20);
+    if (search) url += '&search=' + encodeURIComponent(search);
+    if (status) url += '&status=' + encodeURIComponent(status);
+
+    apiFetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            if (!res || !res.success) {
+                // Auto-refresh senyap (12 dtk) cukup menampilkan baris error di
+                // tabel tanpa toast agar tidak spam; aksi user langsung di-toast.
+                if (!silent) showToast((res && res.message) || 'Gagal memuat data pengawasan', 'error');
+                subsLastHtml = null;
+                tbody.innerHTML = '<tr><td colspan="6" class="pd-table-empty" style="color:var(--color-danger-light);">Gagal memuat data</td></tr>';
+                return;
+            }
+            markUpdated();
+            var subs = res.submissions || [];
+            subsSnapshot = subs;
+            if (res.stats) {
+                document.getElementById('statTotal').textContent = res.stats.total;
+                document.getElementById('statActive').textContent = res.stats.active;
+                document.getElementById('statSubmitted').textContent = res.stats.submitted;
+                document.getElementById('statNotStarted').textContent = res.stats.not_started;
+            }
+
+            if (subs.length === 0) {
+                var msg = search ? 'Pencarian tidak ditemukan.' : 'Belum ada perangkat terdaftar.';
+                subsLastHtml = null;
+                tbody.innerHTML = '<tr><td colspan="6" class="pd-table-empty">' + msg + '</td></tr>';
+                renderSubPagination(res);
+                return;
+            }
+
+            // S94: catat fokus SEBELUM memutuskan render — bila payload
+            // identik dengan render sebelumnya, tbody sama sekali tidak
+            // disentuh; bila berubah, fokus dipulihkan setelah rebuild.
+            var focusKey = getSubsFocusKey();
+            var html = '';
+            for (var i = 0; i < subs.length; i++) {
+                var s = subs[i];
+                var sc = s.submitted ? 'submitted' : (s.start_time ? 'in-progress' : 'not-started');
+                var sl = s.submitted ? 'Terkumpul' : (s.start_time ? 'Mengerjakan' : 'Belum Mulai');
+                var startTime = s.start_time ? localizeUTC(s.start_time) : '—';
+                var toneCls = sc === 'submitted' ? 'tone-success' : (sc === 'in-progress' ? 'tone-warning' : 'tone-neutral');
+                var attCount = s.attempt_count > 1 ? '<span style="background:rgba(var(--rgb-danger),0.1);color:var(--color-danger);padding:2px 6px;border-radius:10px;font-size:0.7rem;font-weight:700;" title="' + escapeHtml(String(s.attempt_count)) + 'x Mengerjakan">' + escapeHtml(String(s.attempt_count)) + 'x</span>' : '<span style="color:var(--color-text-muted);">' + (s.attempt_count || 1) + 'x</span>';
+
+                html += '<tr>' +
+                    '<td data-label="No" style="font-weight:600;color:var(--color-text-muted);width:40px;">' + ((SUB_PAGE - 1) * ((typeof SUBS_PER_PAGE === 'number') ? SUBS_PER_PAGE : 20) + i + 1) + '</td>' +
+                    '<td data-label="ID Perangkat"><button type="button" class="mac-cell" style="background:transparent;" data-action="show-access-log" data-submission-id="' + escapeHtml(String(s.id)) + '" title="' + escapeHtml(s.mac_address) + ' (Klik untuk riwayat akses)">' + escapeHtml(s.mac_address) + '</button></td>' +
+                    '<td data-label="Status"><span class="status-badge-sm ' + toneCls + '">' + sl + '</span></td>' +
+                    '<td data-label="Mulai" style="font-size:0.75rem;color:var(--color-text-muted);font-family:var(--font-mono);">' + startTime + '</td>' +
+                    '<td data-label="Upaya" style="text-align:center;">' + attCount + '</td>' +
+                    '<td data-label="Aksi"><div style="display:flex;justify-content:flex-end;gap:8px;align-items:center;">' +
+                        '<button type="button" class="action-link" data-action="show-access-log" data-submission-id="' + escapeHtml(String(s.id)) + '"><svg class="icon-svg" style="width:12px;height:12px;"><use href="#hi-eye"/></svg> Detail</button>' +
+                        (s.submitted ? '' : '<button class="pd-action-btn pd-action-danger" title="Cabut izin perangkat — sesi berikutnya harus minta izin lagi" data-action="set-approval" data-mac="' + escapeHtml(s.mac_address) + '" data-status="rejected" style="border-radius:6px;font-weight:600;font-size:0.7rem;"><svg class="icon-svg" style="width:12px;height:12px;"><use href="#hi-x"/></svg> Tolak</button>') +
+                    '</div></td>' +
+                    '</tr>';
+            }
+            if (subsLastHtml !== null && subsLastHtml === html) {
+                renderSubPagination(res);
+                return;
+            }
+            tbody.innerHTML = html;
+            subsLastHtml = html;
+            restoreSubsFocus(focusKey);
+            renderSubPagination(res);
+        })
+        .catch(function() {
+            subsLastHtml = null;
+            tbody.innerHTML = '<tr><td colspan="6" class="pd-table-empty" style="color:var(--color-danger-light);">Gagal menghubungi server</td></tr>';
+        })
+        .finally(function() {
+            detailLoading = false;
+            if (detailRerunPending) {
+                detailRerunPending = false;
+                // Re-run silently: DOM params (page/filter/search) are read
+                // fresh at call time, and skipping the loading flash avoids
+                // flicker during back-to-back refreshes on a slow link.
+                loadDetail(SUB_PAGE, true);
+            }
+        });
+}
+
+function renderSubPagination(res) {
+    var pagEl = document.getElementById('subPagination');
+    if (!pagEl) return;
+    if (!res.total_pages || res.total_pages <= 1) {
+        pagEl.style.display = 'none';
+        pagEl.__lastHtml = null;
+        return;
+    }
+
+    // Batch 11 (R56): info paginasi memakai rentang offset, bukan jumlah
+    // baris halaman aktif — "Menampilkan 41–57 dari 57 perangkat".
+    // Batch 15 (R116): per_page dari konstanta bersama SUBS_PER_PAGE
+    // (guard typeof untuk ekstraksi terpisah oleh suite perilaku).
+    var perPage = (typeof SUBS_PER_PAGE === 'number') ? SUBS_PER_PAGE : 20;
+    var rangeStart = (res.page - 1) * perPage + 1;
+    var rangeEnd = Math.min(res.page * perPage, res.total);
+
+    var html = '<div class="pagination-wrapper">' +
+        '<span class="pagination-info">Menampilkan ' + rangeStart + '&ndash;' + rangeEnd + ' dari ' + res.total + ' perangkat</span>' +
+        '<div class="pagination-links">';
+
+    if (res.page > 1) {
+        html += '<button type="button" class="pagination-page-num" data-action="load-detail-page" data-page="1" style="cursor:pointer;" aria-label="Halaman pertama">&laquo;</button>';
+        html += '<button type="button" class="pagination-page-num" data-action="load-detail-page" data-page="' + (res.page - 1) + '" style="cursor:pointer;" aria-label="Halaman sebelumnya">&lsaquo;</button>';
+    }
+    var start = Math.max(1, res.page - 2);
+    var end = Math.min(res.total_pages, res.page + 2);
+    for (var p = start; p <= end; p++) {
+        html += '<button type="button" class="pagination-page-num' + (p === res.page ? ' page-current' : '') + '" data-action="load-detail-page" data-page="' + p + '" style="cursor:pointer;"' + (p === res.page ? ' aria-current="page"' : '') + '>' + p + '</button>';
+    }
+    if (res.page < res.total_pages) {
+        html += '<button type="button" class="pagination-page-num" data-action="load-detail-page" data-page="' + (res.page + 1) + '" style="cursor:pointer;" aria-label="Halaman berikutnya">&rsaquo;</button>';
+        html += '<button type="button" class="pagination-page-num" data-action="load-detail-page" data-page="' + res.total_pages + '" style="cursor:pointer;" aria-label="Halaman terakhir">&raquo;</button>';
+    }
+    html += '</div></div>';
+
+    // S110 (Batch 17): fingerprint HTML paginasi — bila identik dengan tick
+    // sebelumnya, lewati penulisan DOM agar fokus keyboard di tombol halaman
+    // tidak lenyap tiap tick senyap 12 dtk (selaras tujuan S94).
+    if (pagEl.__lastHtml === html) {
+        // S110: payload identik - DOM paginasi dibiarkan stabil.
+        return;
+    }
+    pagEl.__lastHtml = html;
+
+    pagEl.innerHTML = html;
+    pagEl.style.display = 'block';
+}
+
+function esc(s) {
+    if (!s) return '—';
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+}
+
+// Batch 11 (R57): definisi lokal localizeUTC dihapus — pemakaian jatuh ke
+// alias admin-core.js formatDateTimeID agar format tanggal seragam
+// ("YYYY-MM-DD HH:MM") di seluruh halaman admin.
+
+function showAccessLog(subId) {
+    var modal = document.getElementById('accessLogModal');
+    var body = document.getElementById('accessLogBody');
+    if (!modal || !body) return;
+
+    // R113: baca snapshot dari variabel modul (dulunya atribut data-subs).
+    var subs = subsSnapshot || [];
+    var subData = null;
+    for (var i = 0; i < subs.length; i++) {
+        if (subs[i].id === subId) { subData = subs[i]; break; }
+    }
+
+    if (!subData) {
+        body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--color-danger-light);">Data tidak ditemukan</div>';
+        modal.style.display = 'flex';
+        return;
+    }
+
+    var logs = subData.access_logs || [];
+    var h = '<div class="log-modal-header-info">' +
+        '<div class="log-device-row">' +
+            '<svg class="icon-svg" style="width:18px;height:18px;color:var(--color-text-muted);"><use href="#hi-device"/></svg> ' +
+            '<span style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--color-text);letter-spacing:0.5px;">' + esc(subData.mac_address) + '</span>' +
+            '<span class="student-status ' + (subData.submitted ? 'submitted' : (subData.start_time ? 'in-progress' : 'not-started')) + '" style="margin-left:auto;">' + (subData.submitted ? 'Terkumpul' : (subData.start_time ? 'Mengerjakan' : 'Belum Mulai')) + '</span>' +
+        '</div>' +
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;padding:10px 14px;background:var(--color-bg);border:1px solid var(--color-glass-border);border-radius:8px;font-size:0.8rem;">' +
+            '<span style="color:var(--color-text-muted);">Siswa: <strong style="color:var(--color-text);">' + esc(subData.student_name || '—') + '</strong></span>' +
+            '<span style="color:var(--color-text-muted);">Kelas: <strong style="color:var(--color-text);">' + esc(subData.student_class || '—') + '</strong></span>' +
+            '<span style="color:var(--color-text-muted);">No. Ujian: <strong style="color:var(--color-text);">' + esc(subData.exam_number || '—') + '</strong></span>' +
+        '</div>' +
+    '</div>';
+
+    var tl = '';
+    
+    if (subData.submission_history && subData.submission_history.length > 0) {
+        tl += '<div style="margin-bottom:24px;">';
+        tl += '<h4 style="font-size:0.85rem;font-weight:700;color:var(--color-text);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.8;">Riwayat Pengumpulan (Upaya)</h4>';
+        tl += '<div style="display:flex;flex-direction:column;gap:12px;">';
+        for (var j = 0; j < subData.submission_history.length; j++) {
+            var sh = subData.submission_history[j];
+            var shSubmitted = sh.answers_json && sh.answers_json !== "" && sh.answers_json !== "null"; 
+            var shStatus = shSubmitted ? "Terkumpul" : (sh.start_time ? "Mengerjakan" : "Belum Mulai");
+            var shTone = shSubmitted ? 'tone-success' : (sh.start_time ? 'tone-warning' : 'tone-neutral');
+            var shScore = (sh.score != null && shSubmitted) ? sh.score : "—";
+            var shStart = sh.start_time ? localizeUTC(sh.start_time) : "—";
+            var shEnd = shSubmitted ? localizeUTC(sh.created_at) : "—";
+            
+            tl += '<div style="padding:14px;background:var(--color-bg);border:1px solid var(--color-glass-border);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.02);">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;border-bottom:1px solid var(--color-glass-border);padding-bottom:10px;">' +
+                    '<span style="font-weight:800;font-size:0.9rem;color:var(--color-primary-light);">Upaya ' + (j + 1) + '</span>' +
+                    '<span class="status-badge-sm ' + shTone + '" style="padding:4px 10px;border-radius:12px;">' + shStatus + '</span>' +
+                '</div>' +
+                '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;font-size:0.75rem;">' +
+                    '<div><span style="color:var(--color-text-muted);display:block;margin-bottom:4px;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.02em;">Mulai Mengerjakan</span><strong style="color:var(--color-text);font-family:var(--font-mono);">' + shStart + '</strong></div>' +
+                    '<div><span style="color:var(--color-text-muted);display:block;margin-bottom:4px;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.02em;">Waktu Terkumpul</span><strong style="color:var(--color-text);font-family:var(--font-mono);">' + shEnd + '</strong></div>' +
+                    '<div><span style="color:var(--color-text-muted);display:block;margin-bottom:4px;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.02em;">Nilai</span><strong style="color:' + (shSubmitted ? 'var(--color-success-light)' : 'var(--color-text)') + ';font-size:0.9rem;">' + shScore + '</strong></div>' +
+                '</div>' +
+            '</div>';
+        }
+        tl += '</div></div>';
+        tl += '<h4 style="font-size:0.85rem;font-weight:700;color:var(--color-text);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.8;">Aktivitas Akses (Log Sistem)</h4>';
+    }
+
+    if (logs.length === 0) {
+        tl += '<div class="no-logs">Belum ada riwayat akses tercatat.</div>';
+    } else {
+        tl += '<div class="access-log-timeline">';
+        var prevIdDataStr = '';
+        for (var i = 0; i < logs.length; i++) {
+            var l = logs[i];
+            var label = l.event === 'login' ? 'Login / Mulai Mengerjakan' : (l.event === 'logout' ? 'Logout / Keluar' : 'Aktif (Heartbeat)');
+            var t = l.created_at ? localizeUTC(l.created_at) : '—';
+            var extra = '';
+            if (l.ip_address) extra += ' IP: ' + esc(l.ip_address);
+            if (l.device_info) extra += ' ' + esc(l.device_info);
+
+            var identity = '';
+            var currentIdData = l.identity_data;
+            if (!currentIdData) {
+                currentIdData = {};
+                if (l.student_name) currentIdData["Nama"] = l.student_name;
+                if (l.exam_number) currentIdData["No. Ujian"] = l.exam_number;
+                if (l.student_class) currentIdData["Kelas"] = l.student_class;
+            }
+
+            var currentIdDataStr = JSON.stringify(currentIdData);
+            if (Object.keys(currentIdData).length > 0 && currentIdDataStr !== prevIdDataStr) {
+                if (i !== 0) {
+                    label = '<span style="color:var(--color-warning-light);">Mengubah Identitas</span> <span style="font-size:0.7rem;opacity:0.7;">(' + label + ')</span>';
+                }
+                var idParts = [];
+                for (var key in currentIdData) {
+                    if (currentIdData[key] && String(currentIdData[key]).trim() !== "") {
+                        idParts.push('<span>' + esc(key) + ': <strong>' + esc(String(currentIdData[key])) + '</strong></span>');
+                    }
+                }
+                if (idParts.length > 0) {
+                    identity = '<div class="log-identity" style="border-color:rgba(var(--rgb-warning),0.27); background:rgba(var(--rgb-warning),0.05);">' + idParts.join('') + '</div>';
+                }
+                prevIdDataStr = currentIdDataStr;
+            }
+
+            tl += '<div class="log-entry ' + l.event + '">' +
+                '<div class="log-event">' + label + '</div>' +
+                '<div class="log-time">' + t + '</div>' +
+                '<div class="log-detail">' + extra + '</div>' +
+                identity +
+            '</div>';
+        }
+        if (subData.submitted) {
+            tl += '<div class="log-entry login" style="border-left-color:var(--color-success-light);">' +
+                '<div class="log-event" style="color:var(--color-success-light);">Selesai / Mengumpulkan</div>' +
+                '<div class="log-time">—</div>' +
+                '<div class="log-detail" style="color:#6ee7b7;">Jawaban telah dikirimkan</div>' +
+            '</div>';
+        }
+        tl += '</div>';
+    }
+
+    body.innerHTML = h + tl;
+    modal.style.display = 'flex';
+}
+
+function closeAccessLogModal(event) {
+    if (event && event.target !== document.getElementById('accessLogModal')) return;
+    var m = document.getElementById('accessLogModal');
+    if (m) m.style.display = 'none';
+}
+
+// Full admin audit trail for this exam: every auto-approve toggle (who, when,
+// action, detail), newest first — the complete history behind the single
+// "last changed" hint next to the toggle.
+function showAuditLog() {
+    var modal = document.getElementById('auditLogModal');
+    var body = document.getElementById('auditLogBody');
+    if (!modal || !body) return;
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--color-text-secondary);">Memuat...</div>';
+    modal.style.display = 'flex';
+
+    apiFetch('/admin/api/pengawas/exams/' + EXAM_ID + '/audit-logs', { headers: { 'Accept': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            if (!res || !res.success) {
+                showToast((res && res.message) || 'Gagal memuat riwayat audit', 'error');
+                body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--color-danger-light);">Gagal memuat riwayat audit. Coba lagi.</div>';
+                return;
+            }
+            var logs = res.logs || [];
+            if (!logs.length) {
+                body.innerHTML = '<div class="no-logs">Belum ada riwayat audit untuk ujian ini.</div>';
+                return;
+            }
+            var h = '<div class="audit-log-timeline">';
+            for (var i = 0; i < logs.length; i++) {
+                var l = logs[i];
+                var isEnable = l.action === 'auto_approve_enable';
+                var isDisable = l.action === 'auto_approve_disable';
+                var isApprove = l.action === 'approval_approved';
+                var isReject = l.action === 'approval_rejected';
+                var isPdfReplaced = l.action === 'exam_pdf_replaced';
+                var isDeleted = l.action === 'exam_deleted';
+                var isCreated = l.action === 'exam_created';
+                var label = isEnable ? 'Auto-approve diaktifkan'
+                         : isDisable ? 'Auto-approve dimatikan'
+                         : isApprove ? 'Perangkat diizinkan'
+                         : isReject ? 'Perangkat ditolak'
+                         : isCreated ? 'Ujian dibuat'
+                         : isPdfReplaced ? 'PDF diganti'
+                         : isDeleted ? 'Ujian dihapus'
+                         : esc(l.detail || l.action);
+                // Creation is positive (green); PDF replacement is a neutral
+                // maintenance action (blue); a deleted exam is destructive
+				// (red, like the disable/reject dots).
+				var cls = isEnable || isApprove || isCreated ? 'enable' : (isDisable || isReject || isDeleted ? 'disable' : 'heartbeat');
+                h += '<div class="log-entry audit-log-entry ' + cls + '">' +
+                        '<div class="log-event">' + label + '</div>' +
+                        '<div class="log-time">' + localizeUTC(l.created_at) + '</div>' +
+                        '<div class="log-actor">oleh <strong>' + esc(l.username || '—') + '</strong>' +
+                            (l.detail && l.detail !== label ? '<span>· ' + esc(l.detail) + '</span>' : '') +
+                        '</div>' +
+                    '</div>';
+            }
+            h += '</div>';
+            body.innerHTML = h;
+        })
+        .catch(function() {
+            body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--color-danger-light);">Gagal memuat riwayat audit. Coba lagi.</div>';
+        });
+}
+
+function closeAuditLogModal(event) {
+    if (event && event.target !== document.getElementById('auditLogModal')) return;
+    var m = document.getElementById('auditLogModal');
+    if (m) m.style.display = 'none';
+}
+
+function showConfirmApprovalModal(macAddress, status) {
+    var modal = document.getElementById('confirmApprovalModal');
+    var title = document.getElementById('confirmApprovalTitle');
+    var text = document.getElementById('confirmApprovalText');
+    var btn = document.getElementById('confirmApprovalBtn');
+    
+    if (status === 'approved') {
+        title.innerHTML = '<svg class="icon-svg"><use href="#hi-check"/></svg> Izinkan Siswa';
+        title.style.color = 'var(--color-primary-light)';
+        // Batch 10 (S50): sebut identitas siswa agar pengawas yakin siapa yang
+        // disetujui saat antrean berisi beberapa perangkat.
+        var studentLabel = formatApprovalStudentLabel(macAddress);
+        text.innerHTML = 'Apakah Anda yakin ingin <strong>mengizinkan</strong> ' + studentLabel + ' untuk memulai ujian?';
+        btn.className = 'btn-modal-approve';
+        btn.textContent = 'Ya, Izinkan';
+    } else {
+        title.innerHTML = '<svg class="icon-svg"><use href="#hi-x"/></svg> Tolak Siswa';
+        title.style.color = 'var(--color-danger)';
+        var studentLabelRej = formatApprovalStudentLabel(macAddress);
+        text.innerHTML = 'Apakah Anda yakin ingin <strong>menolak</strong> ' + studentLabelRej + '? Siswa tidak akan bisa memulai ujian.';
+        btn.className = 'btn-modal-reject';
+        btn.textContent = 'Ya, Tolak';
+    }
+    
+    btn.onclick = function() {
+        closeConfirmApprovalModal();
+        setApproval(macAddress, status, true);
+    };
+    
+    modal.style.display = 'flex';
+}
+
+function closeConfirmApprovalModal(event) {
+    if (event && event.target !== document.getElementById('confirmApprovalModal')) return;
+    var m = document.getElementById('confirmApprovalModal');
+    if (m) m.style.display = 'none';
+}
+
+// ===== Batch 7 (R28): delegasi data-action =====
+// Satu pintu untuk semua aksi halaman ini. Fungsi-fungsi yang hidup di sini
+// (setApproval, loadApprovals, loadDetail, showAccessLog, dst.) dipanggil
+// lewat wrapper tipis — TIDAK dipindah ke file lain agar diff-render polling
+// Batch 3 dan visibility-guard Batch 6 tetap utuh.
+// FOLLOW-UP (pemilik admin-core.js/pengawas-detail.js): pertimbangkan
+// memindahkan register aksi spesifik halaman ke modul definisinya.
+(function() {
+  if (typeof Actions === 'undefined') return;
+
+  // Backdrop modal: hanya klik LANGSUNG pada overlay yang menutup — setara
+  // pola "if(event.target===this)closeXxx()" lama; klik tombol di dalam kartu
+  // (X / Batal) menutup tanpa syarat karena el bukan overlay-nya.
+  Actions.register('close-confirm-approval-modal', function(el, ev) {
+    var overlay = document.getElementById('confirmApprovalModal');
+    if (el && overlay && el === overlay && ev && ev.target !== overlay) return;
+    if (typeof closeConfirmApprovalModal === 'function') closeConfirmApprovalModal();
+  });
+  Actions.register('close-access-log-modal', function(el, ev) {
+    var overlay = document.getElementById('accessLogModal');
+    if (el && overlay && el === overlay && ev && ev.target !== overlay) return;
+    if (typeof closeAccessLogModal === 'function') closeAccessLogModal();
+  });
+  Actions.register('close-audit-log-modal', function(el, ev) {
+    var overlay = document.getElementById('auditLogModal');
+    if (el && overlay && el === overlay && ev && ev.target !== overlay) return;
+    if (typeof closeAuditLogModal === 'function') closeAuditLogModal();
+  });
+
+  Actions.register('regenerate-active-token', function() { if (typeof regenerateActiveToken === 'function') regenerateActiveToken(); });
+  // S41: copyToken lokal (tanpa catch/fallback) dihapus — salin via
+  // copyCode() guarded milik admin-core.js (fallback execCommand + toast
+  // gagal untuk skenario S29 LAN HTTP/izin clipboard ditolak).
+  Actions.register('copy-active-token', function() {
+    var t = document.getElementById('pdActiveToken');
+    if (!t) return;
+    var tok = (t.textContent || '').trim();
+    if (!tok || tok === '—') return;
+    if (typeof copyCode === 'function') copyCode(tok);
+  });
+  Actions.register('start-pengawas-detail', function(el) { if (typeof startExamPengawasDetail === 'function') startExamPengawasDetail(el.getAttribute('data-exam-id')); });
+  Actions.register('stop-pengawas-detail', function(el) { if (typeof stopExamPengawasDetail === 'function') stopExamPengawasDetail(el.getAttribute('data-exam-id')); });
+  Actions.register('show-audit-log', function() { if (typeof showAuditLog === 'function') showAuditLog(); });
+  Actions.register('load-approvals', function() { if (typeof loadApprovals === 'function') loadApprovals(); });
+  Actions.register('load-detail', function() { if (typeof loadDetail === 'function') loadDetail(); });
+
+  // Izinkan/Tolak antrean izin: mac & status lewat atribut data-* (bukan
+  // interpolasi JS ke onclick) → modal konfirmasi dulu, POST setelah Ya.
+  Actions.register('set-approval', function(el) {
+    var mac = el.getAttribute('data-mac');
+    var status = el.getAttribute('data-status');
+    if (!mac || !status) return;
+    if (typeof showConfirmApprovalModal === 'function') showConfirmApprovalModal(mac, status);
+  });
+  Actions.register('show-access-log', function(el) {
+    var id = parseInt(el.getAttribute('data-submission-id'), 10);
+    if (isNaN(id)) return;
+    if (typeof showAccessLog === 'function') showAccessLog(id);
+  });
+  Actions.register('load-detail-page', function(el) {
+    var p = parseInt(el.getAttribute('data-page'), 10);
+    if (isNaN(p)) return;
+    if (typeof loadDetail === 'function') loadDetail(p);
+  });
+})();
+// ===== end Batch 7 (R28) =====
+
+// ===== Dynamic Token Management =====
+var TOKEN_MODE = '{{.token_mode}}';
+var TOKEN_INTERVAL_MINUTES = {{if .exam.TokenResetInterval}}{{.exam.TokenResetInterval}}{{else}}5{{end}};
+var TOKEN_LAST_RESET = '{{if .exam.TokenLastResetAt}}{{.exam.TokenLastResetAt.Format "2006-01-02T15:04:05Z07:00"}}{{end}}';
+var TOKEN_REFRESH_TIMER = null;
+
+// S41: definisi lokal copyToken dihapus — versi lama menimpa wrapper
+// hardening S29 (admin.js copyToken/copyCode) dan menyalin tanpa
+// catch/fallback. Semua pemanggil menuju copyCode() guarded (admin-core.js).
+
+function regenerateActiveToken() {
+    showConfirm(
+        'Generate token baru sekarang?',
+        'Token lama tidak akan bisa digunakan lagi oleh siswa.',
+        'Ya, Generate',
+        'Batal'
+    ).then(function(confirmed) {
+        if (!confirmed) return;
+        apiFetch('/admin/api/exams/' + EXAM_ID + '/regenerate-token', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                if (res.success) {
+                    updateTokenDisplay(res.token);
+                    TOKEN_LAST_RESET = new Date().toISOString();
+                    showToast('Token baru: ' + res.token, 'success');
+                } else {
+                    showToast(res.message || 'Gagal regenerate token', 'error');
+                }
+            })
+            .catch(function() { showToast('Koneksi gagal', 'error'); });
+    });
+}
+
+function updateTokenDisplay(newToken) {
+    var el = document.getElementById('pdActiveToken');
+    if (!el) return;
+    el.textContent = newToken;
+    el.classList.add('pd-token-flash');
+    setTimeout(function() { el.classList.remove('pd-token-flash'); }, 2000);
+}
+
+// Guard anti-tumpang-tindih: refreshActiveToken dipanggil tiap 30s DAN tiap
+// detik oleh updateCountdown saat countdown rotasi sudah habis — pada jaringan
+// lambat panggilan bisa menumpuk, dan memakai endpoint yang sama dengan
+// loadDetail (submissions) sehingga berisiko tumpang-tindih. Refresh ini murni
+// latar belakang tanpa aksi pengguna yang harus dipertahankan, jadi skip-saja
+// sudah cukup: tick berikutnya (30s, atau 1s dari countdown yang masih expired)
+// yang mengambil alih.
+var activeTokenLoading = false;
+
+function refreshActiveToken() {
+    if (activeTokenLoading) return;
+    activeTokenLoading = true;
+    apiFetch('/admin/api/pengawas/exams/' + EXAM_ID + '/submissions?page=1&per_page=1', {
+        headers: { 'Accept': 'application/json' }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+        if (res && res.exam_active_token) {
+            var el = document.getElementById('pdActiveToken');
+            if (el && el.textContent !== res.exam_active_token) {
+                updateTokenDisplay(res.exam_active_token);
+                TOKEN_LAST_RESET = new Date().toISOString();
+            }
+        }
+    })
+    .catch(function() {})
+    .finally(function() { activeTokenLoading = false; });
+}
+
+function updateCountdown() {
+    var el = document.getElementById('pdTokenCountdown');
+    if (!el) return;
+    if (TOKEN_MODE === 'static') {
+        el.innerHTML = '';
+        return;
+    }
+    // Batch 12 (R74): guard ganda "!TOKEN_LAST_RESET || !TOKEN_INTERVAL_MINUTES"
+    // membuat pesan empty-state di bawah menjadi cabang mati — dipisah:
+    // interval mati → keluar diam; token belum pernah di-reset → pesan tampil.
+    if (!TOKEN_INTERVAL_MINUTES) return;
+    try {
+        if (!TOKEN_LAST_RESET || TOKEN_LAST_RESET === '') {
+            el.innerHTML = '<span style="color:var(--color-text-muted);font-size:0.75rem;">Rotasi otomatis belum aktif</span>';
+            return;
+        }
+        var lastReset = new Date(TOKEN_LAST_RESET);
+        if (isNaN(lastReset.getTime())) { el.innerHTML = ''; return; }
+        var nextReset = new Date(lastReset.getTime() + TOKEN_INTERVAL_MINUTES * 60 * 1000);
+        var now = new Date();
+        var remainMs = nextReset.getTime() - now.getTime();
+
+        if (remainMs <= 0) {
+            el.innerHTML = '<span style="color:var(--color-accent-emerald);">Token akan segera diperbarui...</span>';
+            refreshActiveToken();
+            return;
+        }
+
+        var remainSec = Math.floor(remainMs / 1000);
+        var m = Math.floor(remainSec / 60);
+        var s = remainSec % 60;
+        var totalSec = TOKEN_INTERVAL_MINUTES * 60;
+        var pct = Math.max(0, Math.min(100, (remainSec / totalSec) * 100));
+
+        el.innerHTML = 'Berubah dalam <strong style="color:var(--color-text);">' + m + ':' + (s < 10 ? '0' : '') + s + '</strong>' +
+            ' <div class="pd-countdown-bar"><div class="pd-countdown-fill" style="width:' + pct + '%;"></div></div>';
+    } catch(e) {
+        el.innerHTML = '';
+    }
+}
+
+// Audit hint for the auto-approve toggle: who last flipped the flag and when
+// (server returns last_changed_by / last_changed_at / last_action from the
+// admin_audit_logs trail). Hidden when the exam has no trail yet.
+function updateAAHint(res) {
+    var hint = document.getElementById('aaLastChanged');
+    if (!hint) return;
+    if (!res || !res.success || !res.last_changed_by) {
+        hint.style.display = 'none';
+        return;
+    }
+    var verb = res.last_action === 'auto_approve_enable' ? 'Diaktifkan'
+             : res.last_action === 'auto_approve_disable' ? 'Dimatikan'
+             : res.last_action === 'approval_approved' ? 'Diizinkan'
+             : res.last_action === 'approval_rejected' ? 'Ditolak'
+             : res.last_action === 'exam_created' ? 'Dibuat'
+             : res.last_action === 'exam_pdf_replaced' ? 'PDF diganti'
+             : res.last_action === 'exam_deleted' ? 'Ujian dihapus'
+             : 'Diubah';
+    var t = res.last_changed_at ? localizeUTC(res.last_changed_at) : '';
+    hint.textContent = verb + ' oleh ' + res.last_changed_by + (t ? ' · ' + t : '');
+    hint.style.display = 'inline-flex';
+}
+
+// Server is the source of truth for auto-approve (exam.auto_approve), so it
+// keeps working even when this page is closed; localStorage only mirrors it
+// as an offline fallback. Also refreshes the "who/when" audit hint.
+function loadAAStatus() {
+    var aaToggle = document.getElementById('autoAcceptToggle');
+    if (!aaToggle) return;
+    var aaKey = 'examvan_auto_accept_' + EXAM_ID;
+    apiFetch('/admin/api/pengawas/exams/' + EXAM_ID + '/auto-approve', { headers: { 'Accept': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            if (res && res.success) {
+                aaToggle.checked = !!res.enabled;
+            } else {
+                aaToggle.checked = localStorage.getItem(aaKey) === 'true';
+            }
+            localStorage.setItem(aaKey, aaToggle.checked ? 'true' : 'false');
+            updateAAHint(res);
+            loadApprovals(); // refresh the queue empty-state message
+        })
+        .catch(function() {
+            aaToggle.checked = localStorage.getItem(aaKey) === 'true';
+            // Queue still loads if the status fetch fails.
+            loadApprovals();
+        });
+}
+
+loadAAStatus();
+
+(function() {
+    var aaToggle = document.getElementById('autoAcceptToggle');
+    if (!aaToggle) return;
+    var aaKey = 'examvan_auto_accept_' + EXAM_ID;
+
+    aaToggle.addEventListener('change', function() {
+            var enabled = this.checked;
+            // Batch 10 (S52): meng-AKTIFKAN auto-approve mengubah perilaku
+            // SERVER untuk semua siswa berikutnya (bertahan walau halaman
+            // ditutup) — wajib konfirmasi. Mematikan boleh langsung.
+            if (enabled && typeof showConfirm === 'function') {
+                showConfirm(
+                    'Aktifkan terima otomatis? Semua perangkat berikutnya akan ' +
+                    'disetujui tanpa pemeriksaan hingga dimatikan.',
+                    '', 'Ya, Aktifkan', 'Batal'
+                ).then(function(ok) {
+                    if (ok) { setAutoApprove(enabled); }
+                    else { aaToggle.checked = false; }
+                });
+                return;
+            }
+            setAutoApprove(enabled);
+        });
+
+        function setAutoApprove(enabled) {
+            apiFetch('/admin/api/pengawas/exams/' + EXAM_ID + '/auto-approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: enabled })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                if (res && res.success) {
+                    localStorage.setItem(aaKey, res.enabled ? 'true' : 'false');
+                    // Refetch status + audit hint so the page shows who changed
+                    // the flag (and when) right away.
+                    loadAAStatus();
+                    showToast(res.enabled ? 'Auto-approve aktif — berlaku di server walau halaman ditutup' : 'Auto-approve nonaktif', 'success');
+                } else {
+                    aaToggle.checked = !enabled;
+                    localStorage.setItem(aaKey, aaToggle.checked ? 'true' : 'false');
+                    showToast((res && res.message) || 'Gagal menyimpan pengaturan auto-approve', 'error');
+                }
+            })
+            .catch(function() {
+                aaToggle.checked = !enabled;
+                localStorage.setItem(aaKey, aaToggle.checked ? 'true' : 'false');
+                showToast('Gagal menghubungi server', 'error');
+            });
+        }
+
+    // Batch 10 (S48): pencarian peserta live-search (debounce dari core) —
+    // bukan lagi Enter-only; select filter ikut memicu muat ulang via change.
+    if (typeof initLiveSearch === 'function') {
+        // Batch 11 (S60): reset ke halaman 1 — pencarian dari page > 1 tanpa
+        // reset menghasilkan tabel kosong palsu.
+        initLiveSearch(document.getElementById('pengawasSearch'), function() { loadDetail(1); });
+    }
+    var statusFilterEl = document.getElementById('statusFilter');
+    if (statusFilterEl) statusFilterEl.addEventListener('change', function() { loadDetail(1); });
+
+    loadDetail();
+    // Queue load is triggered by loadAAStatus() above (and by its fetch's
+    // catch path), so no duplicate fetch here.
+    // S36: polling pengawasan hanya berjalan saat tab terlihat (pola
+    // refreshDashboardStats/startAutoRefresh di admin-core.js). Handle semua
+    // interval disimpan di pollTimers; visibilitychange→hidden meng-clear
+    // semuanya, visible menjadwalkan ulang. startPengawasPolling selalu stop
+    // dulu sehingga tidak pernah ada double-scheduling.
+    var pollTimers = [];
+    function stopPengawasPolling() {
+        while (pollTimers.length) clearInterval(pollTimers.pop());
+    }
+    function startPengawasPolling() {
+        stopPengawasPolling();
+        pollTimers.push(setInterval(loadApprovals, 5000));
+        // Keep the "live" monitoring stats + student table actually live (silent
+        // refresh preserves the current page/filter and avoids a loading flash).
+        pollTimers.push(setInterval(function() { if (!document.hidden) loadDetail(SUB_PAGE, true); }, 12000));
+        pollTimers.push(setInterval(function() { if (!document.hidden) refreshActiveToken(); }, 30000));
+        pollTimers.push(setInterval(function() { if (!document.hidden) updateCountdown(); }, 1000));
+    }
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            stopPengawasPolling();
+        } else {
+            loadApprovals();
+            loadDetail(SUB_PAGE, true);
+            refreshActiveToken();
+            updateCountdown();
+            startPengawasPolling();
+        }
+    });
+    startPengawasPolling();
+})();
+</script>
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none;" aria-hidden="true">
+<symbol id="hi-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></symbol>
+<symbol id="hi-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+<symbol id="hi-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18 18 6M6 6l12 12"/></symbol>
+<symbol id="hi-device" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></symbol>
+<symbol id="hi-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></symbol>
+<symbol id="hi-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></symbol>
+<symbol id="hi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4.5 12.75 6 6 9-13.5"/></symbol>
+<symbol id="hi-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15.75 19.5 8.25 12l7.5-7.5"/></symbol>
+<symbol id="hi-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/></symbol>
+<symbol id="hi-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"/></symbol>
+<symbol id="hi-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"/></symbol>
+</svg>
+
+</body>
+</html>

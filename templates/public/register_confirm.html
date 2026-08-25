@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ <meta name="robots" content="noindex, nofollow">
+ <!-- R147: paritas reset_password - halaman OTP ber-URL ?username= tidak
+      boleh terindeks mesin pencari. -->
+
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <!-- R130: warna brand address-bar mobile; nilai = --color-bg theme.css (paritas shared.html:121/S34). -->
+ <meta name="theme-color" content="#09090e">
+ {{ template "public_fonts" . }}
+ <title>EXAMVAN - Verifikasi Email</title>
+ <link rel="stylesheet" href="/static/css/theme.css?v={{.version}}">
+ <link rel="stylesheet" href="/static/css/tailwind/output.css?v={{.version}}">
+ <link rel="icon" type="image/png" href="/static/favicon.png">
+ <!-- R79: semua link stylesheet eksternal ditaruh sebelum blok style inline pertama (urutan cascade jelas). -->
+ <link rel="stylesheet" href="/static/css/public-mobile.css?v={{.version}}">
+ <link rel="stylesheet" href="/static/css/public-desktop.css?v={{.version}}">
+ <style>
+  /* Step progress indicator */
+  .reg-steps {
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   gap: 0;
+   margin-bottom: 28px;
+  }
+  .reg-step {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+  }
+  .reg-step-num {
+   width: 28px;
+   height: 28px;
+   border-radius: 50%;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   font-size: 12px;
+   font-weight: 700;
+   border: 2px solid rgba(var(--rgb-white),0.1);
+   color: var(--color-text-muted);
+   background: transparent;
+   transition: all 0.3s;
+   flex-shrink: 0;
+  }
+  .reg-step.done .reg-step-num {
+   border-color: rgba(var(--rgb-success),0.4);
+   background: rgba(var(--rgb-success),0.12);
+   color: var(--color-success-light);
+  }
+  .reg-step.active .reg-step-num {
+   border-color: rgba(var(--rgb-info),0.5);
+   background: rgba(var(--rgb-info),0.15);
+   color: var(--color-primary-light);
+   box-shadow: 0 0 12px rgba(var(--rgb-info),0.2);
+  }
+  .reg-step-label {
+   font-size: 12px;
+   color: var(--color-text-muted);
+   font-weight: 500;
+   transition: color 0.3s;
+  }
+  .reg-step.active .reg-step-label,
+  .reg-step.done .reg-step-label {
+   color: var(--color-text);
+  }
+  .reg-step-line {
+   width: 40px;
+   height: 2px;
+   background: rgba(var(--rgb-white),0.06);
+   margin: 0 8px;
+   border-radius: 2px;
+   flex-shrink: 0;
+  }
+  .reg-step-line.done {
+   background: rgba(var(--rgb-success),0.3);
+  }
+
+  /* OTP input styling */
+  .otp-input-wrapper {
+   display: flex;
+   flex-wrap: wrap; /* jangan sampai kotak digit terpotong di layar sempit */
+   justify-content: center;
+   gap: 8px;
+   margin: 20px 0;
+  }
+   .otp-input-wrapper .otp-digit {
+    width: 46px;
+    flex: 0 0 46px;
+    height: 54px;
+   text-align: center;
+   font-size: 22px;
+   font-weight: 700;
+   letter-spacing: 0;
+   border-radius: 12px;
+   background: rgba(var(--rgb-white),0.04);
+   border: 1.5px solid rgba(var(--rgb-white),0.08);
+   color: var(--color-text);
+   outline: none;
+   transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
+   caret-color: var(--color-primary-light);
+  }
+  .otp-digit:focus {
+   border-color: rgba(var(--rgb-info),0.5);
+   box-shadow: 0 0 0 3px rgba(var(--rgb-info),0.12);
+   background: rgba(var(--rgb-info),0.06);
+  }
+   .otp-input-wrapper .otp-digit.filled {
+    border-color: rgba(var(--rgb-info),0.35);
+    background: rgba(var(--rgb-info),0.08);
+   }
+
+  /* Email badge */
+  .email-badge {
+   display: inline-flex;
+   align-items: center;
+   gap: 6px;
+   padding: 8px 16px;
+   border-radius: 10px;
+   background: rgba(var(--rgb-info),0.08);
+   border: 1px solid rgba(var(--rgb-info),0.15);
+   font-size: 14px;
+   font-weight: 600;
+   color: var(--color-primary-light);
+   letter-spacing: 0.3px;
+  }
+  .email-badge svg {
+   width: 16px;
+   height: 16px;
+   color: var(--color-primary-bright);
+  }
+
+  /* Info card */
+  .otp-info-card {
+   background: rgba(var(--rgb-white),0.02);
+   border: 1px solid rgba(var(--rgb-white),0.05);
+   border-radius: 14px;
+   padding: 20px;
+   text-align: center;
+   margin-bottom: 24px;
+   animation: cardFadeIn 0.5s cubic-bezier(.16,1,.3,1) 0.15s both;
+  }
+  @keyframes cardFadeIn {
+   from { opacity: 0; transform: translateY(12px); }
+   to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Resend timer */
+  .resend-hint {
+   text-align: center;
+   font-size: 12px;
+   color: var(--color-text-muted);
+   margin-top: 12px;
+  }
+  .resend-hint a {
+   color: var(--color-primary-bright);
+   text-decoration: none;
+   font-weight: 600;
+   cursor: pointer;
+  }
+  .resend-hint a:hover {
+   color: var(--color-primary-light);
+  }
+
+  /* Responsive */
+  @media (max-width: 480px) {
+   .reg-step-label { display: none; }
+   .reg-step-line { width: 24px; }
+   .otp-input-wrapper .otp-digit { width: 40px; height: 48px; font-size: 20px; flex-basis: 40px; }
+   /* Kartu ber-padding 32px membuat 6 kotak OTP (280px) tidak muat di layar
+      ≤360px dan terpotong oleh overflow:hidden — rapatkan di layar kecil. */
+   .login-card { padding: 24px 16px; }
+   .otp-input-wrapper { gap: 6px; }
+  }
+ </style>
+</head>
+<body class="login-page">
+ {{ template "public_auth_nav" . }}
+ {{/* Batch 6 (tugas 6): satu-satunya sisa skip-link inline kini menyatu —
+      partial public_skip_link dipakai seperti halaman publik lain; base
+      styling cukup dari theme.css (.skip-link). */}}
+ {{ template "public_skip_link" . }}
+ <div class="login-bg">
+  <div class="login-orb login-orb-1"></div>
+  <div class="login-orb login-orb-2"></div>
+ </div>
+ <div class="login-container" id="main-content">
+  <div class="login-card">
+
+   <!-- Header -->
+   <div class="login-header">
+    <div class="login-logo">E</div>
+    <h1>EXAMVAN</h1>
+    <p class="login-subtitle">Verifikasi Alamat Email Anda</p>
+   </div>
+
+   <!-- Step Indicator -->
+   <div class="reg-steps">
+    <div class="reg-step done">
+     <div class="reg-step-num">
+      <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m4.5 12.75 6 6 9-13.5"/></svg>
+     </div>
+     <span class="reg-step-label">Isi Data</span>
+    </div>
+    <div class="reg-step-line done"></div>
+    <div class="reg-step active">
+     <div class="reg-step-num">2</div>
+     <span class="reg-step-label">Verifikasi</span>
+    </div>
+   </div>
+
+   <!-- Error Messages -->
+   {{if .error}}
+   <div class="flash-messages">
+    <div class="flash-msg flash-error" role="alert">
+     <svg style="width:16px;height:16px;flex-shrink:0;margin-right:6px;vertical-align:middle;display:inline;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+     {{.error}}
+    </div>
+   </div>
+   {{end}}
+
+   <!-- OTP Info Card -->
+   <div class="otp-info-card">
+    <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:12px;line-height:1.6;">
+     Kode OTP 6 digit telah dikirim ke:
+    </p>
+    <div class="email-badge">
+     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75"/></svg>
+     {{.masked_email}}
+    </div>
+    <p style="font-size:11.5px;color:var(--color-text-muted);margin-top:12px;line-height:1.5;font-style:italic;">
+     Kode berlaku 15 menit. Periksa juga folder Spam / Promosi jika tidak ditemukan di Inbox.
+    </p>
+   </div>
+
+   <!-- OTP Form -->
+   <form method="POST" action="/register/confirm?username={{.username}}" class="login-form" id="otpForm">
+    <!-- Hidden real input. T30 (ronde 10): autocomplete="one-time-code"
+         DIPINDAH ke kotak digit pertama yang visible — mesin autofill OTP
+         OS melewatkan input hidden/tak fokusable sehingga atribut di sini
+         mematikan autofill total (regresi S98). Input ini tetap penerima
+         gabungan dari syncHidden(). Keputusan T30: autocomplete="off"
+         level form MELEPAS/dihapus — form hanya berisi OTP + field
+         tersembunyi, tak ada kredensial lain yang berisiko ter-autofill
+         salah, sementara "off" level form berpotensi menekan saran OTP OS. -->
+    <input type="hidden" id="otp_code" name="otp_code" value="">
+    <input type="hidden" name="csrf_token" value="{{.csrf_token}}">
+    <input type="hidden" name="device_fingerprint" value="">
+
+    <div style="text-align:center;">
+      <label for="otp-digit-1" style="display:block;margin-bottom:6px;font-weight:500;font-size:13px;color:var(--color-text);">Masukkan Kode OTP</label>
+     <div class="otp-input-wrapper" id="otpInputWrapper">
+      <!-- T30: satu-satunya pembawa one-time-code (visible + fokus awal);
+           maxlength="1" DIHAPUS agar isian utuh OS tidak terpotong sebelum
+           distribusi multi-karakter (handler input) bekerja. -->
+      <input type="text" class="otp-digit" id="otp-digit-1" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]" data-idx="0" aria-label="Digit 1 kode OTP" autofocus>
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="1" aria-label="Digit 2 kode OTP">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="2" aria-label="Digit 3 kode OTP">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="3" aria-label="Digit 4 kode OTP">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="4" aria-label="Digit 5 kode OTP">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" data-idx="5" aria-label="Digit 6 kode OTP">
+     </div>
+    </div>
+
+    <button type="submit" class="btn-login" id="verifyBtn" style="margin-top:16px;" disabled>
+     <svg style="width:18px;height:18px;vertical-align:middle;margin-right:6px;display:inline;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+     Verifikasi Akun
+    </button>
+   </form>
+
+   <div class="resend-hint" id="resendHint">
+    <span id="resendMsg" role="status" aria-live="polite" style="display:block;margin-bottom:4px;"></span>
+    <span id="resendTimer">Tidak menerima kode?</span>
+    <a href="#" id="resendLink" role="button">Kirim ulang kode</a>
+   </div>
+
+   <hr class="divider-subtle" style="margin:20px 0 14px;">
+   <div class="login-link-row">
+    <span class="login-link-text"><a href="/register">← Kembali ke Pendaftaran</a></span>
+   </div>
+
+  </div>
+ </div>
+
+ <script>
+ var USERNAME = "{{.username}}";
+ document.addEventListener('DOMContentLoaded', function() {
+  var digits = document.querySelectorAll('.otp-digit');
+  var hiddenInput = document.getElementById('otp_code');
+  var verifyBtn = document.getElementById('verifyBtn');
+  var form = document.getElementById('otpForm');
+
+  function syncHidden() {
+   var code = '';
+   digits.forEach(function(d) { code += d.value; });
+   hiddenInput.value = code;
+   verifyBtn.disabled = code.length < 6;
+   // Visual feedback
+   digits.forEach(function(d) {
+    if (d.value) d.classList.add('filled');
+    else d.classList.remove('filled');
+   });
+  }
+
+   digits.forEach(function(input, idx) {
+    input.addEventListener('input', function(e) {
+     // Only allow digits
+     this.value = String(this.value || '').replace(/[^0-9]/g, '');
+     // S98: autofill OTP OS (dan paste tanpa event paste, mis. drag) datang
+     // sebagai satu string multi-karakter di satu kotak — distribusikan
+     // antar kotak agar kode utuh tidak terpotong jadi 1 digit.
+     if (this.value.length > 1) {
+      var chars = this.value.slice(0, digits.length - idx).split('');
+      for (var k = 0; k < chars.length; k++) digits[idx + k].value = chars[k];
+      var nextIdx = Math.min(idx + chars.length, digits.length - 1);
+      digits[nextIdx].focus();
+     } else if (this.value && idx < digits.length - 1) {
+      digits[idx + 1].focus();
+     }
+     syncHidden();
+    });
+
+   input.addEventListener('keydown', function(e) {
+    if (e.key === 'Backspace' && !this.value && idx > 0) {
+     digits[idx - 1].focus();
+     digits[idx - 1].value = '';
+     syncHidden();
+    }
+    if (e.key === 'ArrowLeft' && idx > 0) {
+     e.preventDefault();
+     digits[idx - 1].focus();
+    }
+    if (e.key === 'ArrowRight' && idx < digits.length - 1) {
+     e.preventDefault();
+     digits[idx + 1].focus();
+    }
+   });
+
+   input.addEventListener('focus', function() {
+    this.select();
+   });
+
+   // Handle paste
+   input.addEventListener('paste', function(e) {
+    e.preventDefault();
+    var paste = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g, '');
+    for (var i = 0; i < Math.min(paste.length, 6); i++) {
+     digits[i].value = paste[i];
+    }
+    var focusIdx = Math.min(paste.length, 5);
+    digits[focusIdx].focus();
+    syncHidden();
+   });
+  });
+
+  // Submit loading
+  if (form && verifyBtn) {
+   form.addEventListener('submit', function(e) {
+    if (hiddenInput.value.length < 6) {
+     e.preventDefault();
+     return;
+    }
+    verifyBtn.classList.add('loading');
+    verifyBtn.disabled = true;
+    verifyBtn.innerHTML = '<span style="vertical-align:middle;">Memverifikasi...</span>';
+   });
+  }
+
+  // ---- Resend OTP ----
+  var resendLink = document.getElementById('resendLink');
+  var resendTimer = document.getElementById('resendTimer');
+  var resendMsg = document.getElementById('resendMsg');
+  var cooldownIv = null;
+
+  // S59: wiring tanpa onclick inline — listener dipasang setelah handler
+  // didefinisikan di bawah (window.resendOtp).
+
+  // Cooldown persists across re-renders (a failed verify POST reloads this
+  // page); otherwise every wrong code restarted the full 60s wait even
+  // though no new code was sent.
+  var CD_KEY = 'otpResendCooldownEnd:' + USERNAME;
+
+  function startCooldown(seconds, fromStorage) {
+   if (!resendLink || !resendTimer) return;
+   if (!fromStorage) {
+    try { sessionStorage.setItem(CD_KEY, String(Date.now() + seconds * 1000)); } catch (_) {}
+   }
+   var remaining = seconds;
+   resendLink.style.display = 'none';
+   resendTimer.textContent = 'Kirim ulang kode dalam ' + remaining + ' detik';
+   if (cooldownIv) clearInterval(cooldownIv);
+   cooldownIv = setInterval(function() {
+    remaining--;
+    if (remaining <= 0) {
+     clearInterval(cooldownIv);
+     resendTimer.textContent = 'Tidak menerima kode?';
+     resendLink.style.display = '';
+    } else {
+     resendTimer.textContent = 'Kirim ulang kode dalam ' + remaining + ' detik';
+    }
+   }, 1000);
+  }
+
+  window.resendOtp = function(e) {
+   if (e) e.preventDefault();
+   if (resendMsg) resendMsg.textContent = '';
+   if (resendLink) resendLink.style.pointerEvents = 'none';
+   var csrfInput = document.querySelector('#otpForm input[name="csrf_token"]');
+   var csrfToken = csrfInput ? csrfInput.value : '';
+   fetch('/register/resend?username=' + encodeURIComponent(USERNAME), {
+    method: 'POST',
+    headers: {
+     'X-Requested-With': 'XMLHttpRequest',
+     'X-CSRF-Token': csrfToken
+    }
+   })
+   .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+   .then(function(res) {
+    if (resendLink) resendLink.style.pointerEvents = '';
+    if (resendMsg) {
+     resendMsg.textContent = res.j.message || (res.ok ? 'Kode baru terkirim.' : 'Gagal mengirim ulang.');
+     resendMsg.style.color = res.ok && res.j.success ? 'var(--color-success-light)' : 'var(--color-danger-bright)';
+     // R109: masa berlaku diulang di pesan resend agar tidak perlu scroll ke atas.
+     if (res.ok && res.j.success) resendMsg.textContent += ' Kode berlaku 15 menit.';
+    }
+    if (res.ok && res.j.success) {
+     // R107: server merotasikan kode saat resend — digit kode basi wajib
+     // dibersihkan agar tidak bercampur dengan kode baru.
+     digits.forEach(function(d) { d.value = ''; });
+     syncHidden();
+     var firstDigit = document.getElementById('otp-digit-1');
+     if (firstDigit) firstDigit.focus();
+     startCooldown(60);
+    }
+   })
+   .catch(function() {
+    if (resendLink) resendLink.style.pointerEvents = '';
+     if (resendMsg) { resendMsg.textContent = 'Gagal terhubung ke server.'; resendMsg.style.color = 'var(--color-danger-bright)'; }
+   });
+  };
+
+  // S59: pengganti atribut handler inline pada #resendLink — listener
+  // dipasang langsung ke window.resendOtp yang sudah didefinisikan di atas.
+  if (resendLink) resendLink.addEventListener('click', window.resendOtp);
+
+  // On load: resume a stored cooldown if one is still running (e.g. the page
+  // re-rendered after a wrong code). Only start a fresh 60s window when no
+  // cooldown was ever stored for this user — i.e. the code was just sent.
+  var storedEnd = 0;
+  try { storedEnd = parseInt(sessionStorage.getItem(CD_KEY) || '0', 10); } catch (_) {}
+  if (storedEnd > Date.now()) {
+   startCooldown(Math.ceil((storedEnd - Date.now()) / 1000), true);
+  } else if (!storedEnd) {
+   startCooldown(60);
+  } else if (resendLink && resendTimer) {
+   // Cooldown already expired — allow resending immediately.
+   resendTimer.textContent = 'Tidak menerima kode?';
+   resendLink.style.display = '';
+  }
+ });
+ </script>
+
+ <script src="/static/js/fingerprintjs.min.js?v={{.version}}" defer></script>
+ <script src="/static/js/device-fingerprint.js?v={{.version}}" defer></script>
+</body>
+</html>

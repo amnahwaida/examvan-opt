@@ -1,0 +1,1078 @@
+{{/*
+  EXAMVAN Public Exam Results Page
+  =================================
+  Standalone template (does not extend base.html).
+  Variables:
+    .exam_name      — string
+    .token          — string
+    .total_students — int
+    .is_logged_in   — bool
+    .is_disabled    — bool (true when results are not public)
+    .show_answers   — bool (whether answer keys are visible)
+    .error          — bool (true when exam not found / error state)
+*/}}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ {{ template "public_fonts" . }}
+ <title>EXAMVAN - {{if .exam_name}}Hasil Ujian {{.exam_name}}{{else}}Hasil Ujian{{end}}</title>
+ <meta name="description" content="{{if .exam_name}}Lihat hasil ujian {{.exam_name}} - EXAMVAN{{else}}Lihat hasil ujian - EXAMVAN{{end}}">
+ <meta name="robots" content="noindex, nofollow">
+ <link rel="stylesheet" href="/static/css/theme.css?v={{.version}}">
+ <link rel="stylesheet" href="/static/css/tailwind/output.css?v={{.version}}">
+ <link rel="stylesheet" href="/static/css/hasil.css?v={{.version}}">
+ <!-- R71: seluruh link stylesheet eksternal wajib SEBELUM blok style inline pertama; urutan antar-link dipertahankan. -->
+ <link rel="stylesheet" href="/static/css/public-mobile.css?v={{.version}}">
+ <link rel="stylesheet" href="/static/css/public-desktop.css?v={{.version}}">
+ <style>
+  /* T3: chip status kelulusan eksplisit + legenda ambang tampilan.
+     Ambang warna tetap mengikuti getScoreClass() (70/40); KKM per sekolah
+     (setting backend) menyusul di batch berikutnya. */
+  /* S101 (ronde 9): warna TEKS chip migrasi ke varian terang — kalibrasi
+     koordinator: base token di tint sendiri atas glass gelap menyentuh garis
+     AA (fail ≈ 4.59:1; pasangan .score-low ≈ 4.45:1), varian aman:
+     --color-success-light ≈ 10.8:1, --color-danger-bright ≈ 6.25:1.
+     S103 (adopsi-a): background bermigrasi ke var(--color-*-bg) — nilai
+     rgba(var(--rgb-*),0.12) identik persis dengan token theme.css.
+     Border tetap rgba(var(--rgb-*),0.35): alpha 0.35 tidak punya padanan
+     token, jadi TIDAK ada literal baru (keputusan didokumentasikan). */
+  .score-status-chip {
+   display: inline-block;
+   font-size: 0.66rem;
+   font-weight: 700;
+   letter-spacing: 0.3px;
+   padding: 2px 10px;
+   border-radius: 999px;
+   white-space: nowrap;
+  }
+  .score-status-pass { color: var(--color-success-light); background: var(--color-success-bg); border: 1px solid rgba(var(--rgb-success), 0.35); }
+  /* R40: tingkat ketiga 40–69 — kuning netral "Hampir", bukan merah
+     "Belum Lulus" yang kontradiktif dengan badge kuning di sampingnya. */
+  .score-status-mid { color: var(--color-warning-light); background: var(--color-warning-bg); border: 1px solid rgba(var(--rgb-warning), 0.35); }
+  .score-status-fail { color: var(--color-danger-bright); background: var(--color-danger-bg); border: 1px solid rgba(var(--rgb-danger), 0.35); }
+  .score-status-none { color: var(--color-text-secondary); background: rgba(var(--rgb-white), 0.12); border: 1px solid rgba(var(--rgb-white), 0.30); }
+  /* Badge status di bar rekap skor lembar jawaban (dirender oleh JS).
+     Batch 9/S46: class, bukan id — id diduplikasi tiap baris detail terbuka
+     (HTML invalid). */
+  .score-status-badge { margin-left: 10px; vertical-align: middle; }
+  .score-legend {
+   margin: 10px 4px 0;
+   font-size: 0.75rem;
+   color: var(--color-text-muted);
+   text-align: center;
+  }
+ </style>
+ <link rel="icon" type="image/png" href="/static/favicon.png">
+ <script src="/static/js/admin-core.js?v={{.version}}" defer></script>
+</head>
+<body>
+ <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+ {{ template "public_skip_link" . }}
+ <!-- Heroicons Sprite -->
+ <svg xmlns="http://www.w3.org/2000/svg" style="display:none;" aria-hidden="true">
+  <symbol id="hi-results" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></symbol>
+  <symbol id="hi-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/></symbol>
+  <symbol id="hi-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></symbol>
+  <symbol id="hi-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/></symbol>
+  <symbol id="hi-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+  <symbol id="hi-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+  <symbol id="hi-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5m7-7-7 7 7 7"/></symbol>
+  <symbol id="hi-trending-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 18 9 11.25l4.306 4.306a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941"/></symbol>
+  <symbol id="hi-magnifying-glass" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></symbol>
+  <symbol id="hi-arrow-path" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.023 9.348h4.992v-4.99M16.023 9.348l3.18-3.18a9 9 0 0 0-15.147 4.364m15.147 3.348h-4.992v4.99M7.977 14.652l-3.18 3.18a9 9 0 0 0 15.147-4.364"/></symbol>
+  <symbol id="hi-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></symbol>
+  <symbol id="hi-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+  <symbol id="hi-paper-airplane" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5"/></symbol>
+  <symbol id="hi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.75 6 6 9-13.5"/></symbol>
+  <symbol id="hi-exclamation-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></symbol>
+  <symbol id="hi-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></symbol>
+  <symbol id="hi-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15.75 19.5-7.5-7.5 7.5-7.5"/></symbol>
+  <symbol id="hi-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></symbol>
+  <symbol id="hi-exclamation" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></symbol>
+ </svg>
+
+ <!-- Animated background -->
+ <div class="bg-orbs">
+ <div class="bg-orb bg-orb-1"></div>
+ <div class="bg-orb bg-orb-2"></div>
+ <div class="bg-orb bg-orb-3"></div>
+ </div>
+
+ <!-- Header -->
+ <header class="header">
+ <div class="header-left">
+ <a href="/" class="back-nav" title="Kembali ke beranda" aria-label="Kembali ke beranda">
+  <svg width="14" height="14" aria-hidden="true"><use href="#hi-arrow-left"/></svg>
+  Kembali
+ </a>
+ <span class="header-divider"></span>
+ <div class="header-logo">E</div>
+ <span class="header-title">EXAMVAN</span>
+ <span class="header-badge"><svg class="icon-svg-sm" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-results"/></svg> Hasil Ujian</span>
+ </div>
+ </header>
+
+ <main class="main" id="main-content">
+ {{if .is_disabled}}
+ <!-- T12: state non-sukses — judul netral sederhana, tanpa hero dinamis
+      (exam_name internal / chip "Peserta: 0" menyesatkan saat error). -->
+ <section class="exam-hero">
+ <h1>Hasil Ujian</h1>
+ </section>
+ <section class="glass-card" style="padding: 60px 40px; text-align: center; margin-top: 24px; border: 1px solid rgba(var(--rgb-danger), 0.15); background: rgba(var(--rgb-danger), 0.02);">
+ <svg class="icon-svg" style="width:60px;height:60px;margin-bottom:20px;color:var(--color-danger-bright);filter:drop-shadow(0 0 10px rgba(var(--rgb-danger),0.3));" aria-hidden="true"><use href="#hi-lock"/></svg>
+ <h2 style="font-size: 1.6rem; font-weight: 800; color: var(--color-text); margin-bottom: 12px; font-family: 'Inter', sans-serif;">Halaman Hasil Dinonaktifkan</h2>
+ <p style="color: var(--color-text-secondary); max-width: 520px; margin: 0 auto 28px auto; line-height: 1.7; font-size: 0.95rem;">
+ Halaman hasil ujian untuk siswa pada ujian ini telah dinonaktifkan oleh Guru / Admin yang bersangkutan.
+ Silakan hubungi pihak sekolah untuk mendapatkan informasi nilai Anda.
+ </p>
+ <div style="display: inline-flex; justify-content: center; width: 100%;">
+ <a href="/" style="background: linear-gradient(135deg, var(--color-primary), var(--color-accent)); color: white; padding: 12px 28px; border-radius: 12px; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(var(--rgb-info), 0.25); transition: all 0.3s;">
+ <svg class="icon-svg" style="width:14px;height:14px;vertical-align:middle;" aria-hidden="true"><use href="#hi-arrow-left"/></svg> Kembali ke Beranda
+ </a>
+ </div>
+ </section>
+ {{else if .error}}
+ <!-- T12: judul netral juga untuk state error -->
+ <section class="exam-hero">
+ <h1>Hasil Ujian</h1>
+ </section>
+ <section class="glass-card" style="padding: 60px 40px; text-align: center; margin-top: 24px;">
+  <svg class="icon-svg" style="width:60px;height:60px;margin-bottom:20px;color:var(--color-danger-bright);" aria-hidden="true"><use href="#hi-x"/></svg>
+ <h2 style="font-size: 1.4rem; font-weight: 700; color: var(--color-text); margin-bottom: 12px;">Ujian Tidak Ditemukan</h2>
+ <p style="color: var(--color-text-secondary);">Token "{{.token}}" tidak valid atau ujian tidak ditemukan.</p>
+ <!-- R63: state error bukan dead-end — CTA utama + jalur coba token lain,
+      pola konsisten dengan state disabled di atas. -->
+ <div style="display: inline-flex; justify-content: center; align-items: center; gap: 16px; flex-wrap: wrap; width: 100%;">
+ <a href="/" style="background: linear-gradient(135deg, var(--color-primary), var(--color-accent)); color: white; padding: 12px 28px; border-radius: 12px; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(var(--rgb-info), 0.25); transition: all 0.3s;">
+ <svg class="icon-svg" style="width:14px;height:14px;vertical-align:middle;" aria-hidden="true"><use href="#hi-arrow-left"/></svg> Kembali ke Beranda
+ </a>
+ <a href="/hasil" style="color: var(--color-text-secondary); font-size: 0.9rem; text-decoration: underline; text-underline-offset: 3px;">Coba Token Lain</a>
+ </div>
+ </section>
+ {{else}}
+ <!-- Exam Hero — hanya dirender pada state sukses (T12) -->
+ <section class="exam-hero">
+ <h1 id="examTitle">{{.exam_name}}</h1>
+ <div class="exam-meta">
+  <div class="exam-meta-item">
+  <svg class="icon-svg" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-key"/></svg>
+  <span>Token: <strong>{{.token}}</strong></span>
+  </div>
+  <div class="exam-meta-item">
+  <svg class="icon-svg" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-users"/></svg>
+  <span>Peserta: <strong id="totalStudents">{{.total_students}}</strong></span>
+  </div>
+  {{if .creator_name}}
+  <div class="exam-meta-item">
+  <svg class="icon-svg" style="vertical-align:middle;width:16px;height:16px;" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+  <span>Pembuat: <strong style="color:var(--color-primary-light);">{{.creator_name}}</strong></span>
+  </div>
+  {{end}}
+  {{if .delegated_name}}
+  <div class="exam-meta-item">
+  <svg class="icon-svg" style="vertical-align:middle;width:16px;height:16px;" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg>
+  <span>Guru: <strong style="color:var(--color-warning);">{{.delegated_name}}</strong></span>
+  </div>
+  {{end}}
+  <div class="exam-meta-item" id="avgScoreItem" style="display: none;">
+  <svg class="icon-svg" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-trending-up"/></svg>
+  <span>Rata-rata: <strong id="avgScore">&mdash;</strong></span>
+  </div>
+  <div class="exam-meta-item" id="maxScoreItem" style="display: none;">
+  <svg class="icon-svg" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-results"/></svg>
+  <span>Tertinggi: <strong id="maxScore">&mdash;</strong></span>
+  </div>
+ </div>
+ <div class="stats-row" id="statsRow" style="display: none;"></div>
+ <!-- T3: legenda ambang tampilan warna skor — ditampilkan saat statistik termuat -->
+ <p class="score-legend" id="scoreLegend" style="display: none;">Ambang tampilan: Hijau ≥ 70 · Kuning 40–69 ("Hampir") · Merah &lt; 40 — Status Lulus mulai dari 70 (ambang sementara — KKM sekolah dapat berbeda)</p>
+ </section>
+ <!-- Tab Navigation — S54: semantik ARIA tabs port dari download.html
+      (role tablist/tab/tabpanel + aria-selected dikelola switchTab +
+      roving tabindex + navigasi panah/Home/End di init). S59: klik
+      dilayani registry Actions admin-core.js (tanpa onclick inline). -->
+ <div class="tab-nav" id="tabNav" role="tablist" aria-label="Pilih tampilan hasil" style="display: none;">
+ <button class="tab-btn active" id="tabScores" role="tab" aria-selected="true" aria-controls="scoresContent" data-action="switch-tab" data-tab="scores">
+ <svg class="icon-svg" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-dashboard"/></svg> Daftar Nilai
+ </button>
+ <button class="tab-btn" id="tabKeys" role="tab" aria-selected="false" aria-controls="keysContent" data-action="switch-tab" data-tab="keys" style="display: none;">
+ <svg class="icon-svg" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-key"/></svg> Kunci Jawaban Ujian
+ </button>
+ </div>
+
+ <!-- Search & Filter -->
+ <section class="search-section">
+ <div class="search-row">
+ <div class="search-input-wrapper">
+<input type="text" class="search-input" id="searchInput"
+   placeholder="Cari berdasarkan nama siswa..."
+   aria-label="Cari nama siswa">
+  <!-- T21: perilaku oninput lama (filterResults + toggle tombol clear)
+       dipindah ke listener addEventListener di init DOMContentLoaded. -->
+ <button class="search-clear-btn" id="searchClearBtn" data-action="clear-search" style="display:none;" title="Hapus pencarian" aria-label="Hapus pencarian"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-x"/></svg></button>
+ </div>
+ </div>
+ </section>
+
+ <!-- Results Content -->
+ <section class="glass-card" id="resultsSection">
+ <!-- S35: region pengumuman screen reader — diupdate tiap render tabel
+      selesai ("Menampilkan X–Y dari Z peserta"); visually hidden. -->
+ <div id="resultsLiveRegion" class="sr-only-results" aria-live="polite" role="status"></div>
+ <div class="loading-text" id="loadingIndicator">
+ <span class="loading-spinner" aria-hidden="true"></span>
+ <span>Memuat data hasil ujian...</span>
+ </div>
+
+ <!-- Scores Tab -->
+ <div id="scoresContent" role="tabpanel" aria-labelledby="tabScores" style="display: none;">
+ <div class="table-wrapper">
+ <table class="results-table" id="scoresTable">
+ <thead>
+ <tr>
+ <th scope="col" style="width: 50px;">#</th>
+ <th scope="col">Nama</th>
+ <th scope="col" class="td-center">Durasi</th>
+ <th scope="col" class="td-center">Nilai</th>
+ <th scope="col" style="width: 40px;"></th>
+ </tr>
+ </thead>
+ <tbody id="scoresBody">
+ <!-- Filled via JS -->
+ </tbody>
+ </table>
+ </div>
+ <!-- Pagination -->
+ <div class="pagination-wrapper" id="paginationWrapper" style="display: none;">
+ <div class="pagination-info" id="paginationInfo"></div>
+ <div class="pagination-controls">
+ <button class="pagination-btn" id="pagePrev" data-action="page-prev" disabled aria-label="Halaman sebelumnya">
+ <svg width="14" height="14" aria-hidden="true"><use href="#hi-chevron-left"/></svg>
+ </button>
+ <div class="pagination-pages" id="paginationPages"></div>
+ <button class="pagination-btn" id="pageNext" data-action="page-next" disabled aria-label="Halaman selanjutnya">
+ <svg width="14" height="14" aria-hidden="true"><use href="#hi-chevron-right"/></svg>
+ </button>
+ </div>
+ </div>
+ </div>
+
+ <!-- Keys Tab -->
+ <div id="keysContent" role="tabpanel" aria-labelledby="tabKeys" style="display: none;">
+ <div style="padding: 16px;">
+ <h2 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px; color: var(--color-primary-light); display: flex; align-items: center; gap: 8px;">
+ <svg class="icon-svg" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-key"/></svg> Kunci Jawaban Resmi
+ </h2>
+ <p style="font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 20px;">
+ Berikut adalah kunci jawaban resmi untuk setiap butir soal pada ujian ini.
+ </p>
+ <div class="keys-grid" id="keysGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;">
+ <!-- Filled via JS -->
+ </div>
+ </div>
+ </div>
+
+ <!-- Empty state -->
+ <div class="empty-state" id="emptyState" style="display: none;">
+ <div class="empty-icon" aria-hidden="true"><svg class="icon-svg-xl" style="margin:0 auto 16px;opacity:0.4;"><use href="#hi-users"/></svg></div>
+ <p>Belum ada siswa yang mengumpulkan jawaban untuk ujian ini.</p>
+ </div>
+
+ <!-- No search results -->
+ <div class="no-results" id="noSearchResults" style="display: none;">
+ <div class="no-results-icon" aria-hidden="true"><svg class="icon-svg" style="width:40px;height:40px;opacity:0.4;"><use href="#hi-magnifying-glass"/></svg></div>
+ <p>Tidak ditemukan hasil yang cocok dengan pencarian Anda.</p>
+ </div>
+ </section>
+ {{end}}
+ </main>
+
+ <!-- Footer -->
+ <footer class="footer">
+ <p>{{.footer_text}}</p>
+ </footer>
+
+  <script>
+ // ===== State =====
+ const EXAM_TOKEN = "{{.token}}";
+ const isLoggedIn = {{if .is_logged_in}}true{{else}}false{{end}};
+ const isDisabled = {{if .is_disabled}}true{{else}}false{{end}};
+ const showAnswersFromServer = {{if .show_answers}}true{{else}}false{{end}};
+ let submissionsData = [];
+ let questionsData = [];
+ let identityFieldsData = [];
+ let showCorrectAnswers = showAnswersFromServer;
+ let currentTab = 'scores';
+
+ // Server-side pagination + search state
+ let currentPage = 1;
+ const PER_PAGE = 20;
+ let searchQuery = '';
+ let pagination = { page: 1, total: 0, total_pages: 1 };
+ let statsData = null;
+ let searchTimer = null;
+ // Anti-overlap guard: never start a second results fetch while one is still
+ // in flight — a slow request plus a new search/pagination action would
+ // otherwise race and let an older response overwrite a newer one. A call
+ // that arrives mid-flight is remembered once and re-run after the current
+ // one settles, so the user's latest action (search, page click) always
+ // lands; currentPage/searchQuery are read fresh at re-run time.
+  let resultsLoading = false;
+  let resultsRerunPending = false;
+  // S35: muat pertama memakai loadingIndicator penuh; feedback dim/aria-busy
+  // hanya untuk fetch berikutnya (paginasi/pencarian). pendingScrollToTable
+  // menunda scroll goToPage sampai data halaman baru benar-benar tampil.
+  let firstLoadDone = false;
+  let pendingScrollToTable = false;
+
+  // S35: redup area tabel + aria-busy saat fetch berjalan (bukan muat awal);
+  // CSS .is-loading juga mematikan pointer-events → guard anti-dobel-klik
+  // paginasi di lapisan visual, di atas guard resultsLoading di sini.
+  function setResultsBusy(busy) {
+   if (!firstLoadDone) return;
+   const section = document.getElementById('resultsSection');
+   if (!section) return;
+   section.classList.toggle('is-loading', busy);
+   if (busy) section.setAttribute('aria-busy', 'true');
+   else section.removeAttribute('aria-busy');
+  }
+
+ // ===== Init =====
+ const pageHasError = {{if .error}}true{{else}}false{{end}};
+ document.addEventListener('DOMContentLoaded', () => {
+  // T19: registrasi handler aksi HARUS di dalam DOMContentLoaded — admin-core.js
+  // dimuat defer sehingga saat inline script ini dieksekusi registry Actions
+  // belum ada (guard typeof lama selalu false → semua aksi mati untuk mouse).
+  // Deferred scripts tereksekusi sebelum DOMContentLoaded, jadi di titik ini
+  // Actions sudah tersedia.
+  if (typeof Actions !== 'undefined') {
+   Actions.register('switch-tab', function (el) {
+    switchTab(el.getAttribute('data-tab'));
+   });
+   Actions.register('page-prev', function () { goToPage(currentPage - 1); });
+   Actions.register('page-next', function () { goToPage(currentPage + 1); });
+    Actions.register('clear-search', function (el) {
+     var input = document.getElementById('searchInput');
+     if (input) input.value = '';
+     filterResults();
+     el.style.display = 'none';
+     // R67: tombol clear kini display:none — tanpa pemulihan fokus eksplisit,
+     // fokus keyboard jatuh ke <body>. Kembalikan ke input pencarian.
+     if (input) input.focus();
+    });
+   Actions.register('reload-page', function () { location.reload(); });
+  }
+
+  // T21: wiring pencarian (pengganti atribut oninput) — perilaku identik:
+  // filterResults + tampilkan/sembunyikan tombol clear sesuai isi input.
+  var searchInput = document.getElementById('searchInput');
+  if (searchInput) {
+   searchInput.addEventListener('input', function () {
+    filterResults();
+    var c = document.getElementById('searchClearBtn');
+    if (c) c.style.display = this.value ? 'flex' : 'none';
+   });
+  }
+
+  // T12/S53: state error/disabled tidak merender tabNav/tombol tab —
+ // jangan sentuh elemen yang tidak ada (dulu: TypeError null) dan jangan
+ // mulai polling hasil.
+ if (!isDisabled && !pageHasError) {
+  // R37: tab awal dibaca dari location.hash (deep-link); guard #kunci ada di
+  // dalam resolveTabFromHash. skipHash: jangan tulis ulang hash saat init.
+  switchTab(resolveTabFromHash(), { skipHash: true });
+
+  // Hash berubah dari luar (user edit URL / back-forward cache): ikuti.
+  window.addEventListener('hashchange', () => {
+  switchTab(resolveTabFromHash(), { skipHash: true });
+  });
+
+  // S54: navigasi keyboard antar tab Nilai/Kunci (pola ARIA tabs download):
+  // panah kiri/kanan, Home/End memindahkan fokus & mengaktifkan tab.
+  var tablist = document.getElementById('tabNav');
+  if (tablist) {
+   tablist.addEventListener('keydown', function(e) {
+    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    var tabs = [document.getElementById('tabScores'), document.getElementById('tabKeys')];
+    var current = tabs.indexOf(document.activeElement);
+    if (current < 0) return;
+    var next;
+    if (e.key === 'ArrowRight') next = (current + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') next = 0;
+    else next = tabs.length - 1;
+    tabs[next].focus();
+    switchTab(next === 0 ? 'scores' : 'keys');
+   });
+  }
+
+  loadResults();
+  }
+ });
+
+ // ===== API: Load Results (server-side pagination + search) =====
+ async function loadResults() {
+   if (resultsLoading) { resultsRerunPending = true; return; }
+   resultsLoading = true;
+   setResultsBusy(true);
+   try {
+  const params = new URLSearchParams();
+  params.set('per_page', String(PER_PAGE));
+  params.set('page', String(currentPage));
+  if (searchQuery) params.set('search', searchQuery);
+
+  const resp = await apiFetch('/api/hasil/' + EXAM_TOKEN + '?' + params.toString(), { suppressApiErrorToast: true });
+   if (!resp.ok) {
+    const errData = await resp.json(); // dinormalisasi apiFetch: {success:false, error_code, message}
+    showApiErrorToast(errData, 'Gagal memuat data hasil');
+    // S65: muat sukses pertama menyembunyikan loadingIndicator permanen —
+    // pulihkan display sebelum menulis kartu error, jika tidak kartu
+    // "Coba Lagi" tak terlihat pada kegagalan fetch berikutnya.
+    document.getElementById('loadingIndicator').style.display = 'block';
+    document.getElementById('loadingIndicator').innerHTML =
+   '<div class="empty-state"><div class="empty-icon" aria-hidden="true"><svg class="icon-svg" style="width:40px;height:40px;margin-bottom:16px;opacity:0.4;"><use href="#hi-exclamation"/></svg></div><p>' + escapeHtml(errData.message || ('Gagal memuat data (HTTP ' + resp.status + '). Coba lagi nanti.')) + '</p>' +
+   '<button class="back-nav" data-action="reload-page" style="margin-top:16px;display:inline-flex;"><svg width="14" height="14" aria-hidden="true"><use href="#hi-arrow-path"/></svg> Coba Lagi</button></div>';
+    return;
+  }
+  const data = await resp.json();
+
+   if (!data.success) {
+    showApiErrorToast(data, 'Gagal memuat data hasil');
+    // S65: pulihkan display (lihat catatan jalur !resp.ok di atas).
+    document.getElementById('loadingIndicator').style.display = 'block';
+    document.getElementById('loadingIndicator').innerHTML =
+   `<div class="empty-state"><div class="empty-icon" aria-hidden="true"><svg class="icon-svg" style="width:40px;height:40px;margin-bottom:16px;opacity:0.4;"><use href="#hi-x"/></svg></div><p>${escapeHtml(data.message || 'Gagal memuat data')}</p></div>`;
+   return;
+  }
+
+  submissionsData = data.submissions || [];
+  questionsData = data.questions || [];
+  identityFieldsData = data.identity_fields || [];
+  statsData = data.stats || null;
+  pagination = data.pagination || { page: currentPage, total: submissionsData.length, total_pages: 1 };
+  // A newer action may have queued a re-run while this (older) response was
+  // still in flight — don't let it overwrite the user's latest page choice;
+  // the re-run fetches with the fresh currentPage/searchQuery instead.
+  if (!resultsRerunPending) {
+   currentPage = pagination.page || 1;
+  }
+
+  document.getElementById('loadingIndicator').style.display = 'none';
+
+    if (pagination.total === 0) {
+    document.getElementById('emptyState').style.display = searchQuery ? 'none' : 'block';
+    document.getElementById('noSearchResults').style.display = searchQuery ? 'block' : 'none';
+    // S74: sembunyikan paginasi & statistik basi dari muat sebelumnya —
+    // konsisten pola renderScoresTable/renderStats yang menyembunyikan
+    // keduanya saat kosong; jangan bertentangan dengan kartu "Tidak ditemukan".
+    document.getElementById('paginationWrapper').style.display = 'none';
+    document.getElementById('statsRow').style.display = 'none';
+    // S35: umumkan hasil kosong/pencarian tanpa hasil ke screen reader.
+    updateResultsLiveRegion();
+    pendingScrollToTable = false;
+    return;
+   }
+
+  renderStats();
+
+  document.getElementById('totalStudents').textContent = statsData && statsData.count != null ? statsData.count : pagination.total;
+
+  renderScoresTable();
+  renderKeysGrid();
+
+   document.getElementById('scoresContent').style.display = 'block';
+
+   // S35: scroll pagination dieksekusi SETELAH data halaman baru tampil —
+   // dulu scroll dilakukan sebelum fetch sehingga tabel "mati" di layar.
+   if (pendingScrollToTable && !resultsRerunPending) {
+    pendingScrollToTable = false;
+    const tableTop = document.getElementById('scoresContent');
+    if (tableTop) tableTop.scrollIntoView({ behavior: 'smooth', block: 'start' });
+   }
+
+  // Show tabNav and tabKeys strictly if server says show_answers is enabled
+  if (questionsData.length > 0 && showAnswersFromServer) {
+   document.getElementById('tabNav').style.display = 'flex';
+   document.getElementById('tabKeys').style.display = 'flex';
+  }
+
+  // T17: loadResults memaksa scoresContent tampil di atas — kembalikan
+  // tampilan ke tab aktif (init bisa mengikuti deep-link #kunci) supaya
+  // panel Nilai dan Kunci tidak bertumpuk. skipHash: jangan menulis ulang
+  // hash URL hanya karena data selesai dimuat.
+  switchTab(currentTab, { skipHash: true });
+  } catch (err) {
+  console.error('Error loading results:', err);
+  showApiErrorToast(null, 'Gagal memuat data hasil ujian');
+  // S65: pulihkan display (lihat catatan jalur !resp.ok di atas).
+  document.getElementById('loadingIndicator').style.display = 'block';
+  document.getElementById('loadingIndicator').innerHTML =
+  '<div class="empty-state"><div class="empty-icon" aria-hidden="true"><svg class="icon-svg" style="width:40px;height:40px;margin-bottom:16px;opacity:0.4;"><use href="#hi-exclamation"/></svg></div><p>Gagal memuat data hasil ujian. Periksa koneksi atau coba lagi nanti.</p>' +
+   '<button class="back-nav" data-action="reload-page" style="margin-top:16px;display:inline-flex;"><svg width="14" height="14" aria-hidden="true"><use href="#hi-arrow-path"/></svg> Coba Lagi</button></div>';
+    } finally {
+   setResultsBusy(false);
+   firstLoadDone = true;
+   resultsLoading = false;
+   if (resultsRerunPending) {
+   resultsRerunPending = false;
+   // Re-run with the CURRENT (latest) currentPage/searchQuery — the user's
+   // newest action wins, even if this older response already rendered.
+   loadResults();
+  }
+  }
+ }
+
+ // ===== Render Header Stats (server aggregate) =====
+ function renderStats() {
+  const avgEl = document.getElementById('avgScore');
+  const maxEl = document.getElementById('maxScore');
+  const statsRow = document.getElementById('statsRow');
+
+  if (!statsData || !statsData.count) {
+   document.getElementById('avgScoreItem').style.display = 'none';
+   document.getElementById('maxScoreItem').style.display = 'none';
+   statsRow.style.display = 'none';
+   return;
+  }
+
+  const avg = Number(statsData.average || 0);
+  const max = Number(statsData.max || 0);
+  const min = Number(statsData.min || 0);
+
+  avgEl.textContent = avg.toFixed(1);
+  maxEl.textContent = max.toFixed(1);
+  document.getElementById('avgScoreItem').style.display = 'flex';
+  document.getElementById('maxScoreItem').style.display = 'flex';
+
+  statsRow.style.display = 'grid';
+  // T3: legenda ambang tampilan muncul bersama statistik skor
+  const scoreLegend = document.getElementById('scoreLegend');
+  if (scoreLegend) scoreLegend.style.display = 'block';
+  statsRow.innerHTML = `
+  <div class="stat-mini">
+  <span class="stat-mini-value" style="color: var(--color-success);">${avg.toFixed(1)}</span>
+  <span class="stat-mini-label">Rata-rata</span>
+  </div>
+  <div class="stat-mini">
+  <span class="stat-mini-value" style="color: var(--color-warning);">${max.toFixed(1)}</span>
+  <span class="stat-mini-label">Tertinggi</span>
+  </div>
+  <div class="stat-mini">
+  <span class="stat-mini-value" style="color: var(--color-danger);">${min.toFixed(1)}</span>
+  <span class="stat-mini-label">Terendah</span>
+  </div>
+  <div class="stat-mini">
+  <span class="stat-mini-value" style="color: var(--color-accent-light);">${statsData.count}</span>
+  <span class="stat-mini-label">Total Peserta</span>
+  </div>
+  `;
+ }
+
+ // ===== Get Duration String =====
+ function getDurationString(startTimeStr, createdAtStr) {
+ if (!startTimeStr || !createdAtStr) return '&mdash;';
+ try {
+ const start = new Date(startTimeStr);
+ const end = new Date(createdAtStr);
+ let diffMs = end - start;
+ if (diffMs < 0) diffMs = 0;
+ const diffSecs = Math.floor(diffMs / 1000);
+ const hours = Math.floor(diffSecs / 3600);
+ const minutes = Math.floor((diffSecs % 3600) / 60);
+ const seconds = diffSecs % 60;
+
+ let parts = [];
+ if (hours > 0) parts.push(hours + ' jam');
+ if (minutes > 0) parts.push(minutes + ' menit');
+ if (seconds > 0 || parts.length === 0) parts.push(seconds + ' detik');
+ return parts.join(' ');
+ } catch (e) {
+ return '&mdash;';
+ }
+ }
+
+ // ===== Render Scores Table (server-provided page, no client slicing) =====
+ function renderScoresTable() {
+ const pageItems = submissionsData;
+ const tbody = document.getElementById('scoresBody');
+ tbody.innerHTML = '';
+
+ // Handle no results state
+ const noResults = document.getElementById('noSearchResults');
+ const paginationWrapper = document.getElementById('paginationWrapper');
+ if (pageItems.length === 0) {
+ noResults.style.display = searchQuery ? 'block' : 'none';
+ paginationWrapper.style.display = 'none';
+ return;
+ }
+ noResults.style.display = 'none';
+
+ pageItems.forEach((sub, idx) => {
+ const globalRank = (currentPage - 1) * PER_PAGE + idx + 1;
+ const tr = document.createElement('tr');
+ tr.id = 'scores-row-' + sub.id;
+ tr.onclick = () => toggleDetailScores(sub.id);
+ tr.style.cursor = 'pointer';
+ tr.setAttribute('tabindex', '0');
+ tr.setAttribute('role', 'button');
+ tr.setAttribute('aria-expanded', 'false');
+ tr.setAttribute('aria-label', 'Lihat rincian jawaban ' + sub.student_name);
+ tr.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' || e.key === ' ') {
+   e.preventDefault();
+   toggleDetailScores(sub.id);
+  }
+ });
+
+ const rankClass = globalRank <= 3 ? 'rank-' + globalRank : '';
+ const scoreClass = getScoreClass(sub.score, sub.max_score);
+ const scoreDisplay = sub.score !== null ? sub.score.toFixed(1) : '&mdash;';
+ const passStatus = getPassStatus(sub.score, sub.max_score);
+ const durationStr = getDurationString(sub.start_time, sub.created_at);
+
+ tr.innerHTML = `
+ <td data-label="#"><span class="rank-num ${rankClass}">${globalRank}</span></td>
+ <td data-label="Nama">
+ <div class="student-name">${escapeHtml(sub.student_name)}</div>
+ </td>
+ <td data-label="Durasi" class="td-center-secondary">${durationStr}</td>
+ <td data-label="Nilai" class="td-center">
+ <span class="score-badge ${scoreClass}">${scoreDisplay}</span>
+ <span class="score-status-chip ${passStatus.cls}" style="display:block;width:fit-content;margin:4px auto 0;">${passStatus.text}</span>
+ </td>
+ <td data-label="" class="td-center">
+ <svg class="icon-svg expand-icon" style="width:14px;height:14px;" aria-hidden="true"><use href="#hi-chevron-down"/></svg>
+ </td>
+ `;
+ tbody.appendChild(tr);
+
+ // Detail row
+ const detailTr = document.createElement('tr');
+ detailTr.className = 'detail-row';
+ detailTr.id = 'scores-detail-' + sub.id;
+
+ const detailTd = document.createElement('td');
+ detailTd.colSpan = 5;
+ detailTd.innerHTML = '<div class="detail-content"></div>';
+ detailTr.appendChild(detailTd);
+ tbody.appendChild(detailTr);
+ });
+
+ renderPagination(pagination.total, pagination.total_pages || 1);
+ // S35: umumkan isi tabel terbaru ke screen reader SETELAH render selesai.
+ updateResultsLiveRegion();
+ }
+
+ // ===== S35: Pengumuman live region =====
+ function updateResultsLiveRegion() {
+ const live = document.getElementById('resultsLiveRegion');
+ if (!live) return;
+ if (pagination.total === 0) {
+ live.textContent = searchQuery ? 'Tidak ditemukan hasil yang cocok dengan pencarian.' : 'Belum ada peserta.';
+ return;
+ }
+ const start = (currentPage - 1) * PER_PAGE + 1;
+ const end = Math.min(currentPage * PER_PAGE, pagination.total);
+ live.textContent = 'Menampilkan ' + start + '-' + end + ' dari ' + pagination.total + ' peserta';
+ }
+
+ // ===== Toggle Detail Scores =====
+ function toggleDetailScores(id) {
+ const detailRow = document.getElementById('scores-detail-' + id);
+ const mainRow = document.getElementById('scores-row-' + id);
+
+ if (detailRow.classList.contains('show')) {
+ detailRow.classList.remove('show');
+ mainRow.classList.remove('expanded');
+ mainRow.setAttribute('aria-expanded', 'false');
+ detailRow.style.display = 'none';
+ } else {
+ // Re-render to reflect current showCorrectAnswers state
+ const sub = submissionsData.find(s => s.id === id);
+ if (sub) {
+ const detailHtml = buildDetailContent(sub);
+ detailRow.querySelector('.detail-content').innerHTML = detailHtml;
+ }
+ detailRow.classList.add('show');
+ mainRow.classList.add('expanded');
+ mainRow.setAttribute('aria-expanded', 'true');
+ detailRow.style.display = 'table-row';
+ }
+ }
+
+ // ===== Build Detail Content =====
+ function buildDetailContent(sub) {
+ if (questionsData.length === 0) {
+ return '<div style="color: var(--color-text-muted); text-align: center; padding: 16px;">Tidak ada konfigurasi soal untuk ujian ini.</div>';
+ } const shouldHideStudentAnswers = !isLoggedIn && !showCorrectAnswers;
+ const answers = sub.answers || {};
+ let totalEarned = 0;
+ // Server-computed max (sum of effective question weights) — authoritative
+ // and immune to the weight-0 / `|| 1.0` client-side mismatch.
+ const totalMax = (sub.max_score !== null && sub.max_score !== undefined) ? Number(sub.max_score) : 0;
+ let correctCount = 0;
+ let incorrectCount = 0;
+ let partialCount = 0;
+
+ let itemsHtml = '';
+
+ questionsData.forEach(q => {
+ const qNum = String(q.number);
+ const studentAns = answers[qNum];
+
+ let earned = 0;
+ let statusText = 'Belum Dijawab';
+ let statusClass = 'unanswered';
+
+ const evalAns = (sub.evaluated_answers || {})[qNum] || {};
+ if (evalAns.statusClass) {
+ statusClass = evalAns.statusClass;
+ statusText = evalAns.statusText;
+ earned = evalAns.earned || 0;
+
+ // Count from the server evaluation status (works even when the raw
+ // student answers are masked for non-entitled visitors).
+ if (statusClass === 'correct') correctCount++;
+ else if (statusClass === 'partial') partialCount++;
+ else if (statusClass === 'incorrect') incorrectCount++;
+ }
+
+ totalEarned += earned;
+
+ const studentDisplay = shouldHideStudentAnswers ? '&#8226;&#8226;&#8226;' : formatAnswer(studentAns);
+ const correctAns = q.key;
+ const correctDisplay = showCorrectAnswers ? formatAnswer(correctAns) : '&#8226;&#8226;&#8226;';
+
+ itemsHtml += `
+ <div class="answer-item ${statusClass}">
+ <span class="q-num">No. ${escapeHtml(String(q.number))}</span>
+ <span class="q-student-ans">${studentDisplay}</span>
+ <span class="q-correct-ans correct-ans-cell">${correctDisplay}</span>
+ <span class="q-status ${statusClass}">${escapeHtml(String(statusText))} (${earned.toFixed(1)})</span>
+ </div>
+ `;
+ });
+
+  // R66: waktu tampilan memakai string WIB terformat dari server
+  // (start_time_display / created_at_display) — sama dengan kartu guru,
+  // tidak lagi mengikuti jam perangkat penonton. Fallback localizeUTC untuk
+  // respons lama tanpa field display.
+  const startTimeStr = sub.start_time_display || (sub.start_time ? localizeUTC(sub.start_time) : '&mdash;');
+  const endTimeStr = sub.created_at_display || (sub.created_at ? localizeUTC(sub.created_at) : '&mdash;');
+ const durationStr = getDurationString(sub.start_time, sub.created_at);
+ // T3: status kelulusan eksplisit mengikuti skor RESMI (sub.score) — bukan
+ // total evaluasi sisi-klien. Skor belum ada → "Belum Dikoreksi".
+ const passStatus = getPassStatus(sub.score, totalMax);
+ // Batch 9/S46: angka UTAMA di bar rekap adalah skor RESMI server
+ // (sub.score/sub.max_score) — bisa berbeda dari penjumlahan evaluasi klien
+ // bila guru merevisi kunci/bobot pasca-ujian (fitur rekalkulasi instan).
+ const hasOfficialScore = sub.score !== null && sub.score !== undefined;
+ const officialScoreText = hasOfficialScore ? `${Number(sub.score).toFixed(1)} / ${totalMax.toFixed(1)}` : '&mdash;';
+
+ // Build dynamic identity fields (excluding student_name which is already in main table)
+ let identityHtml = '';
+ if (identityFieldsData && identityFieldsData.length > 0) {
+ const idData = sub.identity_data || {};
+ identityFieldsData.forEach(f => {
+ if (f.key === 'student_name') return;
+ const label = escapeHtml(f.label || f.key);
+ // Prefer identity_data, fallback to legacy columns
+ let val = idData[f.key];
+ if (val === undefined || val === null || val === '') {
+ if (f.key === 'exam_number') val = sub.exam_number;
+ else if (f.key === 'student_class') val = sub.student_class;
+ else val = '';
+ }
+ if (val) {
+ identityHtml += `
+ <div class="detail-identity-item">
+ <span class="detail-identity-label">${label}</span>
+ <span class="detail-identity-value">${escapeHtml(String(val))}</span>
+ </div>`;
+ }
+ });
+ }
+
+ return `
+ <div class="detail-info-grid">
+ <div class="detail-info-section">
+ <div class="detail-info-heading">
+ <svg class="icon-svg-sm" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-clock"/></svg> Informasi Waktu
+ </div>
+ <div class="detail-info-items">
+ <div class="detail-identity-item">
+ <span class="detail-identity-label">Waktu Mulai</span>
+ <span class="detail-identity-value">${escapeHtml(String(startTimeStr))}</span>
+ </div>
+ <div class="detail-identity-item">
+ <span class="detail-identity-label">Waktu Kumpul</span>
+ <span class="detail-identity-value">${escapeHtml(String(endTimeStr))}</span>
+ </div>
+ <div class="detail-identity-item">
+ <span class="detail-identity-label">Durasi Kerja</span>
+ <span class="detail-identity-value" style="color: var(--color-accent-light); font-weight: 700;">${durationStr}</span>
+ </div>
+ </div>
+ </div>
+ ${identityHtml ? '<div class="detail-info-section">' +
+ '<div class="detail-info-heading">' +
+ '<svg class="icon-svg-sm" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-users"/></svg> Identitas Siswa' +
+ '</div>' +
+ '<div class="detail-info-items">' +
+ identityHtml +
+ '</div>' +
+ '</div>' : ''}
+ </div>
+ <div class="detail-header">
+ <div class="detail-header-labels" style="flex:1;">
+ <span style="min-width:44px;text-align:center;">No</span>
+ <span style="flex:1;">${shouldHideStudentAnswers ? 'Jawaban (Tersembunyi)' : 'Jawaban Siswa'}</span>
+ <span style="flex:1;" class="correct-ans-header">${showCorrectAnswers ? 'Kunci Jawaban' : 'Kunci (Tersembunyi)'}</span>
+ <span style="min-width:90px;text-align:right;">Status</span>
+ </div>
+ </div>
+ <div class="answer-grid">
+ ${itemsHtml}
+ </div>
+ <div class="score-summary-bar">
+ <div class="score-summary-stats">
+ <span style="color:var(--color-success);"><svg class="icon-svg-sm" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-check"/></svg> Benar: ${correctCount}</span>
+ <span style="color:var(--color-warning);"><svg class="icon-svg-sm" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-exclamation-triangle"/></svg> Parsial: ${partialCount}</span>
+ <span style="color:var(--color-danger);"><svg class="icon-svg-sm" style="vertical-align:middle;" aria-hidden="true"><use href="#hi-x"/></svg> Salah: ${incorrectCount}</span>
+ </div>
+ <div class="score-summary-total">
+ <span style="color:var(--color-text-muted);">Skor Resmi:</span>
+ <span class="score-badge ${getScoreClass(sub.score, totalMax)}" style="font-size:0.9rem;">
+ ${officialScoreText}
+ </span>
+ <span class="score-status-chip ${passStatus.cls} score-status-badge">${passStatus.text}</span>
+ </div>
+ <div style="margin:8px 4px 0; font-size:0.72rem; color:var(--color-text-muted); text-align:right;">
+ Perhitungan tampilan (evaluasi sisi klien): ${totalEarned.toFixed(1)} / ${totalMax.toFixed(1)} — dapat berbeda dari Skor Resmi bila kunci/bobot direvisi pasca-ujian
+ </div>
+ `;
+ }
+
+ // ===== Render Pagination Controls =====
+ function renderPagination(total, totalPages) {
+ const wrapper = document.getElementById('paginationWrapper');
+ const info = document.getElementById('paginationInfo');
+ const pagesEl = document.getElementById('paginationPages');
+ const prevBtn = document.getElementById('pagePrev');
+ const nextBtn = document.getElementById('pageNext');
+
+ if (totalPages <= 1) {
+ wrapper.style.display = 'none';
+ return;
+ }
+ wrapper.style.display = 'flex';
+
+ // Info text: "Menampilkan 1-50 dari 200 peserta"
+ const start = (currentPage - 1) * PER_PAGE + 1;
+ const end = Math.min(currentPage * PER_PAGE, total);
+ info.textContent = 'Menampilkan ' + start + '-' + end + ' dari ' + total + ' peserta';
+
+ // Prev / Next buttons
+ prevBtn.disabled = currentPage <= 1;
+ nextBtn.disabled = currentPage >= totalPages;
+
+ // Page number buttons
+ pagesEl.innerHTML = '';
+ const maxVisiblePages = 7;
+ let pageStart = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+ let pageEnd = Math.min(totalPages, pageStart + maxVisiblePages - 1);
+ if (pageEnd - pageStart + 1 < maxVisiblePages) {
+ pageStart = Math.max(1, pageEnd - maxVisiblePages + 1);
+ }
+
+ // First page + ellipsis
+ if (pageStart > 1) {
+ pagesEl.appendChild(createPageBtn(1));
+ if (pageStart > 2) pagesEl.appendChild(createEllipsis());
+ }
+
+ for (let i = pageStart; i <= pageEnd; i++) {
+ pagesEl.appendChild(createPageBtn(i));
+ }
+
+ // Last page + ellipsis
+ if (pageEnd < totalPages) {
+ if (pageEnd < totalPages - 1) pagesEl.appendChild(createEllipsis());
+ pagesEl.appendChild(createPageBtn(totalPages));
+ }
+ }
+
+ function createPageBtn(page) {
+ const btn = document.createElement('button');
+ btn.className = 'pagination-page-btn' + (page === currentPage ? ' active' : '');
+ btn.textContent = page;
+ btn.setAttribute('aria-label', 'Halaman ' + page);
+ // R37: halaman aktif ditandai aria-current="page" (screen reader tidak bisa
+ // merasakan class .active); halaman lain wajib dibersihkan dari atribut.
+ if (page === currentPage) btn.setAttribute('aria-current', 'page');
+ else btn.removeAttribute('aria-current');
+ btn.onclick = () => goToPage(page);
+ return btn;
+ }
+
+ function createEllipsis() {
+ const span = document.createElement('span');
+ span.className = 'pagination-ellipsis';
+ span.textContent = '...';
+ return span;
+ }
+
+ // ===== Go To Page (server fetch) =====
+ function goToPage(page) {
+ const totalPages = pagination.total_pages || 1;
+ if (page < 1 || page > totalPages) return;
+ currentPage = page;
+ // S35: scroll DITUNDA sampai data halaman baru tampil (dieksekusi di
+ // loadResults setelah render); guard dobel-klik tetap dari resultsLoading
+ // (rerun pending) + .is-loading pointer-events:none.
+ pendingScrollToTable = true;
+ loadResults();
+ }
+
+ // ===== Switch Tab =====
+ // R37: tab aktif deep-linkable via location.hash (#nilai/#kunci) — pola tab
+ // download Batch 3 (S14). Hash di luar whitelist jatuh ke tab Nilai.
+ const TAB_HASH_NAMES = { scores: 'nilai', keys: 'kunci' };
+
+ function resolveTabFromHash() {
+ const h = (location.hash || '').replace('#', '');
+ if (h === TAB_HASH_NAMES.keys) {
+ // Hash #kunci hanya dihormati bila server mengizinkan kunci tampil —
+ // hash arbitrer tidak dipercaya dan selalu jatuh ke tab Nilai.
+ return showAnswersFromServer ? 'keys' : 'scores';
+ }
+ return 'scores';
+ }
+
+ function switchTab(tab, opts) {
+  currentTab = tab;
+  // S53: tombol tab hanya dirender di cabang sukses — bila tidak ada
+  // (halaman error/disabled), jangan sentuh properti elemen null.
+  var tabScores = document.getElementById('tabScores');
+  var tabKeys = document.getElementById('tabKeys');
+  if (!tabScores || !tabKeys) return;
+
+  tabScores.classList.toggle('active', tab === 'scores');
+  tabKeys.classList.toggle('active', tab === 'keys');
+
+  // S54: state ARIA tabs + roving tabindex (pola download.html) — class .active
+  // hanya visual; screen reader membaca aria-selected, keyboard menab ke tab aktif saja.
+  tabScores.setAttribute('aria-selected', tab === 'scores' ? 'true' : 'false');
+  tabKeys.setAttribute('aria-selected', tab === 'keys' ? 'true' : 'false');
+  tabScores.tabIndex = tab === 'scores' ? 0 : -1;
+  tabKeys.tabIndex = tab === 'keys' ? 0 : -1;
+
+  document.getElementById('scoresContent').style.display = tab === 'scores' ? 'block' : 'none';
+  document.getElementById('keysContent').style.display = tab === 'keys' ? 'block' : 'none';
+
+ // Toggle the whole search section (not the input's display) so the flex
+ // layout of .search-input-wrapper stays intact on mobile.
+ const searchSection = document.querySelector('.search-section');
+ if (searchSection) searchSection.style.display = tab === 'keys' ? 'none' : 'block';
+
+ // Simpan tab aktif di URL agar deep-linkable. replaceState (bukan
+ // assignment) supaya tidak memicu scroll-to-top / entri history baru;
+ // opts.skipHash dipakai saat balasan dari event hashchange.
+ if (!opts || !opts.skipHash) {
+ history.replaceState(null, '', '#' + (TAB_HASH_NAMES[tab] || TAB_HASH_NAMES.scores));
+ }
+ }
+
+ // ===== Render Official Keys Grid =====
+ function renderKeysGrid() {
+ const grid = document.getElementById('keysGrid');
+ grid.innerHTML = '';
+
+ if (questionsData.length === 0) {
+ grid.innerHTML = '<div style="color: var(--color-text-muted); padding: 20px; text-align: center; grid-column: 1/-1;">Tidak ada kunci jawaban dikonfigurasi.</div>';
+ return;
+ }
+
+ const typeLabels = {
+ 'single_choice': 'Pilihan Ganda',
+ 'multiple_choice': 'Pilihan Ganda Kompleks',
+ 'true_false': 'Benar/Salah',
+ 'matching': 'Menjodohkan',
+ 'short_answer': 'Isian Singkat'
+ };
+
+ questionsData.forEach(q => {
+ const item = document.createElement('div');
+ item.className = 'key-card';
+
+ // Escape every field interpolated into innerHTML (q.type/q.number come from
+ // admin-controlled JSON, but defense-in-depth costs nothing). Weight 0 must
+ // be rendered as 0, not silently promoted to 1.0 by `|| 1.0`.
+ const typeLabel = typeLabels[q.type] || escapeHtml(String(q.type || ''));
+ const weight = (q.weight !== undefined && q.weight !== null && q.weight !== '') ? q.weight : 1.0;
+ const correctDisplay = formatAnswer(q.key);
+
+ item.innerHTML = `
+ <div class="key-card-header">
+ <span class="key-card-number">Soal ${escapeHtml(String(q.number))}</span>
+ <span class="key-card-weight">Bobot: ${escapeHtml(String(weight))}</span>
+ </div>
+ <div style="font-size: 0.72rem; color: var(--color-text-muted); font-weight: 500;">${escapeHtml(String(typeLabel))}</div>
+ <div style="margin-top: 4px;">
+ <div style="font-size: 0.72rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;">Kunci Jawaban:</div>
+ <div style="font-size: 0.95rem; font-weight: 700; color: var(--color-success); margin-top: 4px; word-break: break-all;">${correctDisplay}</div>
+ </div>
+ `;
+ grid.appendChild(item);
+ });
+ }
+
+ // ===== Filter Results (server-side search, debounced) =====
+ function filterResults() {
+ clearTimeout(searchTimer);
+ searchTimer = setTimeout(() => {
+  const input = document.getElementById('searchInput');
+  searchQuery = input.value.trim();
+  currentPage = 1;
+  loadResults();
+ }, 350);
+ }
+
+ // ===== Helpers =====
+ function getScoreClass(score, maxScore) {
+ if (score === null || score === undefined) return 'score-none';
+ const pct = maxScore ? (score / maxScore) * 100 : score;
+ if (pct >= 70) return 'score-high';
+ if (pct >= 40) return 'score-mid';
+ return 'score-low';
+ }
+
+ // ===== T3 + R40: Status kelulusan eksplisit, tiga tingkat =====
+ // Label status untuk sebuah nilai, memakai ambang tampilan yang sama dengan
+ // getScoreClass() (hijau ≥ 70, kuning 40–69 "Hampir", merah < 40). Band kuning
+ // tidak lagi memakai chip merah "Belum Lulus" — dua sinyal warna berlawanan.
+ // Ambang masih hard-coded mengikuti warna badge; KKM per sekolah (setting
+ // backend) menyusul di batch berikutnya.
+ function getPassStatus(score, maxScore) {
+ if (score === null || score === undefined) return { text: 'Belum Dikoreksi', cls: 'score-status-none' };
+ const pct = maxScore ? (score / maxScore) * 100 : score;
+ if (pct >= 70) return { text: 'Lulus', cls: 'score-status-pass' };
+ if (pct >= 40) return { text: 'Hampir', cls: 'score-status-mid' };
+ return { text: 'Belum Lulus', cls: 'score-status-fail' };
+ }
+
+ function formatAnswer(val) {
+ if (val === undefined || val === null) return '<span style="color:var(--color-text-muted);">&mdash;</span>';
+ if (Array.isArray(val)) return escapeHtml(val.join(', '));
+ if (typeof val === 'object') return escapeHtml(Object.entries(val).map(function(e) { return e[0] + '→' + e[1]; }).join(', '));
+ return escapeHtml(String(val));
+ }
+
+ /* escapeHtml + localizeUTC provided by admin-core.js (loaded via defer in head) */
+ </script>
+</body>
+</html>
