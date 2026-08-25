@@ -2,6 +2,7 @@
 #include "session/cookie.hpp"
 #include "websocket/hub.hpp"
 #include <sstream>
+#include <fstream>
 #include <thread>
 #include <atomic>
 #include <cstring>
@@ -150,6 +151,34 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
   close(cfd);
 }
 
+static std::string content_type_for(const std::string& p){
+  if(p.size()>=4 && p.substr(p.size()-4)==".css") return "text/css";
+  if(p.size()>=3 && p.substr(p.size()-3)==".js") return "application/javascript";
+  if(p.size()>=4 && p.substr(p.size()-4)==".png") return "image/png";
+  if(p.size()>=4 && p.substr(p.size()-4)==".ico") return "image/x-icon";
+  if(p.size()>=5 && p.substr(p.size()-5)==".woff") return "font/woff";
+  if(p.size()>=6 && p.substr(p.size()-6)==".woff2") return "font/woff2";
+  return "text/plain";
+}
+
+static bool try_serve_static(int cfd, const std::string& path){
+  std::string fp;
+  if(path.rfind("/static/",0)==0) fp="."+path;
+  else if(path=="/favicon.ico") fp="./static/favicon.png";
+  else return false;
+  std::ifstream f(fp, std::ios::binary);
+  if(!f) return false;
+  std::ostringstream ss; ss<<f.rdbuf();
+  std::string body=ss.str();
+  std::string ct=content_type_for(fp);
+  std::ostringstream out;
+  out<<"HTTP/1.1 200 OK\r\nContent-Type: "<<ct<<"\r\nContent-Length: "<<body.size()<<"\r\nCache-Control: public, max-age=31536000, immutable\r\nConnection: close\r\n\r\n"<<body;
+  std::string s=out.str();
+  send(cfd, s.c_str(), s.size(), 0);
+  close(cfd);
+  return true;
+}
+
 static void handle_client(int cfd, examvan::Router* router, const examvan::Config* cfg, examvan::Hub* hub) {
   std::string req;
   char buf[8192];
@@ -171,6 +200,7 @@ static void handle_client(int cfd, examvan::Router* router, const examvan::Confi
   std::string method=req.substr(0,sp1);
   std::string full_path=req.substr(sp1+1, sp2-sp1-1);
   std::string path=full_path; auto q=full_path.find('?'); if(q!=std::string::npos) path=full_path.substr(0,q);
+  if(try_serve_static(cfd, path)) return;
   if (is_ws_upgrade(req) && path.rfind("/ws/",0)==0) {
     if (cfg && hub) handle_ws(cfd, req, path, *cfg, hub);
     else close(cfd);
@@ -231,6 +261,22 @@ bool Server::listen(const ServerOpts& opts) {
     });
     g_app->any("/*", [router_ptr](auto *res, auto *req){
       std::string path(req->getUrl());
+      if(path.rfind("/static/",0)==0 || path=="/favicon.ico"){
+        std::string fp = path=="/favicon.ico" ? "./static/favicon.png" : "."+path;
+        std::ifstream f(fp, std::ios::binary);
+        if(f){
+          std::ostringstream ss; ss<<f.rdbuf();
+          std::string body=ss.str();
+          std::string ct="text/plain";
+          if(fp.size()>=4 && fp.substr(fp.size()-4)==".css") ct="text/css";
+          else if(fp.size()>=3 && fp.substr(fp.size()-3)==".js") ct="application/javascript";
+          else if(fp.size()>=4 && fp.substr(fp.size()-4)==".png") ct="image/png";
+          res->writeHeader("Content-Type",ct);
+          res->writeHeader("Cache-Control","public, max-age=31536000, immutable");
+          res->end(body);
+          return;
+        }
+      }
       /* HACK uWS v20: getMethod() melowercase method secara in-place
        * (HttpParser.h "Compatibility hack") — Router membandingkan "GET"
        * uppercase, jadi normalisasi kembali ke uppercase sebelum dispatch. */
