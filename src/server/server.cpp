@@ -11,6 +11,10 @@
 #include <arpa/inet.h>
 #include <openssl/sha.h>
 #include <openssl/evp.h>
+#ifdef HAS_UWEBSOCKETS
+#include "App.h"
+struct WsData { std::string room; bool privileged; std::string id; };
+#endif
 
 namespace examvan::server {
 
@@ -172,7 +176,80 @@ static void handle_client(int cfd, examvan::Router* router, const examvan::Confi
   close(cfd);
 }
 
+#ifdef HAS_UWEBSOCKETS
+static uWS::App* g_app = nullptr;
+static std::thread g_uWS_thread;
+#endif
+
 bool Server::listen(const ServerOpts& opts) {
+#ifdef HAS_UWEBSOCKETS
+  g_app = new uWS::App();
+  auto* hub_ptr = hub_;
+  auto* router_ptr = router_;
+  auto& cfg_ref = cfg_;
+  g_app->get("/api/health", [router_ptr](auto *res, auto *req){
+    examvan::Request r; r.method="GET"; r.path="/api/health";
+    auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
+    res->writeHeader("Content-Type","application/json");
+    res->end(resp.body);
+  });
+  g_app->any("/*", [router_ptr](auto *res, auto *req){
+    std::string path(req->getUrl());
+    std::string method(req->getMethod());
+    examvan::Request r; r.method=method; r.path=path;
+    auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
+    if(resp.status==0) resp.status=404;
+    for(auto &h: resp.headers) res->writeHeader(h.first, h.second);
+    res->writeStatus(std::to_string(resp.status));
+    res->end(resp.body);
+  });
+  g_app->ws<WsData>("/ws/:room_id", {
+    .upgrade = [hub_ptr, &cfg_ref](auto *res, auto *req, auto *context){
+      std::string cookie(req->getHeader("cookie"));
+      auto sess = examvan::verify_session_cookie(cfg_ref.secret_key, cookie);
+      bool priv = sess.has_value() && sess->admin_id!=0;
+      std::string origin(std::string(req->getHeader("origin")));
+      std::string host(std::string(req->getHeader("host")));
+      if(!examvan::check_origin(origin, host)){ res->close(); return; }
+      std::string room(req->getParameter(0));
+      res->template upgrade<WsData>({room, priv, ""}, req->getHeader("sec-websocket-key"), req->getHeader("sec-websocket-protocol"), req->getHeader("sec-websocket-extensions"), context);
+    },
+    .open = [hub_ptr](auto *ws){
+      auto* d = ws->getUserData();
+      auto c = std::make_shared<examvan::Client>();
+      c->room = d->room; c->privileged = d->privileged;
+      hub_ptr->add_client(c);
+      d->id = std::to_string((uintptr_t)ws);
+      ws->getUserData()->id = d->id;
+    },
+    .message = [hub_ptr](auto *ws, std::string_view msg, uWS::OpCode op){
+      if(op!=uWS::OpCode::TEXT) return;
+      auto* d = ws->getUserData();
+      auto c = std::make_shared<examvan::Client>();
+      c->room = d->room; c->privileged = d->privileged;
+      hub_ptr->handle_message(c, std::string(msg));
+      while(!c->send_queue.empty()){
+        std::string m;
+        { std::lock_guard<std::mutex> g(c->mu); if(c->send_queue.empty()) break; m=c->send_queue.front(); c->send_queue.pop(); }
+        ws->send(m, uWS::OpCode::TEXT);
+      }
+    },
+    .close = [hub_ptr](auto *ws, int, std::string_view){
+      auto* d = ws->getUserData();
+      auto c = std::make_shared<examvan::Client>();
+      c->room = d->room;
+      hub_ptr->remove_client(c);
+    }
+  });
+  g_app->listen(opts.port, [opts](auto *token){
+    if(token) std::cout << "uWS listening on " << opts.port << std::endl;
+    else std::cout << "uWS failed to listen on " << opts.port << std::endl;
+  });
+  g_uWS_thread = std::thread([]{ g_app->run(); });
+  g_uWS_thread.detach();
+  running_=true; g_running=true;
+  return true;
+#else
   g_fd = socket(AF_INET, SOCK_STREAM, 0);
   if(g_fd<0) return false;
   int opt=1; setsockopt(g_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -189,15 +266,24 @@ bool Server::listen(const ServerOpts& opts) {
     }
   }).detach();
   return true;
+#endif
 }
 
 void Server::run() {
+#ifdef HAS_UWEBSOCKETS
   while (running_ && g_running) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+#else
+  while (running_ && g_running) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+#endif
 }
 
 void Server::stop() {
   running_=false; g_running=false;
+#ifdef HAS_UWEBSOCKETS
+  if(g_app) g_app->close();
+#else
   if(g_fd>=0){ shutdown(g_fd, SHUT_RDWR); close(g_fd); g_fd=-1; }
+#endif
 }
 
 std::string health_json(const Config& cfg) {
