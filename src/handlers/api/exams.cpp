@@ -11,7 +11,7 @@ Response health(const Request& req){
 }
 
 Response time_handler(const Request&){
-  Response r; r.json(200,"{\"now\":\""+helpers::format_iso_utc(std::chrono::system_clock::now())+"\"}"); return r;
+  Response r; r.json(200,"{\"server_time\":\""+helpers::format_iso_utc(std::chrono::system_clock::now())+"\",\"success\":true,\"timezone\":\"UTC\"}"); return r;
 }
 
 Response list_exams(const Request& req){
