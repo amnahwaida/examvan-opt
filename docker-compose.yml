@@ -39,6 +39,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     container_name: examvan-cpp-server
     restart: unless-stopped
     expose: ["5000"]
