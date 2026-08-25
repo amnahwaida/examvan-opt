@@ -146,6 +146,7 @@ add_executable(examvan-tests
   tests/test_f5_logout.cpp
   tests/test_f6_users.cpp
   tests/test_f6_exams.cpp
+  tests/test_f7_jobs.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)
