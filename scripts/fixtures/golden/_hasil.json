@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ 
+ <meta name="theme-color" content="#09090e">
+ 
+
+ <link rel="preconnect" href="https://fonts.googleapis.com">
+ <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+ <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+ <title>EXAMVAN - Cek Hasil Ujian</title>
+ <meta name="description" content="EXAMVAN adalah aplikasi ujian online mandiri dengan sistem keamanan tinggi terhindar dari kecurangan.">
+ <meta name="robots" content="noindex, nofollow">
+ <link rel="stylesheet" href="/static/css/theme.css?v=2.7.3-983a6cca">
+ <link rel="stylesheet" href="/static/css/tailwind/output.css?v=2.7.3-983a6cca">
+ 
+<link rel="stylesheet" href="/static/css/public-mobile.css?v=2.7.3-983a6cca">
+ <link rel="stylesheet" href="/static/css/public-desktop.css?v=2.7.3-983a6cca">
+ <link rel="icon" type="image/png" href="/static/favicon.png">
+ <style>
+   
+  .login-form .form-group input { font-size: 16px; }
+ </style>
+</head>
+<body class="login-page">
+ 
+
+ <div class="nav-overlay" id="navOverlay" data-nav-toggle></div>
+ <nav>
+ <div class="nav-container">
+ <a href="/" class="logo-container">
+ <div class="logo-badge">E</div>
+ <div class="logo-text">EXAMVAN</div>
+ </a>
+ <button class="nav-hamburger" id="navHamburger" data-nav-toggle aria-label="Menu navigasi" aria-expanded="false" aria-controls="navLinks">&#9776;</button>
+ <div class="nav-links" id="navLinks">
+ <a href="/download" class="nav-link">Unduh Aplikasi</a>
+ <a href="/hasil" class="nav-link">Cek Hasil Ujian</a>
+ 
+ <a href="/register" class="nav-link">Daftar</a>
+ <a href="/login" class="btn-nav-login">Masuk</a>
+ 
+ </div>
+ </div>
+ </nav>
+ <script>
+ 
+ 
+ function toggleMenu() {
+ var links = document.getElementById('navLinks');
+ 
+ 
+ var wasOpen = !!(links && links.classList.contains('open'));
+ va

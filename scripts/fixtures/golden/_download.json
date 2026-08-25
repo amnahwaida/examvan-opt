@@ -1,0 +1,61 @@
+
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ <script>if (/Android/i.test(navigator.userAgent) || navigator.maxTouchPoints > 0) document.documentElement.classList.add("touch-device");</script>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <title>EXAMVAN - Aplikasi Ujian Online Aman &amp; Tertib</title>
+ <meta name="description" content="EXAMVAN adalah aplikasi ujian online mandiri dengan sistem keamanan tinggi terhindar dari kecurangan.">
+ <meta name="keywords" content="examvan, ujian online, ujian sekolah">
+ 
+ <meta name="robots" content="index, follow">
+ 
+
+ 
+ <meta property="og:title" content="EXAMVAN - Aplikasi Ujian Online Aman &amp; Tertib">
+ <meta property="og:description" content="EXAMVAN adalah aplikasi ujian online mandiri dengan sistem keamanan tinggi terhindar dari kecurangan.">
+ <meta property="og:type" content="website">
+ <meta property="og:image" content="/static/favicon.png">
+ 
+ <meta name="theme-color" content="#09090e">
+
+ 
+
+ <link rel="preconnect" href="https://fonts.googleapis.com">
+ <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+ <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+ <link rel="icon" type="image/png" href="/static/favicon.png">
+ 
+ <link rel="stylesheet" href="/static/css/theme.css?v=2.7.3-983a6cca">
+ <link rel="stylesheet" href="/static/css/public-mobile.css?v=2.7.3-983a6cca">
+ <link rel="stylesheet" href="/static/css/public-desktop.css?v=2.7.3-983a6cca">
+
+ <style>
+  
+
+  
+
+ * {
+ margin: 0;
+ padding: 0;
+ box-sizing: border-box;
+ font-family: 'Plus Jakarta Sans', sans-serif;
+ scroll-behavior: smooth;
+ }
+
+ body {
+ background-color: var(--color-bg);
+ color: var(--color-text);
+ display: flex;
+ flex-direction: column;
+ min-height: 100vh;
+ min-height: 100dvh;
+ overflow-x: clip;
+ line-height: 1.6;
+ }
+
+ body > main { flex: 1 0 auto; }
+ body > footer { flex: 0 0 auto; mar
