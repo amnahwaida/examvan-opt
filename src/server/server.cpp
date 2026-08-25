@@ -208,7 +208,11 @@ bool Server::listen(const ServerOpts& opts) {
     });
     g_app->any("/*", [router_ptr](auto *res, auto *req){
       std::string path(req->getUrl());
+      /* HACK uWS v20: getMethod() melowercase method secara in-place
+       * (HttpParser.h "Compatibility hack") — Router membandingkan "GET"
+       * uppercase, jadi normalisasi kembali ke uppercase sebelum dispatch. */
       std::string method(req->getMethod());
+      for (auto &c : method) c = toupper(static_cast<unsigned char>(c));
       examvan::Request r; r.method=method; r.path=path;
       auto cookie(std::string_view(req->getHeader("cookie")));
       if(!cookie.empty()) r.headers["Cookie"]=std::string(cookie);
