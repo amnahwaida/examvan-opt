@@ -15,6 +15,7 @@
 #include "handlers/auth/logout.hpp"
 #include "handlers/public/template_helper.hpp"
 #include "session/cookie.hpp"
+#include "session/csrf.hpp"
 #include <fstream>
 #include <sstream>
 
@@ -27,9 +28,13 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/login", [cfg](const Request& req){ return handlers::auth::login_handler(req, cfg); });
   r.add("POST","/logout", [](const Request& req){ return handlers::auth::logout_handler(req); });
   r.add("GET","/logout", [](const Request& req){ return handlers::auth::logout_page(req); });
-  r.add("GET","/register", [](const Request&){
+  r.add("GET","/register", [](const Request& req){
+    std::string csrf=generate_csrf_token();
     std::string html=handlers::public_::render_public_template("register","2.7.2");
+    size_t p=html.find("CSRF_PLACEHOLDER");
+    while(p!=std::string::npos){ html.replace(p,16,csrf); p=html.find("CSRF_PLACEHOLDER",p+csrf.size()); }
     Response res; res.status=200; res.headers["Content-Type"]="text/html";
+    res.headers["Set-Cookie"]="csrf_token="+csrf+"; Path=/";
     res.body=html.empty()?"<html>Register</html>":html; return res;
   });
   r.add("POST","/register", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
@@ -40,15 +45,23 @@ void register_full_routes(Router& r, const Config& cfg){
   });
   r.add("POST","/register/confirm", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
   r.add("POST","/register/resend", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
-  r.add("GET","/forgot-password", [](const Request&){
+  r.add("GET","/forgot-password", [](const Request& req){
+    std::string csrf=generate_csrf_token();
     std::string html=handlers::public_::render_public_template("forgot_password","2.7.2");
+    size_t p=html.find("CSRF_PLACEHOLDER");
+    while(p!=std::string::npos){ html.replace(p,16,csrf); p=html.find("CSRF_PLACEHOLDER",p+csrf.size()); }
     Response res; res.status=200; res.headers["Content-Type"]="text/html";
+    res.headers["Set-Cookie"]="csrf_token="+csrf+"; Path=/";
     res.body=html.empty()?"<html>Forgot</html>":html; return res;
   });
   r.add("POST","/forgot-password", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
-  r.add("GET","/reset-password", [](const Request&){
+  r.add("GET","/reset-password", [](const Request& req){
+    std::string csrf=generate_csrf_token();
     std::string html=handlers::public_::render_public_template("reset_password","2.7.2");
+    size_t p=html.find("CSRF_PLACEHOLDER");
+    while(p!=std::string::npos){ html.replace(p,16,csrf); p=html.find("CSRF_PLACEHOLDER",p+csrf.size()); }
     Response res; res.status=200; res.headers["Content-Type"]="text/html";
+    res.headers["Set-Cookie"]="csrf_token="+csrf+"; Path=/";
     res.body=html.empty()?"<html>Reset</html>":html; return res;
   });
   r.add("POST","/reset-password", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
