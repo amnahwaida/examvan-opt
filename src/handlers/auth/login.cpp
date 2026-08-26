@@ -27,6 +27,13 @@ Response login_page(const Request&){
     std::string html=ss.str();
     size_t p=html.find("{{.csrf_token}}"); if(p!=std::string::npos) html.replace(p, 15, csrf);
     p=html.find("{{ .csrf_token }}"); if(p!=std::string::npos) html.replace(p, 17, csrf);
+    /* rendered.html hasil capture Go berisi token HARDCODE — ganti semua
+     * kemunculannya (meta + hidden input) dengan csrf sesi ini. */
+    p=html.find("CSRF_PLACEHOLDER");
+    while(p!=std::string::npos){
+      html.replace(p, 16, csrf);
+      p=html.find("CSRF_PLACEHOLDER", p+csrf.size());
+    }
     Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]="csrf_token="+csrf+"; Path=/";
     r.body=html; return r;
   }
