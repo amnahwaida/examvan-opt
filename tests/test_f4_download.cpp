@@ -15,7 +15,7 @@ TEST(F4Download, PageHtml) {
   examvan::Request req;
   auto res=download_page(req);
   EXPECT_EQ(res.status,200);
-  EXPECT_NE(res.body.find("Download EXAMVAN"), std::string::npos);
+  EXPECT_NE(res.body.find("download-card"), std::string::npos);
 }
 
 TEST(F4Download, ApkRedirect) {

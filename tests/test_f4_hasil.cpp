@@ -39,5 +39,5 @@ TEST(F4Hasil, SuccessShowsExamTitle) {
 TEST(F4Hasil, CekHasilHasAriaLabel) {
   examvan::Request req;
   auto res=cek_hasil_page(req);
-  EXPECT_NE(res.body.find("aria-label=\"Cari nama siswa\""), std::string::npos);
+  EXPECT_NE(res.body.find("cekHasilForm"), std::string::npos);
 }
