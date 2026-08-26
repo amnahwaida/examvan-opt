@@ -21,7 +21,8 @@ std::string get_csrf_for_test(const std::string& ck){ (void)ck; return "test-csr
 
 Response login_page(const Request&){
   std::string csrf=generate_csrf_token();
-  std::ifstream fr("templates/public/login.rendered.html");
+  std::ifstream fr("templates/admin/login.rendered.html");
+  if(!fr) fr.open("templates/public/login.rendered.html");
   if(!fr) fr.open("templates/admin/login.html");
   if(fr){
     std::ostringstream ss; ss<<fr.rdbuf();
@@ -77,10 +78,25 @@ Response login_handler(const Request& req, const Config& cfg){
     Response r; r.status=401; r.json(401,"{\"error\":\"invalid credentials\"}"); return r;
   }
   std::string payload=b64_encode("admin_id=1&username="+username+"&role=[\"guru\"]");
-  std::string cookie_val=encode_cookie_value(cfg.secret_key, payload);
-  Response r; r.status=200; r.headers["Set-Cookie"]="examvan_session="+cookie_val+"; Path=/; HttpOnly; SameSite=Lax";
-  r.json(200,"{\"success\":true,\"username\":\""+username+"\"}");
-  r.headers["Set-Cookie"]= "examvan_session="+cookie_val+"; Path=/; HttpOnly; SameSite=Lax";
+  std::string cookie="examvan_session="+encode_cookie_value(cfg.secret_key, payload)+"; Path=/; HttpOnly; SameSite=Lax";
+  /* Klien API (fetch/AJAX) tetap menerima JSON {success,message} sesuai kontrak
+   * F1 §5. Form HTML biasa tidak punya header tersebut → 303 redirect agar
+   * browser langsung menuju dashboard/next, bukan menampilkan JSON mentah. */
+  bool wants_json=false;
+  if(auto h=req.headers.find("Accept"); h!=req.headers.end() && h->second.find("application/json")!=std::string::npos) wants_json=true;
+  if(auto x=req.headers.find("X-Requested-With"); x!=req.headers.end() && x->second=="XMLHttpRequest") wants_json=true;
+  if(wants_json){
+    Response r; r.json(200,"{\"success\":true,\"username\":\""+username+"\"}");
+    r.headers["Set-Cookie"]=cookie;
+    return r;
+  }
+  std::string target="/admin/dashboard";
+  if(auto n=form.find("next"); n!=form.end() && !n->second.empty()){
+    /* open-redirect guard: hanya path relatif dalam situs yang diizinkan */
+    const std::string& nx=n->second;
+    if(nx[0]=='/' && (nx.size()==1 || nx[1]!='/') && nx.find("\\")==std::string::npos) target=nx;
+  }
+  Response r; r.status=303; r.headers["Location"]=target; r.headers["Set-Cookie"]=cookie;
   return r;
 }
 
