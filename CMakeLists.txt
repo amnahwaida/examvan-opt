@@ -101,6 +101,7 @@ add_library(examvan_core STATIC
   src/handlers/public/hasil.cpp
   src/handlers/public/download.cpp
   src/handlers/public/template_helper.cpp
+  src/handlers/admin/template_helper.cpp
   src/handlers/api/exams.cpp
   src/handlers/api/webhook.cpp
   src/handlers/admin/dashboard.cpp

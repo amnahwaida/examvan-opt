@@ -1,0 +1,2515 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ <meta charset="UTF-8">
+<script>if (/Android/i.test(navigator.userAgent) || navigator.maxTouchPoints > 0) document.documentElement.classList.add("touch-device");</script>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>EXAMVAN — Pengaturan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/theme.css?v=2.7.3-983a6cca">
+<link rel="stylesheet" href="/static/css/tailwind/output.css?v=2.7.3-983a6cca">
+<link rel="stylesheet" href="/static/css/admin-base.css?v=2.7.3-983a6cca">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<meta name="csrf-token" content="cf271c9f56a0371de5626854009eb250a0e8a15492d819d6bb24ad813e629c32">
+
+<style>
+  
+
+ @media (max-width: 768px) {
+    
+   .users-layout {
+     display: flex !important;
+     flex-direction: column-reverse !important;
+     gap: 16px !important;
+   }
+   
+    
+   .glass-card {
+     padding: 16px !important;
+   }
+   .glass-card h3 {
+     font-size: 1rem !important;
+     margin-bottom: 12px !important;
+   }
+   
+    
+   .exam-table, 
+   .exam-table tbody, 
+   .exam-table tr, 
+   .exam-table td {
+     display: block !important;
+     width: 100% !important;
+   }
+   .exam-table thead {
+     display: none !important;
+   }
+   
+   .exam-table tbody tr {
+     position: relative !important;
+     margin-bottom: 14px !important;
+     padding: 14px 16px !important;
+     display: flex !important;
+     flex-direction: column !important;
+     gap: 6px !important;
+     border-radius: 12px !important;
+   }
+   
+   .exam-table td {
+     display: flex !important;
+     align-items: center !important;
+     justify-content: space-between !important;
+     padding: 5px 0 !important;
+     border: none !important;
+     font-size: 0.8rem !important;
+     text-align: left !important;
+   }
+   
+   .exam-table td::before {
+     content: attr(data-label) !important;
+     font-weight: 700 !important;
+     font-size: 0.68rem !important;
+     text-transform: uppercase !important;
+     letter-spacing: 0.04em !important;
+     color: var(--color-text-muted) !important;
+   }
+   
+    
+   .exam-table td[data-label="Username"] {
+     display: block !important;
+     padding: 0 0 6px 0 !important;
+     border-bottom: 1px dashed var(--color-glass-border) !important;
+     margin-bottom: 4px !important;
+   }
+   .exam-table td[data-label="Username"]::before {
+     content: none !important;
+   }
+   .exam-table td[data-label="Username"] strong {
+     font-size: 1rem !important;
+     font-weight: 700 !important;
+   }
+   
+    
+   .exam-table td[data-label="Aksi"] {
+     justify-content: flex-end !important;
+     border-top: 1px solid var(--color-glass-border) !important;
+     margin-top: 6px !important;
+     padding-top: 10px !important;
+   }
+   .exam-table td[data-label="Aksi"]::before {
+     content: none !important;
+   }
+ }
+
+  
+ .default-pkg-row {
+   display: grid !important;
+   grid-template-columns: repeat(5, 1fr) !important;
+   gap: 16px !important;
+   width: 100% !important;
+ }
+ .default-pkg-row .form-group {
+   width: 100% !important;
+   flex: none !important;
+ }
+ .default-pkg-row .form-group label {
+   font-size: 0.8rem !important;
+   line-height: 1.2 !important;
+   height: 26px !important;
+   display: flex !important;
+   align-items: flex-end !important;
+   margin-bottom: 4px !important;
+ }
+
+  
+ @media (max-width: 768px) {
+   .default-pkg-row {
+     grid-template-columns: repeat(2, 1fr) !important;
+     gap: 8px !important;
+   }
+   .default-pkg-row .form-group label {
+     font-size: 0.65rem !important;
+     height: 24px !important;
+   }
+ }
+
+   
+  .switch-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    margin-bottom: 8px;
+  }
+  .switch-label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(var(--rgb-white),  0.08);
+    border: 1px solid var(--color-glass-border);
+    transition: .3s;
+    border-radius: 24px;
+  }
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--color-text-muted);
+    transition: .3s;
+    border-radius: 50%;
+  }
+  .switch input:checked + .slider {
+    background-color: var(--color-primary);
+  }
+  .switch input:checked + .slider:before {
+    background-color: var(--color-text);
+    transform: translateX(20px);
+  }
+  .switch input:focus + .slider {
+    box-shadow: 0 0 1px var(--color-primary);
+  }
+  .saas-domain-hint {
+    margin-left: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+  }
+  .saas-save-btn {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+  }
+   
+  .sub-pkg-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--color-text-secondary);
+    background: rgba(var(--rgb-white),  0.04);
+    border: 1px solid var(--color-glass-border);
+  }
+   
+  .disk-free-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.4;
+    background: rgba(var(--rgb-warning), 0.12);
+    color: var(--color-warning-light);
+    border: 1px solid rgba(var(--rgb-warning), 0.28);
+    cursor: help;
+    animation: diskBadgeIn 0.4s ease both;
+  }
+  @keyframes diskBadgeIn {
+    from { opacity: 0; transform: translateY(-3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+ 
+</style>
+<style>
+ 
+
+ .voucher-redeem-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+ }
+ .voucher-redeem-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+ }
+ .voucher-redeem-row button {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+ }
+ .tooltip {
+   position: relative;
+   cursor: help;
+   display: inline-flex;
+   align-items: center;
+   gap: 4px;
+   border-bottom: 1px dotted rgba(var(--rgb-white), 0.4);
+ }
+ .tooltip::after {
+   content: attr(data-tooltip);
+   position: absolute;
+   bottom: calc(100% + 8px);
+   left: 50%;
+   transform: translateX(-50%) translateY(5px);
+   background: rgba(15, 23, 42, 0.95);
+   backdrop-filter: blur(8px);
+   color: var(--color-text);
+   padding: 8px 12px;
+   border-radius: 8px;
+   font-size: 12px;
+   font-weight: 500;
+   white-space: nowrap;
+   opacity: 0;
+   visibility: hidden;
+   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+   z-index: 100;
+   border: 1px solid rgba(var(--rgb-white),  0.1);
+   box-shadow: 0 10px 25px rgba(var(--rgb-black), 0.3);
+   pointer-events: none;
+   text-transform: none !important;
+   letter-spacing: normal !important;
+ }
+ .tooltip::before {
+   content: '';
+   position: absolute;
+   bottom: 100%;
+   left: 50%;
+   transform: translateX(-50%) translateY(5px);
+   border: 5px solid transparent;
+   border-top-color: rgba(15, 23, 42, 0.95);
+   opacity: 0;
+   visibility: hidden;
+   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+   z-index: 100;
+   pointer-events: none;
+ }
+ .tooltip:hover::after,
+ .tooltip:hover::before {
+   opacity: 1;
+   visibility: visible;
+   transform: translateX(-50%) translateY(0);
+ }
+ .tooltip svg {
+   opacity: 0.6;
+   width: 14px;
+   height: 14px;
+ }
+ .tooltip:hover svg {
+   opacity: 1;
+   color: var(--color-primary);
+ }
+  @media (max-width: 768px) {
+    .billing-container { padding: 16px !important; }
+    .voucher-redeem-row { flex-wrap: wrap; }
+    .voucher-redeem-row input,
+    .voucher-redeem-row button {
+      flex-basis: 100%;
+      width: 100%;
+    }
+    .tooltip::after {
+      white-space: normal;
+      width: max-content;
+      max-width: calc(100vw - 48px);
+      left: 0;
+      transform: translateY(5px);
+      text-align: left;
+    }
+    .tooltip::before {
+      left: 16px;
+      transform: translateY(5px);
+    }
+    .tooltip:hover::after,
+    .tooltip:hover::before {
+      transform: translateY(0);
+    }
+  }
+ 
+</style>
+<style>
+ 
+
+  .voucher-code-badge {
+     
+    appearance: none;
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 8px;
+    background: rgba(var(--rgb-accent), 0.12);
+    border: 1px solid rgba(var(--rgb-accent), 0.3);
+    color: var(--color-accent-light);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: all;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+  }
+  .voucher-code-badge:hover {
+    background: rgba(var(--rgb-accent), 0.25);
+    border-color: rgba(var(--rgb-accent), 0.5);
+    box-shadow: 0 0 12px rgba(var(--rgb-accent), 0.25);
+    transform: translateY(-1px);
+  }
+  .voucher-code-badge.copied {
+    background: rgba(var(--rgb-success), 0.2) !important;
+    border-color: rgba(var(--rgb-success), 0.6) !important;
+    color: var(--color-success-light) !important;
+    box-shadow: 0 0 16px rgba(var(--rgb-success), 0.45);
+    animation: copyPulse 0.4s ease-out;
+  }
+  .voucher-code-badge.copied .voucher-copy-btn {
+    color: var(--color-success-light);
+    opacity: 1;
+  }
+  @keyframes copyPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+    100% { transform: scale(1); }
+  }
+  .voucher-copy-btn {
+    cursor: pointer;
+    opacity: 0.75;
+    transition: all 0.2s;
+  }
+  .voucher-code-badge:hover .voucher-copy-btn {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+ 
+</style>
+<style>
+ 
+
+  .audit-action-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .audit-action-badge.redeemed {
+    background: rgba(var(--rgb-success), 0.12);
+    border: 1px solid rgba(var(--rgb-success), 0.35);
+    color: var(--color-success-light);
+  }
+  .audit-action-badge.activated {
+    background: rgba(var(--rgb-accent), 0.12);
+    border: 1px solid rgba(var(--rgb-accent), 0.35);
+    color: var(--color-accent-light);
+  }
+  .audit-action-badge.deactivated {
+    background: rgba(248, 113, 113, 0.12);
+    border: 1px solid rgba(248, 113, 113, 0.35);
+    color: var(--color-danger-bright);
+  }
+ 
+</style>
+<style>
+ 
+
+  .pkg-table input[type="text"], .pkg-table input[type="number"], .pkg-table select {
+   width: 100%;
+   padding: 7px 10px;
+   background: rgba(var(--rgb-black), 0.3);
+   border: 1px solid var(--color-glass-border);
+   border-radius: 8px;
+   color: var(--color-text);
+   font-size: 13px;
+   outline: none;
+  }
+  .pkg-table input:focus, .pkg-table select:focus {
+   border-color: rgb(var(--rgb-accent));
+   box-shadow: 0 0 0 2px rgba(var(--rgb-accent),0.2);
+  }
+  .pkg-table input[type="number"] { min-width: 90px; }
+  .pkg-table select option { background: #1e1b4b; color: var(--color-text); }
+  .pkg-key-badge {
+   font-family: var(--font-mono);
+   font-size: 0.78rem;
+   font-weight: 700;
+   padding: 3px 8px;
+   border-radius: 6px;
+   background: rgba(var(--rgb-info),0.12);
+   border: 1px solid rgba(var(--rgb-info),0.3);
+   color: var(--color-primary-light);
+   display: inline-block;
+   margin-top: 4px;
+  }
+ 
+</style>
+<style>
+ 
+
+     
+    .premium-header-title {
+        font-size: 2rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, var(--color-primary-bright), var(--color-accent-light), #f472b6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0;
+        letter-spacing: -0.02em;
+    }
+    .header-icon-wrap {
+        width: 46px;
+        height: 46px;
+        background: linear-gradient(135deg, rgba(var(--rgb-info),0.15), rgba(var(--rgb-accent),0.15));
+        border: 1px solid rgba(139,92,246,0.3);
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #a78bfa;
+        box-shadow: 0 4px 15px rgba(139,92,246,0.2);
+    }
+    .btn-premium {
+        background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        border: none;
+        box-shadow: 0 4px 15px rgba(var(--rgb-info), 0.4);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 12px;
+        font-weight: 600;
+        padding: 12px 24px;
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+    }
+    .btn-premium::after {
+        content: '';
+        position: absolute;
+        top: 0; left: -100%; width: 50%; height: 100%;
+        background: linear-gradient(to right, transparent, rgba(var(--rgb-white), 0.2), transparent);
+        transform: skewX(-20deg);
+        transition: all 0.5s;
+    }
+    .btn-premium:hover::after {
+        left: 150%;
+    }
+    .btn-premium:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(var(--rgb-info), 0.5);
+    }
+    .btn-premium:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+    }
+    
+    .premium-card {
+        background: rgba(var(--rgb-white),  0.03);
+        border: 1px solid rgba(var(--rgb-white),  0.08);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 10px 30px rgba(var(--rgb-black),  0.2);
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex;
+        flex-direction: column;
+    }
+    .premium-card:hover {
+        transform: translateY(-6px);
+        box-shadow: 0 20px 40px rgba(var(--rgb-black),  0.4);
+        border-color: rgba(139, 92, 246, 0.4);
+        background: rgba(var(--rgb-white),  0.05);
+    }
+    
+    .platform-icon {
+        width: 56px;
+        height: 56px;
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        margin-bottom: 20px;
+    }
+    .platform-android { background: linear-gradient(135deg, rgba(var(--rgb-success),0.1), rgba(5,150,105,0.2)); color: var(--color-success-light); border: 1px solid rgba(var(--rgb-success),0.3); box-shadow: 0 4px 15px rgba(var(--rgb-success),0.1); }
+    .platform-windows { background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(37,99,235,0.2)); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); box-shadow: 0 4px 15px rgba(59,130,246,0.1); }
+    .platform-linux { background: linear-gradient(135deg, rgba(var(--rgb-warning),0.1), rgba(217,119,6,0.2)); color: var(--color-warning-light); border: 1px solid rgba(var(--rgb-warning),0.3); box-shadow: 0 4px 15px rgba(var(--rgb-warning),0.1); }
+    
+    .app-title {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: white;
+        margin-bottom: 6px;
+        letter-spacing: -0.01em;
+    }
+    .app-version {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        background: rgba(var(--rgb-white), 0.1);
+        color: #e2e8f0;
+        margin-bottom: 20px;
+        border: 1px solid rgba(var(--rgb-white), 0.05);
+    }
+
+    .apps-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+        gap: 28px;
+        margin-top: 32px;
+    }
+
+    .app-meta {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85rem;
+        color: var(--color-text-placeholder);
+        margin-top: auto;
+        padding-top: 16px;
+        border-top: 1px solid rgba(var(--rgb-white), 0.08);
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 12px;
+        margin-top: 24px;
+    }
+    
+    .btn-icon {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px;
+        border-radius: 12px;
+        font-weight: 600;
+        transition: all 0.2s ease;
+        text-decoration: none;
+        cursor: pointer;
+        border: 1px solid transparent;
+        font-size: 0.95rem;
+    }
+    .btn-download {
+        background: rgba(59, 130, 246, 0.1);
+        color: #60a5fa;
+        border-color: rgba(59, 130, 246, 0.2);
+    }
+    .btn-download:hover {
+        background: #3b82f6;
+        color: white;
+        border-color: #3b82f6;
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+    }
+    
+    .btn-delete {
+        background: rgba(var(--rgb-danger), 0.1);
+        color: var(--color-danger-bright);
+        border-color: rgba(var(--rgb-danger), 0.2);
+    }
+    .btn-delete:hover {
+        background: var(--color-danger);
+        color: white;
+        border-color: var(--color-danger);
+        box-shadow: 0 4px 15px rgba(var(--rgb-danger), 0.4);
+    }
+
+     
+     
+
+    @keyframes modalSlideUp {
+        from { opacity: 0; transform: scale(0.95) translateY(30px); }
+        to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .modal-glass {
+        width: 100%; max-width: 520px; max-height: 90vh; display: flex; flex-direction: column;
+        background: linear-gradient(180deg, rgba(30,41,59,0.95) 0%, rgba(15,23,42,0.98) 100%);
+        border: 1px solid rgba(var(--rgb-white), 0.15);
+        border-radius: 24px; overflow: hidden;
+        box-shadow: 0 25px 50px -12px rgba(var(--rgb-black), 0.6), 0 0 0 1px rgba(var(--rgb-white), 0.05);
+        animation: modalSlideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    .modal-header {
+        padding: 24px 32px; border-bottom: 1px solid rgba(var(--rgb-white), 0.08);
+        background: rgba(var(--rgb-white), 0.03);
+    }
+     
+    .modal-body { padding: 32px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .modal-footer {
+        padding: 20px 32px; border-top: 1px solid rgba(var(--rgb-white), 0.08);
+        background: rgba(var(--rgb-black), 0.25); display: flex; justify-content: flex-end; gap: 16px;
+    }
+    
+    .form-label {
+        display: block; font-size: 0.9rem; font-weight: 600; color: var(--color-text-secondary); margin-bottom: 10px;
+    }
+    .custom-input, .custom-select {
+        width: 100%; padding: 14px 18px; border-radius: 12px;
+        border: 1px solid rgba(var(--rgb-white), 0.15); background: rgba(var(--rgb-black), 0.3); color: white;
+        transition: all 0.3s ease; font-size: 0.95rem; box-sizing: border-box;
+    }
+    .custom-input:focus, .custom-select:focus {
+        outline: none; border-color: #8b5cf6; box-shadow: 0 0 0 4px rgba(139,92,246,0.2); background: rgba(var(--rgb-black), 0.5);
+    }
+    .custom-file-input {
+        position: relative; width: 100%; border: 2px dashed rgba(var(--rgb-white), 0.2); border-radius: 16px;
+        padding: 40px 20px; text-align: center; background: rgba(var(--rgb-black), 0.15); transition: all 0.3s ease; cursor: pointer; box-sizing: border-box;
+    }
+    .custom-file-input:hover { border-color: #8b5cf6; background: rgba(139,92,246,0.08); }
+    .custom-file-input input[type="file"] {
+        position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .file-icon {
+        width: 54px; height: 54px; margin: 0 auto 16px; color: #a78bfa; transition: transform 0.3s ease;
+    }
+    .custom-file-input:hover .file-icon { transform: translateY(-4px); color: var(--color-accent-light); }
+    
+    .btn-cancel {
+        padding: 12px 24px; border-radius: 12px; border: 1px solid rgba(var(--rgb-white), 0.1); background: transparent; color: var(--color-text-secondary); font-weight: 600; cursor: pointer; transition: all 0.2s;
+    }
+    .btn-cancel:hover { background: rgba(var(--rgb-white), 0.1); color: white; }
+    
+    .alert-premium {
+        margin-bottom:36px; 
+        background: linear-gradient(to right, rgba(var(--rgb-warning),0.15), rgba(var(--rgb-warning),0.05)); 
+        padding:24px; 
+        border-radius:20px; 
+        border: 1px solid rgba(var(--rgb-warning),0.4); 
+        display:flex; 
+        gap:20px; 
+        align-items:center; 
+        box-shadow: 0 10px 30px rgba(var(--rgb-warning),0.1);
+    }
+    .alert-icon-box {
+        width: 56px; height: 56px; border-radius: 16px; background: rgba(var(--rgb-warning),0.2); 
+        display: flex; align-items: center; justify-content: center; color: var(--color-warning-light); flex-shrink: 0;
+        border: 1px solid rgba(var(--rgb-warning),0.3);
+    }
+
+</style>
+<style>
+ 
+@keyframes spin { 100% { transform: rotate(360deg); } }
+</style>
+<style>
+ 
+
+ 
+.upload-progress-pill {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    z-index: var(--z-toast); display: none; align-items: center; gap: 10px;
+    padding: 10px 18px; border-radius: 999px;
+    background: rgba(var(--rgb-black), 0.85);
+    border: 1px solid rgba(var(--rgb-accent), 0.45);
+    color: var(--color-text);
+    font-size: 13.5px; font-weight: 600;
+    box-shadow: 0 10px 30px rgba(var(--rgb-black), 0.45);
+}
+.upload-progress-pill .icon-svg {
+    width: 16px; height: 16px;
+    animation: spin 1s linear infinite;
+}
+
+ 
+.saas-dirty-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: rgb(var(--rgb-warning));
+    margin-left: 8px; vertical-align: middle;
+}
+</style>
+</head>
+<body class="dashboard-page">
+
+
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none;" aria-hidden="true">
+ <symbol id="hi-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/></symbol>
+ <symbol id="hi-results" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></symbol>
+ <symbol id="hi-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></symbol>
+ <symbol id="hi-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/></symbol>
+ <symbol id="hi-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></symbol>
+ <symbol id="hi-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></symbol>
+ <symbol id="hi-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></symbol>
+ <symbol id="hi-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+ <symbol id="hi-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"/></symbol>
+ <symbol id="hi-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/></symbol>
+ <symbol id="hi-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></symbol>
+ <symbol id="hi-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+ <symbol id="hi-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"/></symbol>
+ <symbol id="hi-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15m7.5-7.5h-15"/></symbol>
+ <symbol id="hi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.75 6 6 9-13.5"/></symbol>
+ <symbol id="hi-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></symbol>
+ <symbol id="hi-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></symbol>
+ <symbol id="hi-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184"/></symbol>
+ <symbol id="hi-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+ <symbol id="hi-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></symbol>
+ <symbol id="hi-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></symbol>
+ <symbol id="hi-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 19.5 8.25 12l7.5-7.5"/></symbol>
+ <symbol id="hi-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></symbol>
+ <symbol id="hi-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"/></symbol>
+ <symbol id="hi-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18"/></symbol>
+ <symbol id="hi-exclamation" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></symbol>
+ <symbol id="hi-information" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></symbol>
+ <symbol id="hi-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"/></symbol>
+ <symbol id="hi-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"/></symbol>
+ <symbol id="hi-lock-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 10.5V6.75a4.5 4.5 0 1 1 9 0v3.75M3.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H3.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+ <symbol id="hi-device" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></symbol>
+ <symbol id="hi-credit-card" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"/></symbol>
+ <symbol id="hi-banknotes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z"/></symbol>
+ <symbol id="hi-shield-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></symbol>
+ <symbol id="hi-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+ <symbol id="hi-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+ <symbol id="hi-building-library" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0 0 12 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75Z"/></symbol>
+ <symbol id="hi-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+ <symbol id="hi-ticket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-12v.75m0 3v.75m0 3v.75m0 3V18M3 7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v1.875a1.5 1.5 0 0 0 0 2.25V16.5A2.25 2.25 0 0 1 18.75 18.75H5.25A2.25 2.25 0 0 1 3 16.5v-4.875a1.5 1.5 0 0 0 0-2.25V7.5Z"/></symbol>
+ <symbol id="hi-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"/></symbol>
+ <symbol id="hi-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.25 7.5A2.25 2.25 0 0 1 7.5 5.25h9a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25h-9a2.25 2.25 0 0 1-2.25-2.25v-9Z"/></symbol>
+ <symbol id="hi-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></symbol>
+</svg>
+
+
+
+<a href="#mainContent" class="skip-link">Langsung ke konten utama</a>
+
+
+
+
+
+
+
+<header>
+<nav class="topbar">
+ <div class="topbar-left">
+  <div class="topbar-logo">E</div>
+  <a href="/" class="topbar-title" style="text-decoration:none;color:inherit;">EXAMVAN</a>
+ </div>
+ <div class="topbar-center">
+  <div class="topbar-nav">
+   
+    <a href="/admin/dashboard" class="nav-link " ><svg class="icon-svg" aria-hidden="true"><use href="#hi-dashboard"/></svg> Daftar Ujian</a>
+    <a href="/admin/submissions" class="nav-link " ><svg class="icon-svg" aria-hidden="true"><use href="#hi-results"/></svg> Hasil Ujian</a>
+   
+   
+    <a href="/admin/pengawas" class="nav-link " ><svg class="icon-svg" aria-hidden="true"><use href="#hi-eye"/></svg> Pengawasan</a>
+   
+   
+    <a href="/admin/settings" class="nav-link active" aria-current="page"><svg class="icon-svg" aria-hidden="true"><use href="#hi-settings"/></svg> Pengaturan</a>
+   
+  </div>
+ </div>
+ <div class="topbar-right">
+  <div class="topbar-menu-dropdown">
+    
+    <button class="topbar-menu-toggle" id="menuToggleBtn" aria-label="Menu akun & pengaturan" aria-haspopup="true" aria-expanded="false">
+     <span class="menu-hamburger-icon">&#9776;</span>
+    </button>
+   <div class="topbar-dropdown-content" id="menuDropdownContent">
+    <div class="dropdown-header mobile-only-header">
+     <div class="dropdown-brand-row">
+      <div class="dropdown-logo">E</div>
+      <span class="dropdown-brand-title">EXAMVAN</span>
+     </div>
+    </div>
+    
+    <div class="dropdown-divider mobile-only-divider"></div>
+    <div class="mobile-nav-links">
+     
+      <a href="/admin/dashboard" class="dropdown-item " ><svg class="icon-svg"><use href="#hi-dashboard"/></svg> Daftar Ujian</a>
+      <a href="/admin/submissions" class="dropdown-item " ><svg class="icon-svg"><use href="#hi-results"/></svg> Hasil Ujian</a>
+     
+     
+      <a href="/admin/pengawas" class="dropdown-item " ><svg class="icon-svg"><use href="#hi-eye"/></svg> Pengawasan</a>
+     
+     
+      <div class="dropdown-divider"></div>
+      <a href="/admin/settings" class="dropdown-item active" aria-current="page"><svg class="icon-svg"><use href="#hi-settings"/></svg> Pengaturan</a>
+     
+    </div>
+    <div class="dropdown-divider"></div>
+    
+    <div class="dropdown-user-info">
+     <span class="dropdown-user-name">superadmin</span>
+     <span class="dropdown-user-role">Super Admin</span>
+    </div>
+    <div class="dropdown-divider"></div>
+    
+    
+    <button class="dropdown-item" data-action="open-change-password-modal">
+     <svg class="icon-svg"><use href="#hi-key"/></svg> Ubah Password
+    </button>
+    <div class="dropdown-divider"></div>
+    <form method="POST" action="/logout" style="display:inline;">
+     <input type="hidden" name="_csrf_token" value="cf271c9f56a0371de5626854009eb250a0e8a15492d819d6bb24ad813e629c32">
+     <button type="submit" class="dropdown-item dropdown-logout" style="width:100%;border:none;background:none;cursor:pointer;">
+      <svg class="icon-svg" aria-hidden="true"><use href="#hi-logout"/></svg> Logout
+     </button>
+    </form>
+   </div>
+  </div>
+ </div>
+ </nav>
+</header>
+
+
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+<script>
+
+
+(function () {
+    function registerNavActions() {
+        if (typeof Actions === 'undefined') return;
+        if (!Actions.has('open-change-password-modal')) {
+            Actions.register('open-change-password-modal', function () {
+                if (typeof openChangePasswordModal === 'function') openChangePasswordModal();
+            });
+        }
+    }
+    
+    registerNavActions();
+    
+    document.addEventListener('DOMContentLoaded', registerNavActions);
+})();
+</script>
+
+
+
+
+
+
+
+
+
+
+<nav class="settings-tabs" aria-label="Menu Pengaturan">
+ <div class="settings-tabs-scroll">
+  
+  <a href="/admin/settings#users" data-section="users" class="settings-tab "><svg class="icon-svg" aria-hidden="true"><use href="#hi-users"/></svg> Kelola User</a>
+  <a href="/admin/settings#billing" data-section="billing" class="settings-tab "><svg class="icon-svg" aria-hidden="true"><use href="#hi-clipboard"/></svg> Paket &amp; Voucher</a>
+  
+  
+  <a href="/admin/settings#vouchers" data-section="vouchers" class="settings-tab "><svg class="icon-svg" aria-hidden="true"><use href="#hi-ticket"/></svg> Voucher</a>
+  <a href="/admin/settings#general" data-section="general" class="settings-tab "><svg class="icon-svg" aria-hidden="true"><use href="#hi-settings"/></svg> Pengaturan Umum</a>
+  <a href="/admin/settings#system-apps" data-section="system-apps" class="settings-tab "><svg class="icon-svg" aria-hidden="true"><use href="#hi-download"/></svg> Aplikasi Sistem</a>
+  
+ </div>
+</nav>
+
+
+<nav class="settings-tabs-mobile" aria-label="Menu Pengaturan (mobile)">
+ <label for="settingsSectionSelect" class="sr-only">Pilih bagian pengaturan</label>
+ <select id="settingsSectionSelect" aria-label="Pilih bagian pengaturan">
+  
+  <option value="users" >Kelola User</option>
+  <option value="billing" >Paket &amp; Voucher</option>
+  
+  
+  <option value="vouchers" >Voucher</option>
+  <option value="general" >Pengaturan Umum</option>
+  <option value="system-apps" >Aplikasi Sistem</option>
+  
+ </select>
+</nav>
+
+
+<main class="dashboard" id="mainContent">
+
+
+
+
+
+
+
+<h1 class="sr-only">Pengaturan</h1>
+
+
+<section class="settings-section" id="section-users" data-section="users" aria-label="Kelola User">
+<h2 class="sr-only">Kelola User</h2>
+
+ <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:4px;">
+  <button type="button" id="toggleAllUsersBtn" data-action="users-toggle-all" class="btn-toggle-all" title="Lipat/buka semua bagian Kelola User sekaligus">
+  <svg class="icon-svg" style="width:14px;height:14px;transition:transform 0.2s ease;" id="toggleAllUsersIcon" aria-hidden="true"><use href="#hi-chevron-down"/></svg>
+  <span id="toggleAllUsersLabel">Lipat Semua</span>
+  </button>
+ </div>
+ <div class="users-layout" style="display:flex;flex-direction:column;gap:24px;">
+
+ 
+ <section class="glass-card saas-collapse" data-collapse-id="users-add">
+ <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+ <span class="saas-collapse-title"><svg class="icon-svg" style="width:18px;height:18px;color:var(--color-primary-light);"><use href="#hi-plus"/></svg> Tambah User Manual</span>
+ <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+ </div>
+ <div class="saas-collapse-body">
+ <form id="newUserForm" style="display:flex;flex-direction:column;gap:12px;">
+
+  
+
+  
+  <section class="saas-collapse users-sub" data-collapse-id="users-identity">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <span class="saas-collapse-title">Informasi Akun</span>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body" style="display:flex;flex-direction:column;gap:12px;">
+  <div class="form-row-2col grid grid-cols-1 sm:grid-cols-2 gap-4">
+   <div class="form-group space-y-1">
+   <label class="required" for="usernameInput">Username</label>
+   <input type="text" id="usernameInput" required placeholder="Contoh: pak_budi" minlength="3">
+   </div>
+   <div class="form-group space-y-1">
+   <label for="nameInput">Nama</label>
+   <input type="text" id="nameInput" placeholder="Contoh: Budi Sudarsono">
+   </div>
+   </div>
+   <div class="form-row-2col grid grid-cols-1 sm:grid-cols-2 gap-4">
+   <div class="form-group space-y-1">
+   <label for="emailInput">Email <span class="form-hint-inline">opsional</span></label>
+   <input type="email" id="emailInput" placeholder="Contoh: budi@sekolah.sch.id">
+   </div>
+   <div class="form-group space-y-1">
+   <label class="required" for="passwordInput">Password</label>
+   <input type="password" id="passwordInput" required placeholder="Password awal" minlength="8">
+   </div>
+   </div>
+   
+   <div class="form-row-2col grid grid-cols-1 sm:grid-cols-2 gap-4">
+<div class="form-group space-y-1">
+      <label for="instansiInput">Instansi <span class="form-hint-inline">kosong = personal</span></label>
+      <input type="text" id="instansiInput" placeholder="Nama instansi (kosong = personal)">
+    </div>
+   </div>
+   
+  </div>
+  </section>
+
+  
+  <section class="saas-collapse users-sub" data-collapse-id="users-role">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <span class="saas-collapse-title">Role &amp; Paket</span>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body" style="display:flex;flex-direction:column;gap:12px;">
+  <div class="form-group space-y-1">
+  <fieldset class="role-fieldset" style="border:none;padding:0;margin:0;">
+  <legend style="padding:0;font-size:inherit;">Role <span class="multirole-hint">multirole</span></legend>
+  <div class="role-chips">
+  <label class="role-chip">
+  <input type="checkbox" id="roleGuru" value="guru" checked> <span title="Guru">Guru</span>
+  </label>
+  <label class="role-chip">
+  <input type="checkbox" id="rolePengawas" value="pengawas"> <span title="Pengawas">Pengawas</span>
+  </label>
+  
+  <label class="role-chip">
+  <input type="checkbox" id="roleOperator" value="operator"> <span title="Operator">Operator</span>
+  </label>
+  
+  </div>
+  </fieldset>
+   </div>
+   
+   <div class="form-group space-y-1" style="margin-bottom: 8px;">
+     <label for="packageSelect">Paket Langganan (Preset)</label>
+     <select id="packageSelect" style="width:100%;padding:8px 12px;background:rgba(var(--rgb-white), 0.05);border:1px solid var(--color-glass-border);border-radius:10px;color:var(--color-text);outline:none;font-size:13px;cursor:pointer;">
+       <option value="free">Free / Trial</option>
+       <option value="guru">Paket Guru (Rp 50rb)</option>
+       <option value="individu">Paket Individu (Rp 100rb)</option>
+       <option value="sekolah_kecil">Paket Sekolah Kecil (Rp 150rb)</option>
+       <option value="sekolah_menengah">Paket Sekolah Menengah (Rp 350rb)</option>
+       <option value="sekolah_besar">Paket Sekolah Besar (Rp 750rb)</option>
+       <option value="sekolah_unggulan">Paket Sekolah Unggulan (Rp 1.5jt)</option>
+     </select>
+   </div>
+   
+  </div>
+  </section>
+
+
+   <section class="saas-collapse users-sub" data-collapse-id="users-quota">
+   <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+   <span class="saas-collapse-title">Kuota &amp; Masa Aktif</span>
+   <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+   </div>
+   <div class="saas-collapse-body" style="display:flex;flex-direction:column;gap:12px;">
+   
+   <div class="form-row-2col grid grid-cols-1 sm:grid-cols-4 gap-4">
+   <div class="form-group space-y-1">
+    <label class="required" for="limitInput" title="Batas maksimal total ujian yang pernah dibuat akun ini">Maks Total Ujian</label>
+    <input type="number" id="limitInput" required value="0" min="0" class="q-field-input">
+   </div>
+   <div class="form-group space-y-1">
+    <label class="required" for="concurrentInput" title="Maksimal ujian yang berjalan bersamaan (sudah dimulai &amp; bisa dikerjakan siswa)">Ujian Serentak</label>
+    <input type="number" id="concurrentInput" required value="0" min="0" class="q-field-input">
+   </div>
+   <div class="form-group space-y-1">
+    <label class="required" for="pdfSizeInput" title="Limit ukuran file PDF (MB). Tidak boleh melebihi sisa disk server (maks 100 MB global).">Maks Upload (MB)</label>
+    
+    <input type="number" id="pdfSizeInput" required value="0.5" min="0" step="0.1" class="q-field-input" max="100">
+   </div>
+   <div class="form-group space-y-1">
+    <label class="required" for="storageSizeInput" title="Batas total kapasitas storage (MB). 0 = tidak terbatas. Tidak boleh melebihi sisa disk server.">Maks Storage (MB)</label>
+    <input type="number" id="storageSizeInput" required value="0" min="0" class="q-field-input" max="34693.79">
+   </div>
+   </div>
+   
+   
+   <div class="expiry-group">
+   <label for="newUserExpiry" title="Kosongkan untuk menggunakan batas waktu default dari pengaturan SaaS">Masa Aktif Akun</label>
+   <div class="expiry-input-row">
+   <input type="date" id="newUserExpiry" class="expiry-field">
+   <input type="time" id="newUserExpiryTime" value="23:59" class="expiry-field">
+   </div>
+   </div>
+   
+   </div>
+   </section>
+
+ <button type="submit" class="btn-upload" style="margin-top:4px;">
+ <svg class="icon-svg"><use href="#hi-plus"/></svg> Tambah Akun
+ </button>
+ </form>
+ </div>
+ </section>
+
+ 
+ <section class="glass-card saas-collapse" data-collapse-id="users-list">
+ <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+ <span class="saas-collapse-title"><svg class="icon-svg" style="width:18px;height:18px;color:var(--color-primary-light);"><use href="#hi-users"/></svg> Daftar User &amp; Guru Terdaftar</span>
+ <span style="display:inline-flex;align-items:center;gap:10px;">
+     <button class="btn-refresh" data-action="users-refresh-list" aria-label="Muat Ulang daftar user"><svg class="icon-svg"><use href="#hi-refresh"/></svg> Muat Ulang</button>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+ </span>
+ </div>
+ <div class="saas-collapse-body">
+ 
+ <div class="users-toolbar">
+<div class="toolbar-search-wrap">
+   <input type="text" id="userSearchInput" placeholder="Cari username, nama, atau email..." aria-label="Cari pengguna" class="toolbar-search-input">
+
+     <button class="search-clear-btn" data-action="users-clear-search" id="userSearchClearBtn" title="Hapus pencarian" aria-label="Hapus pencarian" style="display:none;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-x"/></svg></button>
+ </div>
+ <button class="btn-sm btn-toggle" data-action="users-search" style="height:32px;padding:0 12px;" title="Cari user"><svg class="icon-svg"><use href="#hi-search"/></svg> Cari</button>
+<select id="userRoleFilter" class="toolbar-select" aria-label="Filter role">
+  <option value="">Semua Role</option>
+  <option value="guru">Guru</option>
+  <option value="pengawas">Pengawas</option>
+  
+  <option value="operator">Operator</option>
+  
+  </select>
+  <select id="userPerPage" class="toolbar-select" aria-label="Jumlah user per halaman" title="Jumlah user per halaman">
+  <option value="10" selected>10 / halaman</option>
+  <option value="25">25 / halaman</option>
+  <option value="50">50 / halaman</option>
+  </select>
+  
+  <select id="userSortMobile" class="toolbar-select users-sort-mobile" aria-label="Urutkan daftar user" title="Urutkan daftar user">
+  <option value="">Urutkan: Default</option>
+  <option value="username_asc">Username (A–Z)</option>
+  <option value="username_desc">Username (Z–A)</option>
+  <option value="name_asc">Nama (A–Z)</option>
+  <option value="name_desc">Nama (Z–A)</option>
+  <option value="instansi_asc">Instansi (A–Z)</option>
+  <option value="instansi_desc">Instansi (Z–A)</option>
+  <option value="package_asc">Paket (A–Z)</option>
+  <option value="package_desc">Paket (Z–A)</option>
+  <option value="role_asc">Role (prioritas)</option>
+  <option value="role_desc">Role (prioritas terbalik)</option>
+  <option value="email_asc">Email (A–Z)</option>
+  <option value="email_desc">Email (Z–A)</option>
+  <option value="status_asc">Status (A–Z)</option>
+  <option value="status_desc">Status (Z–A)</option>
+  <option value="created_at_asc">Terdaftar (terlama dulu)</option>
+  <option value="created_at_desc">Terdaftar (terbaru dulu)</option>
+  </select>
+  </div>
+
+ 
+ <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:0 0 12px 0;font-size:11px;color:var(--color-text-muted);">
+  <span style="display:inline-flex;align-items:center;gap:6px;">
+    <span class="tone-info" style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">Guru</span>
+   Role tetap <em style="font-style:normal;opacity:0.75;">(pemberian admin / identitas)</em>
+  </span>
+  <span style="display:inline-flex;align-items:center;gap:6px;">
+    <span class="tone-success" style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">Guru <em style="font-style:normal;opacity:0.75;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.03em;">paket</em></span>
+   Role dari paket aktif <em style="font-style:normal;opacity:0.75;">(hilang saat paket diganti/berakhir)</em>
+  </span>
+ </div>
+
+ <div class="table-responsive">
+ <table class="exam-table">
+ <thead>
+ <tr>
+ <th scope="col" class="sortable" data-sort="username" tabindex="0" data-action="users-toggle-sort" role="button" title="Urutkan berdasarkan username">Username<span class="sort-indicator" aria-hidden="true"></span></th>
+ <th scope="col" class="sortable" data-sort="name" tabindex="0" data-action="users-toggle-sort" role="button" title="Urutkan berdasarkan nama">Nama<span class="sort-indicator" aria-hidden="true"></span></th>
+ <th scope="col" class="sortable" data-sort="instansi" tabindex="0" data-action="users-toggle-sort" role="button" title="Urutkan berdasarkan instansi">Instansi<span class="sort-indicator" aria-hidden="true"></span></th>
+ <th scope="col" class="sortable" data-sort="package" tabindex="0" data-action="users-toggle-sort" role="button" title="Urutkan berdasarkan paket">Paket<span class="sort-indicator" aria-hidden="true"></span></th>
+ <th scope="col" class="sortable" data-sort="role" tabindex="0" data-action="users-toggle-sort" role="button" title="Urutkan berdasarkan role">Role<span class="sort-indicator" aria-hidden="true"></span></th>
+ <th scope="col" class="sortable" data-sort="email" tabindex="0" data-action="users-toggle-sort" role="button" title="Urutkan berdasarkan email">Email<span class="sort-indicator" aria-hidden="true"></span></th>
+ <th scope="col" class="text-center sortable" data-sort="status" tabindex="0" data-action="users-toggle-sort" role="button" title="Urutkan berdasarkan status">Status<span class="sort-indicator" aria-hidden="true"></span></th>
+ <th scope="col" class="sortable" data-sort="created_at" tabindex="0" data-action="users-toggle-sort" role="button" title="Urutkan berdasarkan tanggal terdaftar">Terdaftar<span class="sort-indicator" aria-hidden="true"></span></th>
+ <th scope="col" class="text-right" title="Tindakan pada akun">Aksi</th>
+ </tr>
+ </thead>
+ <tbody id="usersTableBody" aria-live="polite" aria-busy="false">
+ <tr>
+ <td colspan="9" style="text-align:center;padding:40px;color:var(--color-text-secondary);">
+ Memuat data user...
+ </td>
+ </tr>
+ </tbody>
+ </table>
+ </div>
+ </div>
+ </section>
+
+ </div>
+</section>
+
+
+<section class="settings-section" id="section-billing" data-section="billing" aria-label="Paket &amp; Voucher">
+<div class="billing-container" style="padding:24px;max-width:1200px;margin:0 auto;">
+
+ 
+ <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+  <div>
+   <h2 style="font-size:1.5rem;font-weight:700;color:var(--color-text);margin:0;font-family:'Outfit',sans-serif;display:flex;align-items:center;gap:10px;"><svg class="icon-svg" style="width:26px;height:26px;color:var(--color-primary-light);"><use href="#hi-clipboard"/></svg>Paket &amp; Voucher</h2>
+   <p style="color:var(--color-text-secondary);font-size:0.875rem;margin:2px 0 0 0;">Lihat kuota akun Anda.</p>
+  </div>
+ </div>
+
+ 
+
+ 
+ 
+
+ 
+ <div class="grid grid-cols-1 md:grid-cols-3 gap-6" style="margin-bottom:32px;display:grid;grid-template-columns:repeat(auto-fit, minmax(min(100%, 240px), 1fr));gap:24px;">
+
+  
+  <div class="glass-card" style="padding:24px;border-radius:16px;position:relative;overflow:hidden;">
+   <div style="position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg, var(--color-primary), var(--color-accent));"></div>
+   <span style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--color-accent-light);letter-spacing:0.5px;display:block;margin-bottom:8px;">Paket Saat Ini</span>
+   <h3 style="font-size:1.75rem;font-weight:800;color:var(--color-text);margin:0 0 4px 0;text-transform:uppercase;font-family:'Outfit',sans-serif;" id="currentPkgName">SuperAdmin (Full)</h3>
+   <p style="font-size:13px;color:var(--color-text-secondary);margin:0;">Masa aktif s.d: <strong id="expiresAtLabel" style="color:var(--color-text);">—</strong></p>
+  </div>
+
+  
+  
+
+  
+  <div class="glass-card" style="padding:24px;border-radius:16px;display:flex;flex-direction:column;justify-content:center;">
+    <span style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--color-accent-light);letter-spacing:0.5px;display:block;margin-bottom:12px;">Kuota Ujian</span>
+   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:13px;">
+    <span class="tooltip" data-tooltip="Maksimal total ujian yang dapat dibuat dan disimpan di sistem" style="color:var(--color-text-secondary);">Total Ujian <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg></span>
+    <strong style="color:var(--color-text);">Tidak Terbatas</strong>
+   </div>
+   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:13px;">
+    <span class="tooltip" data-tooltip="Maksimal ujian yang berjalan bersamaan (sudah dimulai &amp; bisa dikerjakan siswa)" style="color:var(--color-text-secondary);">Ujian Serentak <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg></span>
+    <strong style="color:var(--color-text);">Tidak Terbatas</strong>
+   </div>
+  </div>
+
+  
+  
+
+  
+  <div class="glass-card" style="padding:24px;border-radius:16px;display:flex;flex-direction:column;justify-content:center;">
+   <span style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--color-accent-light);letter-spacing:0.5px;display:block;margin-bottom:12px;">Kuota Storage</span>
+   <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+    <span class="tooltip" data-tooltip="Batas ukuran unggah PDF per soal ujian" style="color:var(--color-text-secondary);">Maks. Ukuran PDF <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg></span>
+    <strong style="color:var(--color-text);">Tanpa Batas</strong>
+   </div>
+   <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+    <span class="tooltip" data-tooltip="Total ruang penyimpanan server untuk soal dan media" style="color:var(--color-text-secondary);">Kapasitas Penyimpanan <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg></span>
+    <strong style="color:var(--color-text);">Tanpa Batas</strong>
+   </div>
+  </div>
+
+ </div>
+
+ 
+ 
+
+</div>
+
+
+<div class="modal-overlay" id="confirmRedeemModal" role="dialog" aria-modal="true" aria-labelledby="confirmRedeemModalTitle" style="display:none;" data-action="modal-dismiss" data-modal-close="closeConfirmRedeemModal">
+ <div class="modal-card" style="max-width: 440px;">
+  <div class="modal-header">
+   <h3 id="confirmRedeemModalTitle" style="font-size:1.1rem;color:var(--color-text);margin:0;display:flex;align-items:center;gap:8px;">
+    <svg class="icon-svg" style="width:20px;height:20px;color:var(--color-accent-light);"><use href="#hi-ticket"/></svg>
+    Konfirmasi Klaim Voucher
+   </h3>
+   <button class="modal-close" data-action="billing-redeem-cancel" aria-label="Tutup">&times;</button>
+  </div>
+  <div class="modal-body" style="padding:20px 24px 24px;">
+   <p style="color:var(--color-text-secondary);font-size:13.5px;margin:0 0 16px 0;">
+    Apakah Anda yakin ingin mengklaim kode voucher berikut? Paket ini akan langsung aktif, dan paket lain yang sedang berjalan otomatis dijeda (sisa waktunya dipertahankan).
+   </p>
+   <div style="background:rgba(var(--rgb-accent),0.1);border:1px solid rgba(var(--rgb-accent),0.25);padding:14px 18px;border-radius:10px;margin-bottom:20px;text-align:center;">
+    <span style="font-size:11px;color:var(--color-accent-light);text-transform:uppercase;font-weight:700;letter-spacing:0.5px;display:block;margin-bottom:4px;">Kode Voucher:</span>
+    <span style="font-family:var(--font-mono);font-weight:800;font-size:1.25rem;color:var(--color-text);" id="confirmRedeemCodeDisplay">PROMO</span>
+   </div>
+   <div style="display:flex;justify-content:flex-end;gap:10px;">
+    <button class="btn-secondary" data-action="billing-redeem-cancel" style="padding:10px 18px;border-radius:8px;cursor:pointer;">Batal</button>
+    <button id="btnConfirmDoRedeem" data-action="billing-redeem-confirm" style="padding:10px 20px;border-radius:8px;font-weight:600;background:linear-gradient(135deg, rgb(var(--rgb-accent)), rgb(var(--rgb-info)));border:none;color:var(--color-text-on-primary);cursor:pointer;">Ya, Klaim Sekarang</button>
+   </div>
+  </div>
+ </div>
+</div>
+
+
+</section>
+
+
+<section class="settings-section" id="section-vouchers" data-section="vouchers" aria-label="Kelola Voucher">
+<div class="billing-container" style="padding:24px;max-width:1200px;margin:0 auto;">
+
+ 
+ <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+  <div>
+   <h2 style="font-size:1.5rem;font-weight:700;color:var(--color-text);margin:0;font-family:'Outfit',sans-serif;display:flex;align-items:center;gap:10px;">
+    <svg class="icon-svg" style="width:26px;height:26px;color:var(--color-accent-light);"><use href="#hi-ticket"/></svg>
+    Manajemen Voucher Promo
+   </h2>
+   <p style="color:var(--color-text-secondary);font-size:0.875rem;margin:2px 0 0 0;">Buat dan kelola kode voucher untuk klaim paket otomatis.</p>
+  </div>
+  <div style="display:flex;gap:10px;">
+    <button data-action="voucher-open-batch" class="btn-secondary" style="display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:10px;font-weight:600;font-size:0.875rem;cursor:pointer;background:rgba(var(--rgb-white), 0.06);border:1px solid var(--color-glass-border);color:var(--color-text);">
+    <svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-plus"/></svg> Buat Massal
+   </button>
+    <button data-action="voucher-open-single" class="btn-primary" style="display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:10px;font-weight:600;font-size:0.875rem;cursor:pointer;background:linear-gradient(135deg, rgb(var(--rgb-accent)), rgb(var(--rgb-info)));border:none;color:var(--color-text-on-primary);">
+    <svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-plus"/></svg> Buat Voucher
+   </button>
+  </div>
+ </div>
+
+ 
+ <div class="voucher-subtabs" role="tablist" aria-label="Bagian voucher" style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+<button type="button" class="voucher-subtab active" data-subtab="list" role="tab" id="voucherSubtabList" aria-selected="true" aria-controls="voucherListPanel" data-action="voucher-subtab" style="padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--color-glass-border);background:linear-gradient(135deg,rgb(var(--rgb-accent)),rgb(var(--rgb-info)));color:var(--color-text-on-primary);">Daftar Voucher</button>
+  <button type="button" class="voucher-subtab" data-subtab="history" role="tab" id="voucherSubtabHistory" aria-selected="false" aria-controls="voucherHistoryPanel" data-action="voucher-subtab" style="padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--color-glass-border);background:rgba(var(--rgb-white), 0.06);color:var(--color-text);">Riwayat Klaim</button>
+  </div>
+  <div id="voucherListPanel" role="tabpanel" aria-labelledby="voucherSubtabList">
+ 
+ <div class="glass-card" style="padding:16px 20px;border-radius:12px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+  <div style="display:flex;align-items:center;gap:12px;flex:1;max-width:400px;">
+   <div style="position:relative;flex:1;">
+    <input type="text" id="searchVoucher" placeholder="Cari kode atau catatan..." aria-label="Cari voucher" style="width:100%;padding:8px 14px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);font-size:13px;outline:none;" />
+    <button type="button" id="voucherSearchClearBtn" data-action="voucher-search-clear" title="Hapus pencarian" aria-label="Hapus pencarian" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--color-text-secondary);cursor:pointer;padding:6px;"><svg class="icon-svg" style="width:14px;height:14px;display:block;" aria-hidden="true"><use href="#hi-x"/></svg></button>
+   </div>
+   <button data-action="voucher-search" class="btn-secondary" style="padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;">Cari</button>
+  </div>
+ </div>
+
+ 
+ <div class="glass-card" style="border-radius:16px;overflow:hidden;">
+  <div style="overflow-x:auto;">
+   <table class="exam-table" style="width:100%;border-collapse:collapse;text-align:left;font-size:13.5px;">
+    
+    <caption class="sr-only">Daftar Voucher</caption>
+    <thead>
+     <tr style="border-bottom:1px solid var(--color-glass-border);background:rgba(var(--rgb-white), 0.02);color:var(--color-text-secondary);font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">
+      <th scope="col" style="padding:16px 20px;">Kode Voucher</th>
+      <th scope="col" style="padding:16px 20px;">Paket & Durasi</th>
+      <th scope="col" style="padding:16px 20px;">Penggunaan</th>
+      <th scope="col" style="padding:16px 20px;">Kadaluarsa</th>
+      <th scope="col" style="padding:16px 20px;">Status</th>
+      <th scope="col" style="padding:16px 20px;">Catatan</th>
+      <th scope="col" style="padding:16px 20px;text-align:right;">Aksi</th>
+     </tr>
+    </thead>
+    <tbody id="vouchersTableBody" aria-live="polite" aria-busy="false">
+     <tr>
+      <td colspan="7" style="padding:40px;text-align:center;color:var(--color-text-secondary);">Memuat data voucher...</td>
+     </tr>
+    </tbody>
+   </table>
+  </div>
+  
+  
+  <div id="paginationContainer" style="padding:16px 20px;border-top:1px solid var(--color-glass-border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;"></div>
+ </div>
+
+</div>
+
+</div>
+<div id="voucherHistoryPanel" class="voucher-subpanel" role="tabpanel" aria-labelledby="voucherSubtabHistory" style="display:none;">
+<div class="billing-container" style="padding:24px;max-width:1200px;margin:0 auto;">
+
+ 
+ <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+  <div>
+   <h2 style="font-size:1.5rem;font-weight:700;color:var(--color-text);margin:0;font-family:'Outfit',sans-serif;display:flex;align-items:center;gap:10px;">
+    <svg class="icon-svg" style="width:26px;height:26px;color:var(--color-success-light);"><use href="#hi-clock"/></svg>
+    Riwayat Klaim &amp; Aktivasi Voucher
+   </h2>
+   <p style="color:var(--color-text-secondary);font-size:0.875rem;margin:2px 0 0 0;">Jejak append-only siapa yang mengklaim, mengaktifkan, atau menonaktifkan paket voucher, kapan, dan detailnya.</p>
+  </div>
+  <div style="display:flex;gap:10px;">
+    <button data-action="audit-refresh" class="btn-secondary" style="display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:10px;font-weight:600;font-size:0.875rem;cursor:pointer;background:rgba(var(--rgb-white), 0.06);border:1px solid var(--color-glass-border);color:var(--color-text);">
+    <svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-refresh"/></svg> Muat Ulang
+   </button>
+  </div>
+ </div>
+
+ 
+ <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+  <div style="position:relative;flex:1;min-width:220px;max-width:360px;">
+    <input type="text" id="auditSearchInput" placeholder="Cari username / kode voucher..." value="" aria-label="Cari riwayat voucher"
+           style="width:100%;padding:10px 38px 10px 14px;background:rgba(var(--rgb-white), 0.04);border:1px solid var(--color-glass-border);border-radius:10px;color:var(--color-text);font-size:13px;outline:none;" />
+   <svg class="icon-svg" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--color-text-secondary);"><use href="#hi-search"/></svg>
+  </div>
+  <button class="btn-sm btn-toggle" data-action="audit-search" style="height:38px;padding:0 16px;" title="Cari"><svg class="icon-svg" style="width:15px;height:15px;"><use href="#hi-search"/></svg> Cari</button>
+  <button class="btn-sm btn-toggle" data-action="audit-search-clear" style="height:38px;padding:0 16px;" title="Bersihkan pencarian">Bersihkan</button>
+ </div>
+
+ 
+ <div class="glass-card" style="border-radius:16px;overflow:hidden;">
+  <div style="overflow-x:auto;">
+   <table style="width:100%;border-collapse:collapse;min-width:760px;">
+    
+    <caption class="sr-only">Riwayat Klaim Voucher</caption>
+    <thead>
+     <tr style="background:rgba(var(--rgb-white), 0.03);">
+      <th scope="col" style="padding:14px 20px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--color-text-secondary);">Waktu</th>
+      <th scope="col" style="padding:14px 20px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--color-text-secondary);">Aksi</th>
+      <th scope="col" style="padding:14px 20px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--color-text-secondary);">Oleh</th>
+      <th scope="col" style="padding:14px 20px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--color-text-secondary);">Detail</th>
+     </tr>
+    </thead>
+    <tbody id="auditLogsBody" aria-live="polite" aria-busy="false">
+     <tr><td colspan="4" style="padding:40px;text-align:center;color:var(--color-text-secondary);">Memuat...</td></tr>
+    </tbody>
+   </table>
+  </div>
+ </div>
+
+ <div id="auditPaginationContainer" style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;flex-wrap:wrap;gap:10px;"></div>
+
+</div>
+
+</div>
+
+<div class="modal-overlay" id="singleModal" role="dialog" aria-modal="true" aria-labelledby="singleModalTitle" data-action="modal-dismiss" data-modal-close="closeSingleModal" style="display:none;">
+ <div class="modal-card" style="max-width:500px;">
+  <div class="modal-header">
+   <h3 id="singleModalTitle" style="font-size:1.1rem;color:var(--color-text);margin:0;">Buat Voucher</h3>
+   <button class="modal-close" data-action="voucher-close-single" aria-label="Tutup">&times;</button>
+  </div>
+  <div style="padding:20px;max-height:calc(90vh - 60px);overflow-y:auto;-webkit-overflow-scrolling:touch;">
+   <form id="formSingleVoucher">
+    <div style="margin-bottom:14px;">
+     <label for="singleCode" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Kode Voucher (Kosongkan untuk otomatis)</label>
+     <input type="text" id="singleCode" placeholder="Misal: HARIGURU2026" style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);font-family:var(--font-mono);text-transform:uppercase;outline:none;" />
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+     <div>
+      <label for="singlePackage" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Paket</label>
+      <select id="singlePackage" required style="width:100%;padding:10px;background:rgba(15,23,42,0.9);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;">
+       <option value="guru">Guru</option>
+       <option value="individu">Individu</option>
+       <option value="sekolah_kecil">Sekolah Kecil</option>
+       <option value="sekolah_menengah">Sekolah Menengah</option>
+       <option value="sekolah_besar">Sekolah Besar</option>
+       <option value="sekolah_unggulan">Sekolah Unggulan</option>
+       <option value="custom">Kustom (Atur Limit Sendiri)</option>
+      </select>
+     </div>
+     <div>
+      <label for="singleDuration" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Durasi</label>
+      <select id="singleDuration" required style="width:100%;padding:10px;background:rgba(15,23,42,0.9);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;">
+       <option value="bulanan">Bulanan (30 Hari)</option>
+       <option value="semester">Semester (180 Hari)</option>
+       <option value="tahunan">Tahunan (365 Hari)</option>
+       <option value="custom">Kustom (Jumlah Hari...)</option>
+      </select>
+     </div>
+    </div>
+
+    <div id="singleCustomDaysGroup" style="display:none;margin-bottom:14px;">
+     <label for="singleCustomDays" style="display:block;font-size:12px;color:var(--color-accent-light);margin-bottom:4px;font-weight:600;">Jumlah Hari Masa Aktif (Kustom)</label>
+     <input type="number" id="singleCustomDays" placeholder="Misal: 7, 14, 45, 90..." min="1" value="7" style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid rgba(var(--rgb-accent),0.4);border-radius:8px;color:var(--color-text);outline:none;" />
+    </div>
+
+    <div id="singleCustomGroup" style="display:none;margin-bottom:14px;padding:12px;border:1px dashed rgba(var(--rgb-accent),0.4);border-radius:8px;background:rgba(var(--rgb-accent),0.05);">
+     <div style="font-size:12px;color:var(--color-accent-light);font-weight:700;margin-bottom:8px;">Entitlement Kustom (menimpa limit akun saat redeem)</div>
+     <div style="margin-bottom:10px;">
+      <label for="singleCustomLabel" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Label Paket</label>
+      <input type="text" id="singleCustomLabel" placeholder="Misal: PROMO-KHUSUS" style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+     </div>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+      <div>
+       <label for="singleCustomMaxExams" title="Maksimal total ujian yang dapat disimpan di sistem" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maks Total Ujian</label>
+       <input type="number" id="singleCustomMaxExams" value="1" min="0" style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="singleCustomConcurrent" title="Maksimal ujian yang berjalan bersamaan (sudah dimulai &amp; bisa dikerjakan siswa)" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Ujian Serentak</label>
+       <input type="number" id="singleCustomConcurrent" value="1" min="0" style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="singleCustomPdfMb" title="Maksimal ukuran file PDF dalam sekali upload" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maks Upload (MB)</label>
+       
+       <input type="number" id="singleCustomPdfMb" value="10" min="0" step="0.1" max="100" title="Maks Upload PDF (MB). 0 = tidak terbatas. Tidak boleh melebihi sisa disk server (upload global dibatasi 100 MB)." style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="singleCustomStorageMb" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maks Storage (MB)</label>
+       <input type="number" id="singleCustomStorageMb" value="100" min="0" step="0.1" max="34693.79" title="Maks Storage (MB). 0 = tidak terbatas. Tidak boleh melebihi sisa disk server." style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="singleCustomMaxUsers" title="Batas jumlah akun yang boleh dibuat operator di instansi (0 = tanpa batas)" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maks Akun Guru (0 = tanpa batas)</label>
+       <input type="number" id="singleCustomMaxUsers" value="0" min="0" style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="singleCustomRole" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Role Akun</label>
+       <select id="singleCustomRole" style="width:100%;padding:8px;background:rgba(15,23,42,0.9);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;">
+        <option value="">— Jangan ubah role —</option>
+        <option value="guru">Guru</option>
+        <option value="pengawas">Pengawas</option>
+        <option value="operator">Operator</option>
+       </select>
+      </div>
+     </div>
+     <p style="font-size:11px;color:var(--color-text-secondary);margin:0;">Durasi tetap mengikuti pilihan "Durasi" di atas (boleh custom hari).</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+     <div>
+      <label for="singleMaxUsage" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maksimal Penggunaan</label>
+      <input type="number" id="singleMaxUsage" value="1" min="1" required style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+     </div>
+     <div>
+      <label for="singleExpiresAt" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Tanggal Kadaluarsa (Opsional)</label>
+      <input type="date" id="singleExpiresAt" style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+     </div>
+    </div>
+
+    <div style="margin-bottom:20px;">
+     <label for="singleNotes" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Catatan / Nama Campaign</label>
+     <input type="text" id="singleNotes" placeholder="Misal: Promo WhatsApp Grup Guru" style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;">
+     <button type="button" data-action="voucher-close-single" style="padding:10px 18px;border-radius:8px;background:rgba(var(--rgb-white), 0.06);border:1px solid var(--color-glass-border);color:var(--color-text);cursor:pointer;">Batal</button>
+     <button type="submit" id="btnSubmitSingle" style="padding:10px 20px;border-radius:8px;background:linear-gradient(135deg, rgb(var(--rgb-accent)), rgb(var(--rgb-info)));border:none;color:var(--color-text-on-primary);font-weight:600;cursor:pointer;">Simpan Voucher</button>
+    </div>
+   </form>
+  </div>
+ </div>
+</div>
+
+
+<div class="modal-overlay" id="batchModal" role="dialog" aria-modal="true" aria-labelledby="batchModalTitle" data-action="modal-dismiss" data-modal-close="closeBatchModal" style="display:none;">
+ <div class="modal-card" style="max-width:500px;">
+  <div class="modal-header">
+   <h3 id="batchModalTitle" style="font-size:1.1rem;color:var(--color-text);margin:0;">Buat Massal Voucher</h3>
+   <button class="modal-close" data-action="voucher-close-batch" aria-label="Tutup">&times;</button>
+  </div>
+  <div style="padding:20px;max-height:calc(90vh - 60px);overflow-y:auto;-webkit-overflow-scrolling:touch;">
+   <form id="formBatchVoucher">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+     <div>
+      <label for="batchPrefix" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Prefix Kode</label>
+      <input type="text" id="batchPrefix" placeholder="EV-SEKOLAH" value="PROMO" style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);font-family:var(--font-mono);text-transform:uppercase;outline:none;" />
+     </div>
+     <div>
+      <label for="batchCount" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Jumlah Voucher</label>
+      <input type="number" id="batchCount" value="10" min="1" max="100" required style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+     </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+     <div>
+      <label for="batchPackage" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Paket</label>
+      <select id="batchPackage" required style="width:100%;padding:10px;background:rgba(15,23,42,0.9);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;">
+       <option value="guru">Guru</option>
+       <option value="individu">Individu</option>
+       <option value="sekolah_kecil">Sekolah Kecil</option>
+       <option value="sekolah_menengah">Sekolah Menengah</option>
+       <option value="sekolah_besar">Sekolah Besar</option>
+       <option value="sekolah_unggulan">Sekolah Unggulan</option>
+       <option value="custom">Kustom (Atur Limit Sendiri)</option>
+      </select>
+     </div>
+     <div>
+      <label for="batchDuration" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Durasi</label>
+      <select id="batchDuration" required style="width:100%;padding:10px;background:rgba(15,23,42,0.9);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;">
+       <option value="bulanan">Bulanan (30 Hari)</option>
+       <option value="semester">Semester (180 Hari)</option>
+       <option value="tahunan">Tahunan (365 Hari)</option>
+       <option value="custom">Kustom (Jumlah Hari...)</option>
+      </select>
+     </div>
+    </div>
+
+    <div id="batchCustomDaysGroup" style="display:none;margin-bottom:14px;">
+     <label for="batchCustomDays" style="display:block;font-size:12px;color:var(--color-accent-light);margin-bottom:4px;font-weight:600;">Jumlah Hari Masa Aktif (Kustom)</label>
+     <input type="number" id="batchCustomDays" placeholder="Misal: 7, 14, 45, 90..." min="1" value="7" style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid rgba(var(--rgb-accent),0.4);border-radius:8px;color:var(--color-text);outline:none;" />
+    </div>
+
+    <div id="batchCustomGroup" style="display:none;margin-bottom:14px;padding:12px;border:1px dashed rgba(var(--rgb-accent),0.4);border-radius:8px;background:rgba(var(--rgb-accent),0.05);">
+     <div style="font-size:12px;color:var(--color-accent-light);font-weight:700;margin-bottom:8px;">Entitlement Kustom (berlaku untuk semua kode di batch)</div>
+     <div style="margin-bottom:10px;">
+      <label for="batchCustomLabel" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Label Paket</label>
+      <input type="text" id="batchCustomLabel" placeholder="Misal: PROMO-KHUSUS" style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+     </div>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div>
+       <label for="batchCustomMaxExams" title="Maksimal total ujian yang dapat disimpan di sistem" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maks Total Ujian</label>
+       <input type="number" id="batchCustomMaxExams" value="1" min="0" style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="batchCustomConcurrent" title="Maksimal ujian yang berjalan bersamaan (sudah dimulai &amp; bisa dikerjakan siswa)" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Ujian Serentak</label>
+       <input type="number" id="batchCustomConcurrent" value="1" min="0" style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="batchCustomPdfMb" title="Maksimal ukuran file PDF dalam sekali upload" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maks Upload (MB)</label>
+       
+       <input type="number" id="batchCustomPdfMb" value="10" min="0" step="0.1" max="100" title="Maks Upload PDF (MB). 0 = tidak terbatas. Tidak boleh melebihi sisa disk server (upload global dibatasi 100 MB)." style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="batchCustomStorageMb" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maks Storage (MB)</label>
+       <input type="number" id="batchCustomStorageMb" value="100" min="0" step="0.1" max="34693.79" title="Maks Storage (MB). 0 = tidak terbatas. Tidak boleh melebihi sisa disk server." style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="batchCustomMaxUsers" title="Batas jumlah akun yang boleh dibuat operator di instansi (0 = tanpa batas)" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maks Akun Guru (0 = tanpa batas)</label>
+       <input type="number" id="batchCustomMaxUsers" value="0" min="0" style="width:100%;padding:8px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+      </div>
+      <div>
+       <label for="batchCustomRole" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Role Akun</label>
+       <select id="batchCustomRole" style="width:100%;padding:8px;background:rgba(15,23,42,0.9);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;">
+        <option value="">— Jangan ubah role —</option>
+        <option value="guru">Guru</option>
+        <option value="pengawas">Pengawas</option>
+        <option value="operator">Operator</option>
+       </select>
+      </div>
+     </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+     <div>
+      <label for="batchMaxUsage" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Maksimal Penggunaan</label>
+      <input type="number" id="batchMaxUsage" value="1" min="1" required style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+     </div>
+     <div>
+      <label for="batchExpiresAt" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Kadaluarsa (Opsional)</label>
+      <input type="date" id="batchExpiresAt" style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+     </div>
+    </div>
+
+    <div style="margin-bottom:20px;">
+     <label for="batchNotes" style="display:block;font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;">Catatan / Nama Campaign</label>
+     <input type="text" id="batchNotes" placeholder="Misal: Workshop Digitalisasi Sekolah 2026" style="width:100%;padding:10px;background:rgba(var(--rgb-black), 0.3);border:1px solid var(--color-glass-border);border-radius:8px;color:var(--color-text);outline:none;" />
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;">
+     <button type="button" data-action="voucher-close-batch" style="padding:10px 18px;border-radius:8px;background:rgba(var(--rgb-white), 0.06);border:1px solid var(--color-glass-border);color:var(--color-text);cursor:pointer;">Batal</button>
+     <button type="submit" id="btnSubmitBatch" style="padding:10px 20px;border-radius:8px;background:linear-gradient(135deg, rgb(var(--rgb-accent)), rgb(var(--rgb-info)));border:none;color:var(--color-text-on-primary);font-weight:600;cursor:pointer;">Buat Massal</button>
+    </div>
+   </form>
+  </div>
+ </div>
+</div>
+
+
+<div class="modal-overlay" id="redemptionsModal" role="dialog" aria-modal="true" aria-labelledby="redemptionsTitle" data-action="modal-dismiss" data-modal-close="closeRedemptionsModal" style="display:none;">
+ <div class="modal-card" style="max-width:550px;">
+  <div class="modal-header">
+   <h3 style="font-size:1.1rem;color:var(--color-text);margin:0;" id="redemptionsTitle">Pengguna Voucher</h3>
+   <button class="modal-close" data-action="voucher-close-redemptions" aria-label="Tutup">&times;</button>
+  </div>
+  <div style="padding:20px;max-height:60vh;overflow-y:auto;" id="redemptionsBody">
+   <p style="text-align:center;color:var(--color-text-secondary);">Memuat...</p>
+  </div>
+ </div>
+</div>
+</div>
+</section>
+
+
+
+<section class="settings-section" id="section-general" data-section="general" aria-label="Pengaturan Umum">
+<h2 class="sr-only">Pengaturan Umum</h2>
+  
+  
+  <div class="saas-toolbar" style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:16px;">
+  <button type="button" id="toggleAllGeneralBtn" data-action="general-toggle-all" class="btn-sm" title="Lipat/buka semua bagian Pengaturan Umum sekaligus" style="background:rgba(var(--rgb-info),0.15);border:1px solid rgba(var(--rgb-info),0.4);color:var(--color-primary-light);display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:8px;font-size:13px;transition:all 0.2s;">
+  <svg class="icon-svg" style="width:14px;height:14px;transition:transform 0.2s ease;" id="toggleAllGeneralIcon"><use href="#hi-chevron-down"/></svg>
+  <span id="toggleAllGeneralLabel">Buka Semua</span>
+  </button>
+  </div>
+
+  
+  <section class="glass-card saas-collapse" id="saas-card-smtp" data-collapse-id="smtp" style="margin-bottom:24px;">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <h3 class="saas-collapse-title"><svg class="icon-svg" style="color:var(--color-primary-light);"><use href="#hi-settings"/></svg> Pengaturan Email SaaS &amp; SMTP</h3>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body">
+  <div class="switch-container">
+  <span class="switch-label" id="emailEnabledLabel" title="Aktifkan untuk mewajibkan verifikasi kode OTP lewat email saat pendaftaran akun baru">Verifikasi OTP Email</span>
+  <label class="switch">
+  <input type="checkbox" id="emailEnabledInput" aria-labelledby="emailEnabledLabel">
+  <span class="slider"></span>
+  </label>
+  </div>
+
+  <div class="form-group space-y-1">
+  <label for="emailDomainWhitelistInput">Whitelist Domain Email Pendaftaran</label>
+  <textarea id="emailDomainWhitelistInput" rows="3" placeholder="gmail.com, yahoo.com, sch.id, ac.id" style="width:100%;background:rgba(var(--rgb-white), 0.05);border:1px solid var(--color-glass-border);border-radius:6px;padding:8px;color:var(--color-text);font-family:var(--font-mono);font-size:0.8rem;resize:vertical;"></textarea>
+  <span class="form-hint saas-domain-hint">Hanya email dari domain ini yang boleh mendaftar. Pisahkan dengan koma atau baris baru. Subdomain otomatis diizinkan (mis. <code>sch.id</code> mengizinkan <code>smanegeri1.sch.id</code>). Kosongkan untuk mengizinkan semua domain.</span>
+  </div>
+
+  <div id="emailSettingsFields" style="display:flex;flex-direction:column;gap:12px;">
+  <div class="form-row-2col grid grid-cols-1 sm:grid-cols-2 gap-4">
+  <div class="form-group space-y-1">
+  <label for="smtpHostInput" title="Alamat server SMTP penyedia email (contoh: smtp.gmail.com)">SMTP Host</label>
+  <input type="text" id="smtpHostInput" placeholder="smtp.gmail.com">
+  </div>
+  <div class="form-group space-y-1">
+  <label for="smtpPortInput" title="Port server SMTP (contoh: 587 untuk TLS/STARTTLS, 465 untuk SSL)">SMTP Port</label>
+  <input type="number" id="smtpPortInput" min="1" max="65535" inputmode="numeric" placeholder="587">
+  </div>
+  </div>
+
+  <div class="form-row-2col grid grid-cols-1 sm:grid-cols-2 gap-4">
+  <div class="form-group space-y-1">
+  <label for="smtpUserInput" title="Alamat email yang digunakan sebagai pengirim kode verifikasi OTP">Email Pengirim</label>
+  <input type="email" id="smtpUserInput" placeholder="nama-email@gmail.com">
+  </div>
+  <div class="form-group space-y-1">
+  <label for="smtpPasswordInput" title="Sandi aplikasi 16-karakter (misal Gmail App Password) atau kata sandi akun SMTP Anda">Sandi Aplikasi</label>
+  <input type="password" id="smtpPasswordInput" placeholder="Masukkan password aplikasi atau sandi SMTP">
+  </div>
+  </div>
+
+  <div class="form-group space-y-1">
+  <label for="smtpSenderNameInput" title="Nama pengirim yang muncul di email penerima (contoh: EXAMVAN Verification)">Nama Pengirim Email</label>
+  <input type="text" id="smtpSenderNameInput" placeholder="EXAMVAN Verification">
+  </div>
+  <div style="display:flex;justify-content:flex-end;margin-top:4px;">
+  <button type="button" id="testSmtpBtn" data-action="smtp-test" class="btn-sm" style="background:rgba(59,130,246,0.2);border:1px solid rgba(59,130,246,0.4);color:#93c5fd;display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border-radius:6px;font-size:13px;transition:all 0.2s;">
+  <svg class="icon-svg" style="width:16px;height:16px;" id="testSmtpIcon"><use href="#hi-refresh"/></svg>
+  <span id="testSmtpText">Test Koneksi SMTP</span>
+  </button>
+  </div>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--color-glass-border);">
+  <button type="button" id="saveSmtpSettingsBtn" data-action="smtp-save" class="btn-upload saas-save-btn" style="background:rgba(var(--rgb-success),0.2);border-color:rgba(var(--rgb-success),0.4);color:#6ee7b7;">
+  <svg class="icon-svg"><use href="#hi-check"/></svg> <span class="saas-save-text">Simpan Setelan SMTP</span>
+  </button>
+  </div>
+  </div>
+  </section>
+
+  
+  <section class="glass-card saas-collapse" id="saas-card-turnstile" data-collapse-id="turnstile" style="margin-bottom:24px;">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <h3 class="saas-collapse-title"><svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-lock"/></svg> Cloudflare Turnstile (Anti-Bot)</h3>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body">
+  <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">Wajibkan verifikasi Turnstile pada form pendaftaran untuk memblokir registrasi massal otomatis. Buat widget gratis di <code style="font-size:11px;color:var(--color-primary-light);">dash.cloudflare.com &rarr; Turnstile</code> lalu tempel Site Key &amp; Secret Key di sini.</p>
+  <div class="switch-container">
+  <span class="switch-label" id="turnstileEnabledLabel" title="Aktifkan verifikasi Turnstile di halaman /register">Aktifkan Turnstile</span>
+  <label class="switch">
+  <input type="checkbox" id="turnstileEnabledInput" aria-labelledby="turnstileEnabledLabel">
+  <span class="slider"></span>
+  </label>
+  </div>
+  <div id="turnstileFields" style="display:none;flex-direction:column;gap:12px;">
+  <div class="form-row-2col grid grid-cols-1 sm:grid-cols-2 gap-4">
+  <div class="form-group space-y-1">
+  <label for="turnstileSiteKeyInput" title="Site Key dari dashboard Turnstile Cloudflare">Site Key</label>
+  <input type="text" id="turnstileSiteKeyInput" placeholder="0x4AAAAAAA...">
+  </div>
+  <div class="form-group space-y-1">
+  <label for="turnstileSecretKeyInput" title="Secret Key dari dashboard Turnstile Cloudflare. Hanya untuk verifikasi server, tidak pernah ditampilkan utuh">Secret Key</label>
+  <input type="password" id="turnstileSecretKeyInput" placeholder="0x4AAAAAAA...">
+  </div>
+  </div>
+  </div>
+  <div class="form-group space-y-1">
+  <label for="maxAccountsPerIpInput" title="Maksimal akun yang boleh dibuat dari satu alamat IP dalam 24 jam (0 = tanpa batas)">Maks Akun per IP (24 jam)</label>
+  <input type="number" id="maxAccountsPerIpInput" min="0" placeholder="3">
+  <span class="form-hint saas-domain-hint">Lapisan kedua di atas Turnstile. Sekolah dengan satu IP bersama (NAT) bisa menaikkan angka ini. 0 = tanpa batas.</span>
+  </div>
+  <div class="form-group space-y-1">
+  <label for="maxApprovalsPerExamInput" title="Maksimal perangkat yang boleh berstatus &quot;disetujui&quot; dalam satu ujian saat auto-approve server aktif (0 = tanpa batas)">Maks Perangkat Disetujui per Ujian</label>
+  <input type="number" id="maxApprovalsPerExamInput" min="0" placeholder="500">
+  <span class="form-hint saas-domain-hint">Batas perangkat berstatus &quot;disetujui&quot; per ujian saat auto-approve server aktif (anti-spam token bocor — request berikutnya jatuh ke antrean persetujuan). 0 = tanpa batas.</span>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--color-glass-border);">
+  <button type="button" id="saveTurnstileSettingsBtn" data-action="turnstile-save" class="btn-upload saas-save-btn" style="background:rgba(var(--rgb-success),0.2);border-color:rgba(var(--rgb-success),0.4);color:#6ee7b7;">
+  <svg class="icon-svg"><use href="#hi-check"/></svg> <span class="saas-save-text">Simpan Setelan Turnstile</span>
+  </button>
+  </div>
+  </div>
+  </section>
+
+  
+  <section class="glass-card saas-collapse" id="saas-card-cleanup" data-collapse-id="cleanup" style="margin-bottom:24px;">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <h3 class="saas-collapse-title"><svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-refresh"/></svg> Pembersihan Otomatis Antrean Persetujuan</h3>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body">
+  <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">Atur seberapa agresif job latar membersihkan baris persetujuan basi (pending yang ujiannya sudah berakhir &amp; pending/approved pada ujian nonaktif). Berlaku tanpa restart server — job membaca nilai ini setiap siklus.</p>
+  <div class="form-group space-y-1">
+  <label for="approvalCleanupIntervalMinutesInput" title="Seberapa sering job pembersih berjalan (menit)">Interval Pembersihan (menit)</label>
+  <input type="number" id="approvalCleanupIntervalMinutesInput" min="1" placeholder="15">
+  <span class="form-hint saas-domain-hint">Frekuensi job membersihkan baris approval basi. Minimum 1 menit. Nilai lebih kecil = antrean lebih ramping tapi beban DB lebih tinggi.</span>
+  </div>
+  <div class="form-group space-y-1">
+  <label for="approvalCleanupEndedGraceHoursInput" title="Toleransi (jam) setelah end_time ujian lewat sebelum barisnya dibersihkan">Toleransi Setelah Ujian Berakhir (jam)</label>
+  <input type="number" id="approvalCleanupEndedGraceHoursInput" min="0" placeholder="1">
+  <span class="form-hint saas-domain-hint">Buffer terhadap selisih jam perangkat &amp; perpanjangan jadwal oleh guru. 0 = bersihkan segera setelah jadwal berakhir.</span>
+  </div>
+  <div class="form-group space-y-1">
+  <label for="approvalCleanupInactiveTTLHoursInput" title="Umur baris pending/approved pada ujian nonaktif sebelum dihapus (jam)">TTL Baris pada Ujian Nonaktif (jam)</label>
+  <input type="number" id="approvalCleanupInactiveTTLHoursInput" min="0" placeholder="24">
+  <span class="form-hint saas-domain-hint">Baris pending/approved pada ujian nonaktif yang lebih tua dari ini dihapus. 0 = hapus semua. Keputusan &quot;ditolak&quot; dan data pengumpulan siswa tidak pernah disentuh.</span>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--color-glass-border);">
+  <button type="button" id="saveCleanupSettingsBtn" data-action="cleanup-save" class="btn-upload saas-save-btn" style="background:rgba(var(--rgb-success),0.2);border-color:rgba(var(--rgb-success),0.4);color:#6ee7b7;">
+  <svg class="icon-svg"><use href="#hi-check"/></svg> <span class="saas-save-text">Simpan Setelan Pembersihan</span>
+  </button>
+  </div>
+  </div>
+  </section>
+
+  
+  <section class="glass-card saas-collapse" id="saas-card-default-pkg" data-collapse-id="default-pkg" style="margin-bottom:24px;">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+  <h3 class="saas-collapse-title"><svg class="icon-svg"><use href="#hi-clipboard"/></svg> Default Paket Pendaftaran</h3>
+  <span class="disk-free-badge" id="diskFreeBadge" title="Sisa kapasitas disk partisi penyimpanan server. Nilai Maks Upload &amp; Maks Storage tidak boleh melebihi sisa disk ini.">
+  <svg class="icon-svg" style="width:13px;height:13px;flex-shrink:0;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/></svg>
+  <span id="diskFreeBadgeText">Sisa disk server: 33.88 GB</span>
+  </span>
+  </div>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body">
+  <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">Kuota default yang otomatis diterapkan ke akun baru yang mendaftar mandiri.</p>
+
+  <div class="form-row-3col grid grid-cols-1 sm:grid-cols-4 gap-4 default-pkg-row">
+  <div class="form-group space-y-1">
+  <label class="required" for="defaultExamsInput" title="Default limit jumlah ujian untuk pendaftaran baru">Maks Total Ujian</label>
+  <input type="number" id="defaultExamsInput" required min="1" title="Limit jumlah ujian">
+  </div>
+  <div class="form-group space-y-1">
+  <label class="required" for="defaultConcurrentInput" title="Default maksimal ujian yang berjalan bersamaan (sudah dimulai &amp; bisa dikerjakan siswa) untuk pendaftaran baru">Ujian Serentak</label>
+  <input type="number" id="defaultConcurrentInput" required min="1" title="Maksimal ujian berjalan bersamaan (sudah dimulai & bisa dikerjakan siswa)">
+  </div>
+  <div class="form-group space-y-1">
+  <label class="required" for="defaultPdfInput" title="Default limit ukuran file PDF (dalam Megabytes / MB) untuk pendaftaran baru">Maks Upload (MB)</label>
+  <input type="number" id="defaultPdfInput" required min="0.1" step="0.1" title="Limit ukuran file PDF (MB). Tidak boleh melebihi sisa disk server (maks 100 MB global).">
+  <span class="form-hint saas-domain-hint" id="defaultPdfHint">Maks 100 MB per file PDF.</span>
+  </div>
+  <div class="form-group space-y-1">
+  <label class="required" for="defaultStorageInput" title="Default batas total kapasitas storage (dalam Megabytes / MB) untuk pendaftaran baru. 0 = tidak terbatas.">Maks Storage (MB)</label>
+  <input type="number" id="defaultStorageInput" required min="0" step="0.1" title="Batas total kapasitas storage (dalam Megabytes / MB). 0 = tidak terbatas. Tidak boleh melebihi sisa disk server.">
+  <span class="form-hint saas-domain-hint" id="defaultStorageHint">0 = tidak terbatas.</span>
+  </div>
+  <div class="form-group space-y-1">
+  <label class="required" for="defaultActiveDaysInput" title="Default masa aktif akun (dalam Hari) untuk pendaftaran baru">Masa Aktif</label>
+  <input type="number" id="defaultActiveDaysInput" required min="1" title="Masa aktif akun (dalam Hari)">
+  </div>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--color-glass-border);">
+  <button type="button" id="saveDefaultPkgSettingsBtn" data-action="default-pkg-save" class="btn-upload saas-save-btn" style="background:rgba(var(--rgb-success),0.2);border-color:rgba(var(--rgb-success),0.4);color:#6ee7b7;">
+  <svg class="icon-svg"><use href="#hi-check"/></svg> <span class="saas-save-text">Simpan Default Paket</span>
+  </button>
+  </div>
+  </div>
+  </section>
+
+  
+  <section class="glass-card saas-collapse" id="saas-card-versions" data-collapse-id="versions" style="margin-bottom:24px;">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <h3 class="saas-collapse-title"><svg class="icon-svg"><use href="#hi-download"/></svg> Versi Aplikasi</h3>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body">
+  <div class="form-row-2col grid grid-cols-1 sm:grid-cols-2 gap-4">
+  <div class="form-group space-y-1">
+  <label class="required" for="androidVersionInput">Versi Android App (vX.Y.Z)</label>
+  <input type="text" id="androidVersionInput" required placeholder="Contoh: 2.0.0">
+  </div>
+  <div class="form-group space-y-1">
+  <label class="required" for="webappVersionInput">Versi WebApp Server (vX.Y.Z)</label>
+  <input type="text" id="webappVersionInput" required placeholder="Contoh: 2.0.0">
+  </div>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--color-glass-border);">
+  <button type="button" id="saveVersionsSettingsBtn" data-action="versions-save" class="btn-upload saas-save-btn" style="background:rgba(var(--rgb-success),0.2);border-color:rgba(var(--rgb-success),0.4);color:#6ee7b7;">
+  <svg class="icon-svg"><use href="#hi-check"/></svg> <span class="saas-save-text">Simpan Versi Aplikasi</span>
+  </button>
+  </div>
+  </div>
+  </section>
+
+  
+  <section class="glass-card saas-collapse" id="saas-card-footer" data-collapse-id="footer" style="margin-bottom:24px;">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <h3 class="saas-collapse-title"><svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-clipboard"/></svg> Kustomisasi Footer</h3>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body">
+  <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">Teks footer yang tampil di semua halaman publik (halaman utama, unduh, login/daftar, dan hasil ujian).</p>
+
+  <div class="form-group space-y-1">
+  <label for="footerTextInput" title="Teks utama footer (biasanya hak cipta)">Teks Footer</label>
+  <input type="text" id="footerTextInput" placeholder="© 2026 Tim EXAMVAN. Hak cipta dilindungi.">
+  </div>
+
+  <div class="form-group space-y-1">
+  <label for="footerTaglineInput" title="Kalimat pendukung di bawah teks footer (boleh kosong)">Subteks Footer</label>
+  <input type="text" id="footerTaglineInput" placeholder="Dibuat khusus untuk pengujian sekolah digital mandiri yang aman.">
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--color-glass-border);">
+  <button type="button" id="saveFooterSettingsBtn" data-action="footer-save" class="btn-upload saas-save-btn" style="background:rgba(var(--rgb-success),0.2);border-color:rgba(var(--rgb-success),0.4);color:#6ee7b7;">
+  <svg class="icon-svg"><use href="#hi-check"/></svg> <span class="saas-save-text">Simpan Footer</span>
+  </button>
+  </div>
+  </div>
+  </section>
+
+  
+  <section class="glass-card saas-collapse" id="saas-card-seo" data-collapse-id="seo" style="margin-bottom:24px;">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <h3 class="saas-collapse-title"><svg class="icon-svg" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;"><path d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A11.952 11.952 0 0 1 12 16.5c-2.998 0-5.74-1.1-7.843-2.918m0 0A8.959 8.959 0 0 1 3 12c0-.778.099-1.533.284-2.253"/></svg> Pengaturan SEO &amp; Indexing Google</h3>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body">
+  <div class="form-group space-y-1">
+  <label for="seoTitleInput" title="Judul situs web yang akan muncul di hasil pencarian Google">Meta Title</label>
+  <input type="text" id="seoTitleInput" placeholder="EXAMVAN - Aplikasi Ujian Online Aman &amp; Tertib">
+  </div>
+
+  <div class="form-group space-y-1">
+  <label for="seoDescriptionInput" title="Deskripsi singkat yang akan muncul di bawah judul situs pada pencarian Google">Meta Description</label>
+  <textarea id="seoDescriptionInput" placeholder="Masukkan deskripsi singkat untuk pencarian Google..." style="width:100%;min-height:60px;background:rgba(var(--rgb-white), 0.05);border:1px solid var(--color-glass-border);border-radius:6px;padding:8px;color:var(--color-text);font-family:inherit;font-size:0.875rem;resize:vertical;"></textarea>
+  </div>
+
+  <div class="form-row-2col grid grid-cols-1 sm:grid-cols-2 gap-4">
+  <div class="form-group space-y-1">
+  <label for="seoKeywordsInput" title="Kata kunci pencarian yang relevan, dipisahkan dengan koma">Meta Keywords</label>
+  <input type="text" id="seoKeywordsInput" placeholder="examvan, ujian online, ujian sekolah">
+  </div>
+  <div class="form-group space-y-1" style="display:flex;flex-direction:column;justify-content:center;">
+  <div class="switch-container" style="margin-top:16px;">
+  <span class="switch-label" id="seoIndexLabel" title="Aktifkan agar Google dan mesin pencari lainnya dapat mengindeks halaman login/registrasi situs ini">Izinkan Google Index</span>
+  <label class="switch">
+  <input type="checkbox" id="seoIndexInput" aria-labelledby="seoIndexLabel">
+  <span class="slider"></span>
+  </label>
+  </div>
+  </div>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--color-glass-border);">
+  <button type="button" id="saveSeoSettingsBtn" data-action="seo-save" class="btn-upload saas-save-btn" style="background:rgba(var(--rgb-success),0.2);border-color:rgba(var(--rgb-success),0.4);color:#6ee7b7;">
+  <svg class="icon-svg"><use href="#hi-check"/></svg> <span class="saas-save-text">Simpan Setelan SEO</span>
+  </button>
+  </div>
+  </div>
+  </section>
+
+  
+  <section class="glass-card saas-collapse" id="saas-card-monetization" data-collapse-id="monetization" style="margin-bottom:24px;">
+  <div class="saas-collapse-head" role="button" tabindex="0" aria-expanded="true">
+  <h3 class="saas-collapse-title"><svg class="icon-svg"><use href="#hi-credit-card"/></svg> Kontrol Monetisasi</h3>
+  <svg class="saas-collapse-chev" aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+  </div>
+  <div class="saas-collapse-body">
+  <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">Kelola penukaran kode promo/voucher oleh pengguna. Mematikan hanya menghentikan <em>klaim kode baru</em> — paket yang sudah diklaim tetap dapat diaktifkan/dilanjutkan oleh pengguna.</p>
+  <div style="display:flex;flex-direction:column;gap:8px;">
+   <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:8px 10px;border-radius:8px;background:rgba(var(--rgb-white), 0.03);">
+    <input type="checkbox" id="voucherRedeemEnabledInput" style="accent-color:var(--color-primary);">
+    <span><strong>Redeem Kode Promo / Voucher</strong><br><span style="font-size:11px;color:var(--color-text-secondary);">Penukaran kode promo/voucher oleh pengguna. Hanya memblokir klaim kode baru — pengguna tetap bisa mengaktifkan paket yang sudah diklaim sebelumnya.</span></span>
+   </label>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--color-glass-border);">
+  <button type="button" id="saveMonetizationSettingsBtn" data-action="monetization-save" class="btn-upload saas-save-btn" style="background:rgba(var(--rgb-success),0.2);border-color:rgba(var(--rgb-success),0.4);color:#6ee7b7;">
+  <svg class="icon-svg"><use href="#hi-check"/></svg> <span class="saas-save-text">Simpan Kontrol Monetisasi</span>
+  </button>
+  </div>
+  </div>
+  </section>
+  
+
+ 
+ <section class="glass-card" id="packages-card" style="margin-top:24px;">
+<div class="billing-container" style="padding:24px;max-width:1200px;margin:0 auto;">
+
+ 
+ <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+  <div>
+   <h2 style="font-size:1.5rem;font-weight:700;color:var(--color-text);margin:0;font-family:'Outfit',sans-serif;display:flex;align-items:center;gap:10px;">
+    <svg class="icon-svg" style="width:26px;height:26px;color:var(--color-primary-light);"><use href="#hi-settings"/></svg>
+    Pengaturan Paket
+   </h2>
+   <p style="color:var(--color-text-secondary);font-size:0.875rem;margin:2px 0 0 0;">Atur kuota default setiap paket. Perubahan berlaku untuk klaim voucher berikutnya; paket yang sudah diklaim tetap memakai snapshot lamanya.</p>
+  </div>
+  <button data-action="packages-save" id="btnSavePackages" class="btn-primary" style="display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border-radius:10px;font-weight:600;font-size:0.875rem;cursor:pointer;background:linear-gradient(135deg, rgb(var(--rgb-accent)), rgb(var(--rgb-info)));border:none;color:var(--color-text-on-primary);">
+   <svg class="icon-svg" style="width:16px;height:16px;"><use href="#hi-check"/></svg> Simpan Perubahan
+  </button>
+ </div>
+
+ 
+ <div class="glass-card" style="border-radius:16px;overflow:hidden;">
+  <div style="overflow-x:auto;">
+   <table class="exam-table pkg-table" style="width:100%;border-collapse:collapse;text-align:left;font-size:13.5px;">
+    
+    <caption class="sr-only">Pengaturan Paket Pendaftaran</caption>
+    <thead>
+     <tr style="border-bottom:1px solid var(--color-glass-border);background:rgba(var(--rgb-white), 0.02);color:var(--color-text-secondary);font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">
+      <th scope="col" style="padding:16px 20px;min-width:170px;">Nama Paket</th>
+      <th scope="col" style="padding:16px 20px;min-width:110px;">Total Ujian</th>
+      <th scope="col" style="padding:16px 20px;min-width:120px;">Ujian Serentak</th>
+      <th scope="col" style="padding:16px 20px;min-width:120px;">Maks. PDF (MB)</th>
+      <th scope="col" style="padding:16px 20px;min-width:130px;">Storage (MB)</th>
+      <th scope="col" style="padding:16px 20px;min-width:130px;">Maks. Akun Guru</th>
+      <th scope="col" style="padding:16px 20px;min-width:140px;">Role</th>
+     </tr>
+    </thead>
+    <tbody id="packagesTableBody">
+     <tr>
+      <td colspan="7" style="padding:32px;text-align:center;color:var(--color-text-secondary);">
+       <span style="display:inline-flex;align-items:center;gap:6px;"><svg class="icon-svg spin" style="width:16px;height:16px;"><use href="#hi-refresh"/></svg> Memuat pengaturan paket...</span>
+      </td>
+     </tr>
+    </tbody>
+   </table>
+  </div>
+ </div>
+
+ <p style="color:var(--color-text-secondary);font-size:12.5px;margin-top:14px;">
+  Keterangan: <strong style="color:var(--color-text);">Total Ujian</strong> = maksimal ujian yang dapat dibuat; <strong style="color:var(--color-text);">Ujian Serentak</strong> = maksimal ujian yang berjalan bersamaan (otomatis dibatasi tidak melebihi Total Ujian); <strong style="color:var(--color-text);">Maks. Akun Guru</strong> = batas jumlah akun yang boleh dibuat operator di instansi (0 = tanpa batas); <strong style="color:var(--color-text);">Role</strong> = peran tambahan yang diberikan saat voucher paket ini diklaim.
+ </p>
+
+</div>
+
+ </section>
+</section>
+
+<section class="settings-section" id="section-system-apps" data-section="system-apps" aria-label="Aplikasi Sistem">
+    
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:48px; flex-wrap: wrap; gap: 24px;">
+        <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+            <div class="header-icon-wrap">
+                <svg class="icon-svg" style="width:28px;height:28px;color:var(--color-primary-bright);"><use href="#hi-download"/></svg>
+            </div>
+            <div>
+                <h2 class="premium-header-title">Aplikasi Sistem</h2>
+                <p style="color:var(--color-text-placeholder); font-size:16px; margin:8px 0 0 0;">Kelola dan distribusikan aplikasi ujian (Android, Windows, Linux) via Cloudflare R2.</p>
+            </div>
+        </div>
+        
+        <button class="btn-premium" type="button" id="btnOpenUploadApp">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> 
+            Unggah Aplikasi Baru
+        </button>
+        
+    </div>
+    
+    
+
+<div id="uploadModal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="uploadModalTitle" data-action="modal-dismiss" data-modal-close="closeUploadModal">
+    <div class="modal-glass">
+        <div class="modal-header" style="position:relative;">
+            <button type="button" data-action="app-upload-close" aria-label="Tutup" style="position:absolute;top:0;right:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:rgba(var(--rgb-white), 0.06);border:1px solid rgba(var(--rgb-white), 0.1);border-radius:10px;color:#e2e8f0;font-size:18px;cursor:pointer;line-height:1;">&times;</button>
+            <h3 id="uploadModalTitle" style="margin:0; font-size:1.5rem; font-weight:800; color:white; display:flex; align-items:center; gap:12px; padding-right:52px;">
+                
+                <span style="width: 40px; height: 40px; background: rgba(var(--rgb-accent),0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: var(--color-accent-light);">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                </span>
+                Unggah Aplikasi Baru
+            </h3>
+            <p style="margin:12px 0 0 0; font-size:0.95rem; color:var(--color-text-placeholder); line-height:1.5;">Lengkapi data dan pilih file instalasi aplikasi klien yang akan didistribusikan.</p>
+        </div>
+        <div class="modal-body">
+            <form id="uploadAppForm">
+                <div style="margin-bottom:24px;">
+                    <label class="form-label" for="appName">Nama Aplikasi <span style="color:var(--color-danger-light);">*</span></label>
+                    <input type="text" id="appName" name="name" class="custom-input" required placeholder="Contoh: EXAMVAN Client CBT">
+                </div>
+
+                <div style="display:flex; gap:20px; margin-bottom:24px;">
+                    <div style="flex:1;">
+                        <label class="form-label" for="platformSelect">Platform <span style="color:var(--color-danger-light);">*</span></label>
+                        <select id="platformSelect" name="platform" class="custom-select" required>
+                            <option value="android">Android (.apk)</option>
+                            <option value="windows">Windows (.exe)</option>
+                            <option value="linux">Linux (.AppImage / ELF)</option>
+                        </select>
+                    </div>
+                    <div style="flex:1;">
+                        <label class="form-label" for="appVersion">Versi <span style="color:var(--color-danger-light);">*</span></label>
+                        <input type="text" id="appVersion" name="version" class="custom-input" required placeholder="Contoh: 2.1.0">
+                    </div>
+                </div>
+
+                <div style="margin-bottom:24px;">
+                    <label class="form-label" for="appFile">File Aplikasi <span style="color:var(--color-danger-light);">*</span></label>
+                    <div class="custom-file-input" id="fileDropArea">
+                        <input type="file" id="appFile" name="file" required>
+                        <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                        <div id="file-name-display" style="font-weight:700; color:white; font-size:1.15rem; margin-bottom:6px;">Pilih atau Seret File Ke Sini</div>
+                        <div style="font-size:0.9rem; color:var(--color-text-placeholder);">Mendukung file .apk, .exe, atau executable linux.</div>
+                    </div>
+                </div>
+                
+                <div id="uploadError" style="margin-bottom:20px; padding:16px 20px; border-radius:12px; background:rgba(var(--rgb-danger),0.15); border:1px solid rgba(var(--rgb-danger),0.4); color:var(--color-danger-light); font-size:14.5px; font-weight:500; display:none; align-items:flex-start; gap:12px; box-shadow:0 4px 15px rgba(var(--rgb-danger),0.1);">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0; margin-top:1px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                    <span id="uploadErrorText" style="line-height:1.5;"></span>
+                </div>
+                
+                <div id="uploadProgressContainer" style="display:none; margin-bottom:20px; background:rgba(var(--rgb-black), 0.3); padding:24px; border-radius:16px; border:1px solid rgba(var(--rgb-white), 0.08); box-shadow:inset 0 4px 10px rgba(var(--rgb-black), 0.2);">
+                    <div style="display:flex; justify-content:space-between; font-weight:700; font-size:15px; margin-bottom:14px; color:white;">
+                        <span id="uploadStatusText" style="display:flex; align-items:center; gap:10px;">
+                            <svg class="animate-spin" width="18" height="18" style="animation: spin 1s linear infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+                            Mengunggah File...
+                        </span>
+                        <span id="uploadPercentage" style="color:var(--color-accent-light); font-size:16px;">0%</span>
+                    </div>
+                    <div style="width:100%; height:12px; background:rgba(var(--rgb-white), 0.1); border-radius:12px; overflow:hidden; box-shadow:inset 0 2px 4px rgba(var(--rgb-black), 0.3);">
+                        <div id="uploadProgressBar" style="height:100%; width:0%; background:linear-gradient(90deg, #4f46e5, var(--color-accent-light), #f472b6); border-radius:12px; transition:width 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 15px rgba(var(--rgb-accent),0.6);"></div>
+                    </div>
+                    <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-cancel" data-action="app-upload-close">Batal</button>
+            <button id="uploadSubmitBtn" class="btn-premium" data-action="app-upload-submit">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Unggah Sekarang
+            </button>
+        </div>
+    </div>
+
+    <script>
+    
+    
+    
+    (function() {
+      var pending = false;
+      window.openUploadModalSafe = function() {
+        if (typeof window.openUploadModal === 'function') {
+          window.openUploadModal();
+          return;
+        }
+        if (pending) return;
+        pending = true;
+        var tryOpen = function() {
+          pending = false;
+          if (typeof window.openUploadModal === 'function') window.openUploadModal();
+        };
+        
+        
+        
+        
+        
+        
+        
+        
+        var s = document.createElement('script');
+        s.src = '/static/js/settings-system-apps.js?v=2.7.3-983a6cca';
+        s.onload = function() {
+          window.__settingsLoaded = window.__settingsLoaded || {};
+          window.__settingsLoaded['system-apps'] = true;
+          tryOpen();
+        };
+        s.onerror = function() {
+          pending = false;
+          window.__settingsLoaded = window.__settingsLoaded || {};
+          window.__settingsLoaded['system-apps'] = false;
+          if (typeof window.showToast === 'function') window.showToast('Gagal memuat modul Pengaturan', 'error');
+        };
+        document.head.appendChild(s);
+      };
+      document.addEventListener('DOMContentLoaded', function() {
+        
+        
+        
+        
+        
+        
+        var sizeEls = document.querySelectorAll('[data-app-size-bytes]');
+        for (var i = 0; i < sizeEls.length; i++) {
+          var bytes = parseInt(sizeEls[i].getAttribute('data-app-size-bytes'), 10);
+          if (!isNaN(bytes)) sizeEls[i].textContent = (bytes / (1024 * 1024)).toFixed(2);
+        }
+      });
+      document.addEventListener('click', function(e) {
+        var el = e.target.closest && e.target.closest('#btnOpenUploadApp');
+        if (el) { e.preventDefault(); window.openUploadModalSafe(); }
+      });
+    })();
+    </script>
+
+    <div class="apps-grid">
+        
+        <div style="grid-column: 1 / -1; text-align: center; padding: 80px 20px; background: rgba(var(--rgb-white), 0.02); border-radius: 24px; border: 2px dashed rgba(var(--rgb-white), 0.1);">
+            <svg style="width: 80px; height: 80px; color: rgba(var(--rgb-white), 0.1); margin-bottom: 24px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            <h3 style="color:white; font-size:1.5rem; font-weight:700; margin-bottom:12px;">Belum Ada Aplikasi</h3>
+            <p style="color:var(--color-text-placeholder); font-size:1.05rem; max-width:480px; margin:0 auto; line-height:1.6;">Anda belum mengunggah aplikasi apapun. Klik tombol unggah di kanan atas untuk mulai mendistribusikan aplikasi ujian ke siswa.</p>
+        </div>
+        
+    </div>
+</section>
+
+
+</main>
+
+
+<div class="modal-overlay" id="changePasswordModal" role="dialog" aria-modal="true" aria-labelledby="changePasswordModalTitle" style="display:none;">
+ <div class="modal-card glass-card" style="max-width: 420px;">
+ <div class="modal-header">
+ <h3 id="changePasswordModalTitle"><svg class="icon-svg" style="vertical-align:middle;margin-top:-2px;"><use href="#hi-key"/></svg> Ubah Password</h3>
+ <button class="modal-close" data-action="modal-close" data-modal-close="closeChangePasswordModal" aria-label="Tutup"><svg class="icon-svg" style="width:18px;height:18px;"><use href="#hi-x"/></svg></button>
+ </div>
+ <div class="modal-body">
+ <form id="changePasswordForm">
+ <input type="hidden" name="csrf_token" value="cf271c9f56a0371de5626854009eb250a0e8a15492d819d6bb24ad813e629c32">
+ <div class="form-group" style="margin-bottom: 16px;">
+ <label class="required" for="currentPassword">Password Saat Ini</label>
+ <div class="password-wrapper">
+ <input type="password" id="currentPassword" required placeholder="Masukkan password lama">
+ <button type="button" id="toggleCurPassword" class="password-toggle-btn" aria-label="Tampilkan/sembunyikan password" style="background:none; border:none; cursor:pointer; padding:4px; line-height:1;">
+  <svg class="icon-svg pw-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+   <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/>
+   <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+  </svg>
+ </button>
+ </div>
+ </div>
+ <div class="form-group" style="margin-bottom: 16px;">
+ <label class="required" for="newPassword">Password Baru</label>
+ <div class="password-wrapper">
+ <input type="password" id="newPassword" required placeholder="Masukkan password baru (min. 8 karakter)" minlength="8">
+ <button type="button" id="toggleNewPassword" class="password-toggle-btn" aria-label="Tampilkan/sembunyikan password" style="background:none; border:none; cursor:pointer; padding:4px; line-height:1;">
+  <svg class="icon-svg pw-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+   <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/>
+   <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+  </svg>
+ </button>
+ </div>
+ </div>
+ <div class="form-group" style="margin-bottom: 24px;">
+ <label class="required" for="confirmNewPassword">Konfirmasi Password Baru</label>
+ <div class="password-wrapper">
+ <input type="password" id="confirmNewPassword" required placeholder="Ulangi password baru">
+ <button type="button" id="toggleConfirmPassword" class="password-toggle-btn" aria-label="Tampilkan/sembunyikan password" style="background:none; border:none; cursor:pointer; padding:4px; line-height:1;">
+  <svg class="icon-svg pw-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+   <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/>
+   <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+  </svg>
+ </button>
+ </div>
+ </div>
+ <button type="submit" class="btn-upload" style="width: 100%;"><svg class="icon-svg" aria-hidden="true"><use href="#hi-check"/></svg> Simpan Password Baru</button>
+ </form>
+ </div>
+ </div>
+ </div>
+
+<script src="/static/js/admin-core.js?v=2.7.3-983a6cca"></script>
+<script src="/static/js/admin.js?v=2.7.3-983a6cca"></script>
+<script>
+
+window.__adminRole = 'superadmin';
+window.__adminInstansi = 'owner';
+window.__storageFreeMb =  34693.79 ;
+const CSRF_TOKEN = 'cf271c9f56a0371de5626854009eb250a0e8a15492d819d6bb24ad813e629c32';
+
+
+window.__settingsReady = {};
+window.__settingsLoaded = {};
+
+
+
+
+
+
+
+
+
+
+(function() {
+  
+  
+  window.Actions.register('voucher-subtab', function(el) { window.switchVoucherSubtab(el.getAttribute('data-subtab')); });
+})();
+
+
+
+
+
+
+
+
+(function() {
+  function wire(id, type, fn) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener(type, fn);
+  }
+  function lazy(fnName) {
+    return function(arg) {
+      if (typeof window[fnName] === 'function') window[fnName](arg);
+    };
+  }
+
+  
+  wire('newUserForm', 'submit', function(e) { createUser(e); });
+  wire('changePasswordForm', 'submit', function(e) { submitChangePassword(e); });
+  wire('formSingleVoucher', 'submit', lazy('submitSingleVoucher'));
+  wire('formBatchVoucher', 'submit', lazy('submitBatchVoucher'));
+
+  
+  wire('userSearchInput', 'keydown', function(e) {
+    if (e.key === 'Enter') { clearTimeout(window.__usersSearchTimer); loadUsersList(1); }
+  });
+  wire('userSearchInput', 'input', function() { onUsersSearchInput(this); });
+  wire('userRoleFilter', 'change', function() { loadUsersList(1); });
+  wire('userPerPage', 'change', function() { loadUsersList(1); });
+  wire('userSortMobile', 'change', function() { onUsersSortMobileChange(); });
+
+  
+  wire('packageSelect', 'change', function() { applyPackagePreset('new'); });
+
+  
+  wire('voucherCodeInput', 'keyup', function(e) { if (e.key === 'Enter') lazy('redeemVoucher')(); });
+  wire('searchVoucher', 'input', function() { lazy('toggleVoucherSearchClear')(); });
+  wire('searchVoucher', 'keyup', function(e) { if (e.key === 'Enter') lazy('loadVouchers')(1); });
+
+  
+  wire('auditSearchInput', 'keyup', function(e) { if (e.key === 'Enter') lazy('loadAuditLogs')(1); });
+
+  
+  wire('singlePackage', 'change', function() { lazy('toggleCustomPackage')('single'); });
+  wire('singleDuration', 'change', function() { lazy('toggleCustomDuration')('single'); });
+  wire('batchPackage', 'change', function() { lazy('toggleCustomPackage')('batch'); });
+  wire('batchDuration', 'change', function() { lazy('toggleCustomDuration')('batch'); });
+
+  
+  wire('emailEnabledInput', 'change', function() { lazy('toggleEmailFields')(); });
+  wire('turnstileEnabledInput', 'change', function() { lazy('toggleTurnstileFields')(); });
+
+  
+  wire('appFile', 'change', function() { lazy('updateFileName')(this); });
+})();
+
+
+(function() {
+  var sections = Array.prototype.slice.call(document.querySelectorAll('.settings-section'));
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.settings-tab[data-section]'));
+  var inited = {};
+
+  var isSuper = (window.__adminRole === 'superadmin');
+  var isOp = (window.__adminRole === 'operator' || (window.__adminRole || '').indexOf('operator') !== -1);
+  
+  
+  
+  var defaultSection = (isSuper || isOp) ? 'users' : 'billing';
+  if (!document.getElementById('section-' + defaultSection)) defaultSection = 'billing';
+
+  
+  
+  
+  
+  function resolveSection(h) {
+    if (h === 'voucher-audit') return 'vouchers';
+    if (h === 'packages') return 'general';
+    return h;
+  }
+
+  function loadSectionScript(key, cb) {
+    if (window.__settingsLoaded[key]) { cb(); return; }
+    window.__settingsLoaded[key] = true;
+    
+    
+    
+    
+    var files = ['settings-' + key + '.js'];
+    if (key === 'vouchers') files.push('settings-voucher-audit.js');
+    if (key === 'general') files.push('settings-packages.js');
+    var remaining = files.length;
+    function done() { if (--remaining <= 0 && cb) cb(); }
+    files.forEach(function(f) {
+      var s = document.createElement('script');
+      s.src = '/static/js/' + f + '?v=2.7.3-983a6cca';
+      s.onload = done;
+      s.onerror = function() {
+        window.__settingsLoaded[key] = false;
+        if (typeof showToast === 'function') showToast('Gagal memuat modul Pengaturan', 'error');
+        done();
+      };
+      document.head.appendChild(s);
+    });
+  }
+
+  function syncSelect(key) {
+    var sel = document.getElementById('settingsSectionSelect');
+    if (sel) sel.value = key;
+  }
+
+  function activate(key, opts) {
+    opts = opts || {};
+    var target = document.getElementById('section-' + key);
+    if (!target) key = defaultSection;
+    sections.forEach(function(sec) {
+      var on = sec.getAttribute('data-section') === key;
+      sec.style.display = on ? '' : 'none';
+      sec.setAttribute('aria-hidden', on ? 'false' : 'true');
+    });
+    tabs.forEach(function(t) {
+      var active = t.getAttribute('data-section') === key;
+      t.classList.toggle('active', active);
+      if (active) t.setAttribute('aria-current', 'page');
+      else t.removeAttribute('aria-current');
+    });
+    syncSelect(key);
+    if (!inited[key]) {
+      inited[key] = true;
+      loadSectionScript(key, function() {
+        if (window.__settingsReady && typeof window.__settingsReady[key] === 'function') {
+          window.__settingsReady[key]();
+        }
+        if (opts.afterInit) opts.afterInit();
+      });
+    } else if (opts.afterInit) {
+      opts.afterInit();
+    }
+  }
+
+  
+  window.switchVoucherSubtab = function(name) {
+    var listPanel = document.getElementById('voucherListPanel');
+    var historyPanel = document.getElementById('voucherHistoryPanel');
+    if (!listPanel || !historyPanel) return;
+    var showHistory = (name === 'history');
+    listPanel.style.display = showHistory ? 'none' : '';
+    historyPanel.style.display = showHistory ? '' : 'none';
+    var btns = document.querySelectorAll('.voucher-subtab');
+    btns.forEach(function(b) {
+      var on = b.getAttribute('data-subtab') === name;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+      b.style.background = on ? 'linear-gradient(135deg,rgb(var(--rgb-accent)),rgb(var(--rgb-info)))' : 'rgba(var(--rgb-white), 0.06)';
+      b.style.color = on ? 'var(--color-text)' : 'var(--color-text)';
+    });
+  };
+
+  tabs.forEach(function(t) {
+    t.addEventListener('click', function(e) {
+      var key = t.getAttribute('data-section');
+      if (!key) return;
+      e.preventDefault();
+      activate(key);
+      try { history.replaceState(null, '', '#' + key); } catch (err) {}
+    });
+  });
+
+  
+  var sel = document.getElementById('settingsSectionSelect');
+  if (sel) {
+    sel.addEventListener('change', function() {
+      var key = sel.value;
+      if (!key) return;
+      activate(key);
+      try { history.replaceState(null, '', '#' + key); } catch (err) {}
+    });
+  }
+
+  function initialFromHash() {
+    var h = (window.location.hash || '').replace(/^#/, '').trim();
+    return document.getElementById('section-' + resolveSection(h)) ? resolveSection(h) : '';
+  }
+
+  
+  
+  window.addEventListener('hashchange', function() {
+    var h = (window.location.hash || '').replace(/^#/, '').trim();
+    var key = resolveSection(h);
+    if (!document.getElementById('section-' + key)) return;
+    activate(key, {
+      afterInit: function() {
+        if (h === 'voucher-audit' && typeof window.switchVoucherSubtab === 'function') {
+          window.switchVoucherSubtab('history');
+        } else if (h === 'packages') {
+          var card = document.getElementById('packages-card');
+          if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+    });
+  });
+
+  var initial = initialFromHash() || defaultSection;
+  var initialHash = (window.location.hash || '').replace(/^#/, '').trim();
+  activate(initial, {
+    afterInit: function() {
+      if (initialHash === 'voucher-audit' && typeof window.switchVoucherSubtab === 'function') {
+        window.switchVoucherSubtab('history');
+      } else if (initialHash === 'packages') {
+        var card = document.getElementById('packages-card');
+        if (card && card.scrollIntoView) setTimeout(function() { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
+      }
+    }
+  });
+})();
+
+document.addEventListener('DOMContentLoaded', function() {
+  togglePasswordVisibility('currentPassword', 'toggleCurPassword');
+  togglePasswordVisibility('newPassword', 'toggleNewPassword');
+  togglePasswordVisibility('confirmNewPassword', 'toggleConfirmPassword');
+});
+</script>
+</body>
+</html>
