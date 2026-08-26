@@ -282,18 +282,29 @@ bool Server::listen(const ServerOpts& opts) {
        * uppercase, jadi normalisasi kembali ke uppercase sebelum dispatch. */
       std::string method(req->getMethod());
       for (auto &c : method) c = toupper(static_cast<unsigned char>(c));
-      examvan::Request r; r.method=method; r.path=path;
-      auto cookie(std::string_view(req->getHeader("cookie")));
-      if(!cookie.empty()) r.headers["Cookie"]=std::string(cookie);
-      auto xver(std::string_view(req->getHeader("x-app-version")));
-      if(!xver.empty()) r.headers["X-App-Version"]=std::string(xver);
-      auto origin(std::string_view(req->getHeader("origin")));
-      if(!origin.empty()) r.headers["Origin"]=std::string(origin);
-      auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
-      if(resp.status==0) resp.status=404;
-      res->writeStatus(std::to_string(resp.status));
-      for(auto &h: resp.headers) res->writeHeader(h.first, h.second);
-      res->end(resp.body);
+      /* Body POST harus dibaca via res->onData (uWS streaming) —
+       * req tidak membawa body. Tanpa ini POST body kosong → login 403. */
+      std::string cookie(std::string_view(req->getHeader("cookie")));
+      std::string xver(std::string_view(req->getHeader("x-app-version")));
+      std::string origin(std::string_view(req->getHeader("origin")));
+      res->onData([router_ptr, res, method, path, cookie, xver, origin](std::string_view chunk, bool last){
+        static thread_local std::string body;
+        body.append(chunk);
+        if(!last) return;
+        examvan::Request r; r.method=method; r.path=path; r.body=body;
+        if(!cookie.empty()) r.headers["Cookie"]=cookie;
+        if(!xver.empty()) r.headers["X-App-Version"]=xver;
+        if(!origin.empty()) r.headers["Origin"]=origin;
+        body.clear();
+        auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
+        if(resp.status==0) resp.status=404;
+        res->writeStatus(std::to_string(resp.status));
+        for(auto &h: resp.headers) res->writeHeader(h.first, h.second);
+        res->end(resp.body);
+      }, [res](uintmax_t){
+        res->writeStatus("413");
+        res->end("{\"error\":\"payload too large\"}");
+      });
     });
     g_app->ws<WsData>("/ws/:room_id", {
       .upgrade = [hub_ptr, cfg_ptr](auto *res, auto *req, auto *context){
