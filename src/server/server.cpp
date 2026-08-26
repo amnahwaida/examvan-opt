@@ -301,7 +301,7 @@ bool Server::listen(const ServerOpts& opts) {
         res->writeStatus(std::to_string(resp.status));
         for(auto &h: resp.headers) res->writeHeader(h.first, h.second);
         res->end(resp.body);
-      }, [res](uintmax_t){
+      }, [res](){
         res->writeStatus("413");
         res->end("{\"error\":\"payload too large\"}");
       });
