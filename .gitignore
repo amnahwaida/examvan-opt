@@ -5,3 +5,4 @@ build-san/
 .env
 postgres_data/
 build-uws/
+soak-logs/
