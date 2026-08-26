@@ -1,0 +1,188 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ 
+
+ <link rel="preconnect" href="https://fonts.googleapis.com">
+ <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+ <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+ <title>EXAMVAN - Admin Login</title>
+ <meta name="description" content="EXAMVAN adalah aplikasi ujian online mandiri dengan sistem keamanan tinggi terhindar dari kecurangan.">
+ 
+ <meta name="robots" content="index, follow">
+ 
+ <link rel="stylesheet" href="/static/css/theme.css?v=2.7.3-983a6cca">
+ <link rel="stylesheet" href="/static/css/tailwind/output.css?v=2.7.3-983a6cca">
+ <link rel="icon" type="image/png" href="/static/favicon.png">
+ <meta name="csrf-token" content="b0b41180608d318f0452c8a9389d64ea16cf5baf6cb1efe121c17d973473a1ed">
+ <style>
+   
+  .login-form .form-group input,
+  .login-form .form-group select { font-size: 16px; }
+ </style>
+
+<link rel="stylesheet" href="/static/css/public-mobile.css?v=2.7.3-983a6cca">
+<link rel="stylesheet" href="/static/css/public-desktop.css?v=2.7.3-983a6cca">
+ 
+</head>
+<body class="login-page">
+ 
+
+ <div class="nav-overlay" id="navOverlay" data-nav-toggle></div>
+ <nav>
+ <div class="nav-container">
+ <a href="/" class="logo-container">
+ <div class="logo-badge">E</div>
+ <div class="logo-text">EXAMVAN</div>
+ </a>
+ <button class="nav-hamburger" id="navHamburger" data-nav-toggle aria-label="Menu navigasi" aria-expanded="false" aria-controls="navLinks">&#9776;</button>
+ <div class="nav-links" id="navLinks">
+ <a href="/download" class="nav-link">Unduh Aplikasi</a>
+ <a href="/hasil" class="nav-link">Cek Hasil Ujian</a>
+ 
+ <a href="/register" class="nav-link">Daftar</a>
+ <a href="/login" class="btn-nav-login">Masuk</a>
+ 
+ </div>
+ </div>
+ </nav>
+ <script>
+ 
+ 
+ function toggleMenu() {
+ var links = document.getElementById('navLinks');
+ 
+ 
+ var wasOpen = !!(links && links.classList.contains('open'));
+ var open = links.classList.toggle('open');
+ document.getElementById('navOverlay').classList.toggle('active');
+ var burger = document.getElementById('navHamburger');
+ burger.innerHTML = open ? '✕' : '☰';
+ burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+ document.body.style.overflow = open ? 'hidden' : '';
+ if (wasOpen && !open) burger.focus();
+ }
+ Array.prototype.forEach.call(document.querySelectorAll('[data-nav-toggle]'), function (el) {
+ el.addEventListener('click', toggleMenu);
+ });
+ function closeMenu() {
+  var links = document.getElementById('navLinks');
+  
+  
+  var wasOpen = !!(links && links.classList.contains('open'));
+  if (links) links.classList.remove('open');
+  var overlay = document.getElementById('navOverlay');
+  if (overlay) overlay.classList.remove('active');
+  var burger = document.getElementById('navHamburger');
+  if (burger) {
+   burger.innerHTML = '&#9776;';
+   burger.setAttribute('aria-expanded', 'false');
+   
+   
+   if (wasOpen) burger.focus();
+  }
+  document.body.style.overflow = '';
+ }
+ document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { closeMenu(); } });
+ </script>
+
+ <a href="#main-content" class="skip-link">Langsung ke konten</a>
+ <div class="login-bg">
+ <div class="login-orb login-orb-1"></div>
+ <div class="login-orb login-orb-2"></div>
+ </div>
+ <div class="login-container" id="main-content">
+ <div class="login-card">
+ <div class="login-header">
+ <div class="login-logo">E</div>
+ <h1>EXAMVAN</h1>
+ <p class="login-subtitle">Panel Admin &mdash; Kelola Ujian Digital</p>
+ </div>
+ 
+ 
+ <form method="POST" action="/admin/login" class="login-form" id="loginForm">
+  <input type="hidden" name="csrf_token" value="b0b41180608d318f0452c8a9389d64ea16cf5baf6cb1efe121c17d973473a1ed">
+  <input type="hidden" name="next" value="">
+  <input type="hidden" name="device_fingerprint" value="">
+ <div class="form-group">
+ <label class="required" for="username">Username</label>
+ <input type="text" id="username" name="username" placeholder="Masukkan username" required autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
+ </div>
+ <div class="form-group">
+ <label class="required" for="password">Password</label>
+ <div class="password-wrapper">
+ <input type="password" id="password" name="password" placeholder="Masukkan password" required autocomplete="current-password">
+ <button type="button" id="togglePassword" class="password-toggle-btn" aria-label="Tampilkan password">
+ <svg class="pw-icon pw-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+ </button>
+ </div>
+ </div>
+ 
+ <button type="submit" class="btn-login" id="loginSubmitBtn">Masuk</button>
+ </form>
+ <div class="login-link-row" style="margin-top:12px;">
+ <span class="login-link-text"><a href="/forgot-password">Lupa password?</a></span>
+ </div>
+ <div class="login-link-row">
+ <span class="login-link-text">Belum memiliki akun? <a href="/register">Daftar Sebagai Guru</a></span>
+ </div>
+ <div class="login-footer"><p>© 2026 EXAMVAN Team. All rights reserved.</p></div>
+ </div>
+ </div>
+ <script>
+ window.__turnstileEnabled = false;
+ document.addEventListener('DOMContentLoaded', function() {
+ const password = document.getElementById('password');
+ const toggle = document.getElementById('togglePassword');
+ if (password && toggle) {
+  toggle.addEventListener('click', function() {
+   const show = password.type === 'password';
+   password.type = show ? 'text' : 'password';
+   toggle.setAttribute('aria-label', show ? 'Sembunyikan password' : 'Tampilkan password');
+  });
+ }
+ const form = document.getElementById('loginForm');
+ const btn = document.getElementById('loginSubmitBtn');
+ if (form && btn) {
+ form.addEventListener('submit', function(e) {
+  if (window.__turnstileEnabled) {
+   var tok = document.querySelector('input[name="cf-turnstile-response"]');
+   if (!tok || !tok.value) {
+    e.preventDefault();
+    var terr = document.getElementById('turnstileError');
+    if (terr) {
+     terr.style.display = 'block';
+     terr.textContent = 'Harap selesaikan verifikasi keamanan di atas terlebih dahulu.';
+    }
+    return;
+   }
+  }
+  btn.classList.add('loading'); btn.disabled = true; btn.textContent = 'Memproses...';
+ });
+ if (document.querySelector('.flash-messages')) {
+  btn.classList.remove('loading');
+  btn.disabled = false;
+ }
+ }
+  
+ var successFlashes = document.querySelectorAll('.flash-msg:not(.flash-error)');
+ if (successFlashes.length) {
+  setTimeout(function() {
+   successFlashes.forEach(function(el) {
+    el.style.transition = 'opacity 0.5s ease';
+    el.style.opacity = '0';
+    setTimeout(function() { el.style.display = 'none'; }, 500);
+   });
+  }, 5000);
+ }
+ });
+ </script>
+
+ <script src="/static/js/fingerprintjs.min.js?v=2.7.3-983a6cca" defer></script>
+ <script src="/static/js/device-fingerprint.js?v=2.7.3-983a6cca"></script>
+</body>
+</html>

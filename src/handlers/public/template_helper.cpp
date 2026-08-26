@@ -3,13 +3,18 @@
 #include <sstream>
 namespace examvan::handlers::public_ {
 std::string render_public_template(const std::string& name, const std::string& version){
+  std::string rpath="templates/public/"+name+".rendered.html";
+  std::ifstream fr(rpath);
+  if(fr){
+    std::ostringstream ss; ss<<fr.rdbuf();
+    std::string h=ss.str();
+    size_t p=h.find("2.7.3"); if(p!=std::string::npos) h.replace(p,5,version);
+    p=h.find("2.7.2"); if(p!=std::string::npos) h.replace(p,5,version);
+    return h;
+  }
   std::string path="templates/public/"+name+".html";
   std::ifstream f(path);
-  if(!f){
-    std::ifstream fr("templates/public/"+name+".rendered.html");
-    if(fr){ std::ostringstream ss; ss<<fr.rdbuf(); std::string h=ss.str(); size_t p=h.find("2.7.3"); if(p!=std::string::npos) h.replace(p,5,version); return h; }
-    return "";
-  }
+  if(!f) return "";
   std::ostringstream ss; ss<<f.rdbuf();
   std::string html=ss.str();
   std::ifstream sf("templates/public/shared.html");

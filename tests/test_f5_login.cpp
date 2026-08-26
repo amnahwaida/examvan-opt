@@ -6,7 +6,7 @@ TEST(F5Login, PageHasCsrf) {
   examvan::Request req;
   auto res=login_page(req);
   EXPECT_EQ(res.status,200);
-  EXPECT_NE(res.body.find("_csrf"), std::string::npos);
+  EXPECT_NE(res.body.find("csrf_token"), std::string::npos);
   EXPECT_NE(res.headers["Set-Cookie"].find("csrf_token"), std::string::npos);
 }
 
