@@ -1,6 +1,8 @@
 #pragma once
 #include "http/router.hpp"
 namespace examvan::handlers::admin {
+Response pengawas_page(const Request& req);
+Response pengawas_detail_page(const Request& req);
 Response pengawas_exams(const Request& req);
 Response pengawas_submissions(const Request& req);
 Response pending_approvals(const Request& req);

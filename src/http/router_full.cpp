@@ -12,6 +12,7 @@
 #include "handlers/admin/pengawas.hpp"
 #include "handlers/admin/submissions.hpp"
 #include "handlers/auth/login.hpp"
+#include "middleware/auth.hpp"
 #include "handlers/auth/logout.hpp"
 #include "handlers/public/template_helper.hpp"
 #include "session/cookie.hpp"
@@ -24,8 +25,24 @@ namespace examvan {
 void register_full_routes(Router& r, const Config& cfg){
   register_routes(r, cfg);
 
+  /* Guard sesi untuk SEMUA route /admin/api: tanpa cookie examvan_session yang valid,
+   * handler tidak dieksekusi → 401 JSON (format dipahami apiFetch admin-core.js:
+   * event auth:expired + redirect /admin/login?next=). */
+  auto admin_api=[cfg](Handler h)->Handler{
+    return [cfg,h](const Request& req)->Response{
+      if(!middleware::is_authenticated(req,cfg.secret_key)){
+        Response rr; rr.status=401; rr.json(401,"{\"success\":false,\"message\":\"unauthorized\"}"); return rr;
+      }
+      return h(req);
+    };
+  };
+
   r.add("GET","/login", [cfg](const Request& req){ return handlers::auth::login_page(req); });
   r.add("POST","/login", [cfg](const Request& req){ return handlers::auth::login_handler(req, cfg); });
+  /* Alias /admin/login: template login & admin-core.js memakai path ini.
+   * Tanpa alias, submit form login → fallback 404 JSON {"error":"not found"}. */
+  r.add("GET","/admin/login", [cfg](const Request& req){ return handlers::auth::login_page(req); });
+  r.add("POST","/admin/login", [cfg](const Request& req){ return handlers::auth::login_handler(req, cfg); });
   r.add("POST","/logout", [](const Request& req){ return handlers::auth::logout_handler(req); });
   r.add("GET","/logout", [](const Request& req){ return handlers::auth::logout_page(req); });
   r.add("GET","/register", [](const Request& req){
@@ -103,48 +120,69 @@ void register_full_routes(Router& r, const Config& cfg){
     }
     return handlers::admin::settings_page(req);
   });
-  r.add("GET","/admin/api/stats", handlers::admin::dashboard_stats);
-  r.add("GET","/admin/api/saas-settings", handlers::admin::settings_page);
-  r.add("POST","/admin/api/saas-settings", handlers::admin::update_settings);
-  r.add("GET","/admin/api/users", handlers::admin::list_users);
-  r.add("GET","/admin/api/users/:id", handlers::admin::list_users);
-  r.add("POST","/admin/api/users", handlers::admin::create_user);
-  r.add("PUT","/admin/api/users/:id", handlers::admin::edit_user);
-  r.add("DELETE","/admin/api/users/:id", handlers::admin::delete_user);
-  r.add("POST","/admin/api/instansi/update", handlers::admin::instansi_update);
-  r.add("POST","/admin/api/change-password", [](const Request&){ Response rr; rr.json(200,"{\"ok\":true}"); return rr; });
-  r.add("GET","/admin/api/vouchers", handlers::admin::list_vouchers);
-  r.add("GET","/admin/api/vouchers/mine", handlers::admin::list_vouchers);
-  r.add("POST","/admin/api/vouchers/redeem", handlers::admin::redeem_voucher);
-  r.add("POST","/admin/api/vouchers/activate", handlers::admin::activate_voucher);
-  r.add("GET","/admin/api/vouchers/audit-logs", handlers::admin::list_vouchers);
-  r.add("GET","/admin/api/packages", handlers::admin::list_vouchers);
-  r.add("GET","/admin/api/saas-settings", handlers::admin::settings_page);
-  r.add("GET","/admin/api/exams", handlers::admin::list_admin_exams);
-  r.add("POST","/admin/api/exams", handlers::admin::create_exam);
-  r.add("POST","/admin/api/upload", handlers::admin::create_exam);
-  r.add("PUT","/admin/api/exams/:id", handlers::admin::update_exam);
-  r.add("DELETE","/admin/api/exams/:id", handlers::admin::delete_exam);
-  r.add("POST","/admin/api/exams/:exam_id/toggle", handlers::admin::update_exam);
-  r.add("POST","/admin/api/exams/:exam_id/delete", handlers::admin::delete_exam);
-  r.add("POST","/admin/api/exams/:exam_id/edit", handlers::admin::update_exam);
-  r.add("POST","/admin/api/exams/:exam_id/start", handlers::admin::update_exam);
-  r.add("POST","/admin/api/exams/:exam_id/stop", handlers::admin::update_exam);
-  r.add("POST","/admin/api/exams/:exam_id/regenerate-token", handlers::admin::update_exam);
-  r.add("GET","/admin/api/exams/:id/export", handlers::admin::export_xlsx);
-  r.add("GET","/admin/api/submissions", handlers::admin::list_submissions);
-  r.add("GET","/admin/api/submissions/:id/detail", handlers::admin::submission_detail);
-  r.add("GET","/admin/api/submissions/export", handlers::admin::export_xlsx);
-  r.add("GET","/admin/api/queue/status", handlers::admin::queue_status);
-  r.add("POST","/admin/api/submissions/:id/delete", handlers::admin::delete_submission);
-  r.add("GET","/admin/api/pengawas/exams", handlers::admin::pengawas_exams);
-  r.add("GET","/admin/api/pengawas/exams/:exam_id/submissions", handlers::admin::pengawas_submissions);
-  r.add("GET","/admin/api/pengawas/exams/:exam_id/approvals", handlers::admin::pending_approvals);
-  r.add("POST","/admin/api/pengawas/exams/:exam_id/approvals/:mac_address", handlers::admin::set_approval);
-  r.add("GET","/admin/api/pengawas/exams/:exam_id/auto-approve", handlers::admin::get_auto_approve);
-  r.add("POST","/admin/api/pengawas/exams/:exam_id/auto-approve", handlers::admin::set_auto_approve);
-  r.add("GET","/admin/api/system-apps", handlers::admin::settings_page);
-  r.add("POST","/admin/api/system-apps", handlers::admin::update_settings);
+  r.add("GET","/admin/pengawas", [cfg](const Request& req){
+    auto it=req.headers.find("Cookie");
+    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+      Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/pengawas"; return rr;
+    }
+    return handlers::admin::pengawas_page(req);
+  });
+  r.add("GET","/admin/pengawas/:exam_id", [cfg](const Request& req){
+    auto it=req.headers.find("Cookie");
+    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+      Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/pengawas"; return rr;
+    }
+    return handlers::admin::pengawas_detail_page(req);
+  });
+  r.add("GET","/admin/submissions", [cfg](const Request& req){
+    auto it=req.headers.find("Cookie");
+    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+      Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/submissions"; return rr;
+    }
+    return handlers::admin::submissions_page(req);
+  });
+  r.add("GET","/admin/api/stats", admin_api(handlers::admin::dashboard_stats));
+  r.add("GET","/admin/api/saas-settings", admin_api(handlers::admin::settings_page));
+  r.add("POST","/admin/api/saas-settings", admin_api(handlers::admin::update_settings));
+  r.add("GET","/admin/api/users", admin_api(handlers::admin::list_users));
+  r.add("GET","/admin/api/users/:id", admin_api(handlers::admin::list_users));
+  r.add("POST","/admin/api/users", admin_api(handlers::admin::create_user));
+  r.add("PUT","/admin/api/users/:id", admin_api(handlers::admin::edit_user));
+  r.add("DELETE","/admin/api/users/:id", admin_api(handlers::admin::delete_user));
+  r.add("POST","/admin/api/instansi/update", admin_api(handlers::admin::instansi_update));
+  r.add("POST","/admin/api/change-password", admin_api([](const Request&){ Response rr; rr.json(200,"{\"ok\":true}"); return rr; }));
+  r.add("GET","/admin/api/vouchers", admin_api(handlers::admin::list_vouchers));
+  r.add("GET","/admin/api/vouchers/mine", admin_api(handlers::admin::list_vouchers));
+  r.add("POST","/admin/api/vouchers/redeem", admin_api(handlers::admin::redeem_voucher));
+  r.add("POST","/admin/api/vouchers/activate", admin_api(handlers::admin::activate_voucher));
+  r.add("GET","/admin/api/vouchers/audit-logs", admin_api(handlers::admin::list_vouchers));
+  r.add("GET","/admin/api/packages", admin_api(handlers::admin::list_vouchers));
+  r.add("GET","/admin/api/saas-settings", admin_api(handlers::admin::settings_page));
+  r.add("GET","/admin/api/exams", admin_api(handlers::admin::list_admin_exams));
+  r.add("POST","/admin/api/exams", admin_api(handlers::admin::create_exam));
+  r.add("POST","/admin/api/upload", admin_api(handlers::admin::create_exam));
+  r.add("PUT","/admin/api/exams/:id", admin_api(handlers::admin::update_exam));
+  r.add("DELETE","/admin/api/exams/:id", admin_api(handlers::admin::delete_exam));
+  r.add("POST","/admin/api/exams/:exam_id/toggle", admin_api(handlers::admin::update_exam));
+  r.add("POST","/admin/api/exams/:exam_id/delete", admin_api(handlers::admin::delete_exam));
+  r.add("POST","/admin/api/exams/:exam_id/edit", admin_api(handlers::admin::update_exam));
+  r.add("POST","/admin/api/exams/:exam_id/start", admin_api(handlers::admin::update_exam));
+  r.add("POST","/admin/api/exams/:exam_id/stop", admin_api(handlers::admin::update_exam));
+  r.add("POST","/admin/api/exams/:exam_id/regenerate-token", admin_api(handlers::admin::update_exam));
+  r.add("GET","/admin/api/exams/:id/export", admin_api(handlers::admin::export_xlsx));
+  r.add("GET","/admin/api/submissions", admin_api(handlers::admin::list_submissions));
+  r.add("GET","/admin/api/submissions/:id/detail", admin_api(handlers::admin::submission_detail));
+  r.add("GET","/admin/api/submissions/export", admin_api(handlers::admin::export_xlsx));
+  r.add("GET","/admin/api/queue/status", admin_api(handlers::admin::queue_status));
+  r.add("POST","/admin/api/submissions/:id/delete", admin_api(handlers::admin::delete_submission));
+  r.add("GET","/admin/api/pengawas/exams", admin_api(handlers::admin::pengawas_exams));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/submissions", admin_api(handlers::admin::pengawas_submissions));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/approvals", admin_api(handlers::admin::pending_approvals));
+  r.add("POST","/admin/api/pengawas/exams/:exam_id/approvals/:mac_address", admin_api(handlers::admin::set_approval));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::get_auto_approve));
+  r.add("POST","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::set_auto_approve));
+  r.add("GET","/admin/api/system-apps", admin_api(handlers::admin::settings_page));
+  r.add("POST","/admin/api/system-apps", admin_api(handlers::admin::update_settings));
 }
 
 } // namespace examvan

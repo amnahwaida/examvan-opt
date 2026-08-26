@@ -1,0 +1,569 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ <meta charset="UTF-8">
+<script>if (/Android/i.test(navigator.userAgent) || navigator.maxTouchPoints > 0) document.documentElement.classList.add("touch-device");</script>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>EXAMVAN — Pengawasan Ujian</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/theme.css?v=2.7.3-983a6cca">
+<link rel="stylesheet" href="/static/css/tailwind/output.css?v=2.7.3-983a6cca">
+<link rel="stylesheet" href="/static/css/admin-base.css?v=2.7.3-983a6cca">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<meta name="csrf-token" content="c9d0a9b0799f98187370a024e01d61ee9be6e1755e77e97afc5b43ee66b961f5">
+
+</head>
+<body class="dashboard-page">
+
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none;" aria-hidden="true">
+ <symbol id="hi-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/></symbol>
+ <symbol id="hi-results" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></symbol>
+ <symbol id="hi-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></symbol>
+ <symbol id="hi-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/></symbol>
+ <symbol id="hi-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></symbol>
+ <symbol id="hi-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></symbol>
+ <symbol id="hi-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></symbol>
+ <symbol id="hi-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+ <symbol id="hi-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"/></symbol>
+ <symbol id="hi-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/></symbol>
+ <symbol id="hi-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></symbol>
+ <symbol id="hi-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+ <symbol id="hi-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"/></symbol>
+ <symbol id="hi-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15m7.5-7.5h-15"/></symbol>
+ <symbol id="hi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.75 6 6 9-13.5"/></symbol>
+ <symbol id="hi-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></symbol>
+ <symbol id="hi-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></symbol>
+ <symbol id="hi-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184"/></symbol>
+ <symbol id="hi-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+ <symbol id="hi-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></symbol>
+ <symbol id="hi-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></symbol>
+ <symbol id="hi-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 19.5 8.25 12l7.5-7.5"/></symbol>
+ <symbol id="hi-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></symbol>
+ <symbol id="hi-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"/></symbol>
+ <symbol id="hi-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18"/></symbol>
+ <symbol id="hi-exclamation" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></symbol>
+ <symbol id="hi-information" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></symbol>
+ <symbol id="hi-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"/></symbol>
+ <symbol id="hi-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"/></symbol>
+ <symbol id="hi-lock-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 10.5V6.75a4.5 4.5 0 1 1 9 0v3.75M3.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H3.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+ <symbol id="hi-device" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></symbol>
+ <symbol id="hi-credit-card" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"/></symbol>
+ <symbol id="hi-banknotes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z"/></symbol>
+ <symbol id="hi-shield-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></symbol>
+ <symbol id="hi-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+ <symbol id="hi-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+ <symbol id="hi-building-library" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0 0 12 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75Z"/></symbol>
+ <symbol id="hi-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+ <symbol id="hi-ticket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-12v.75m0 3v.75m0 3v.75m0 3V18M3 7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v1.875a1.5 1.5 0 0 0 0 2.25V16.5A2.25 2.25 0 0 1 18.75 18.75H5.25A2.25 2.25 0 0 1 3 16.5v-4.875a1.5 1.5 0 0 0 0-2.25V7.5Z"/></symbol>
+ <symbol id="hi-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"/></symbol>
+ <symbol id="hi-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.25 7.5A2.25 2.25 0 0 1 7.5 5.25h9a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25h-9a2.25 2.25 0 0 1-2.25-2.25v-9Z"/></symbol>
+ <symbol id="hi-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></symbol>
+</svg>
+
+
+
+<a href="#mainContent" class="skip-link">Langsung ke konten utama</a>
+
+
+
+
+
+
+
+<header>
+<nav class="topbar">
+ <div class="topbar-left">
+  <div class="topbar-logo">E</div>
+  <a href="/" class="topbar-title" style="text-decoration:none;color:inherit;">EXAMVAN</a>
+ </div>
+ <div class="topbar-center">
+  <div class="topbar-nav">
+   
+    <a href="/admin/dashboard" class="nav-link " ><svg class="icon-svg" aria-hidden="true"><use href="#hi-dashboard"/></svg> Daftar Ujian</a>
+    <a href="/admin/submissions" class="nav-link " ><svg class="icon-svg" aria-hidden="true"><use href="#hi-results"/></svg> Hasil Ujian</a>
+   
+   
+    <a href="/admin/pengawas" class="nav-link active" aria-current="page"><svg class="icon-svg" aria-hidden="true"><use href="#hi-eye"/></svg> Pengawasan</a>
+   
+   
+    <a href="/admin/settings" class="nav-link " ><svg class="icon-svg" aria-hidden="true"><use href="#hi-settings"/></svg> Pengaturan</a>
+   
+  </div>
+ </div>
+ <div class="topbar-right">
+  <div class="topbar-menu-dropdown">
+    
+    <button class="topbar-menu-toggle" id="menuToggleBtn" aria-label="Menu akun & pengaturan" aria-haspopup="true" aria-expanded="false">
+     <span class="menu-hamburger-icon">&#9776;</span>
+    </button>
+   <div class="topbar-dropdown-content" id="menuDropdownContent">
+    <div class="dropdown-header mobile-only-header">
+     <div class="dropdown-brand-row">
+      <div class="dropdown-logo">E</div>
+      <span class="dropdown-brand-title">EXAMVAN</span>
+     </div>
+    </div>
+    
+    <div class="dropdown-divider mobile-only-divider"></div>
+    <div class="mobile-nav-links">
+     
+      <a href="/admin/dashboard" class="dropdown-item " ><svg class="icon-svg"><use href="#hi-dashboard"/></svg> Daftar Ujian</a>
+      <a href="/admin/submissions" class="dropdown-item " ><svg class="icon-svg"><use href="#hi-results"/></svg> Hasil Ujian</a>
+     
+     
+      <a href="/admin/pengawas" class="dropdown-item active" aria-current="page"><svg class="icon-svg"><use href="#hi-eye"/></svg> Pengawasan</a>
+     
+     
+      <div class="dropdown-divider"></div>
+      <a href="/admin/settings" class="dropdown-item " ><svg class="icon-svg"><use href="#hi-settings"/></svg> Pengaturan</a>
+     
+    </div>
+    <div class="dropdown-divider"></div>
+    
+    <div class="dropdown-user-info">
+     <span class="dropdown-user-name">superadmin</span>
+     <span class="dropdown-user-role">Super Admin</span>
+    </div>
+    <div class="dropdown-divider"></div>
+    
+    
+    <button class="dropdown-item" data-action="open-change-password-modal">
+     <svg class="icon-svg"><use href="#hi-key"/></svg> Ubah Password
+    </button>
+    <div class="dropdown-divider"></div>
+    <form method="POST" action="/logout" style="display:inline;">
+     <input type="hidden" name="_csrf_token" value="c9d0a9b0799f98187370a024e01d61ee9be6e1755e77e97afc5b43ee66b961f5">
+     <button type="submit" class="dropdown-item dropdown-logout" style="width:100%;border:none;background:none;cursor:pointer;">
+      <svg class="icon-svg" aria-hidden="true"><use href="#hi-logout"/></svg> Logout
+     </button>
+    </form>
+   </div>
+  </div>
+ </div>
+ </nav>
+</header>
+
+
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+<script>
+
+
+(function () {
+    function registerNavActions() {
+        if (typeof Actions === 'undefined') return;
+        if (!Actions.has('open-change-password-modal')) {
+            Actions.register('open-change-password-modal', function () {
+                if (typeof openChangePasswordModal === 'function') openChangePasswordModal();
+            });
+        }
+    }
+    
+    registerNavActions();
+    
+    document.addEventListener('DOMContentLoaded', registerNavActions);
+})();
+</script>
+
+
+
+
+<main class="dashboard" id="mainContent">
+ <h1 class="sr-only">Pengawasan Ujian</h1>
+
+ 
+ <section class="stats-grid" id="pengawasStats">
+  <div class="stat-card stat-total">
+   <div class="stat-icon"><svg class="icon-svg" style="width:24px;height:24px;"><use href="#hi-dashboard"/></svg></div>
+   <div class="stat-info">
+    <span class="stat-value" id="statTotalExam">0</span>
+    <span class="stat-label">Ujian Diawasi</span>
+   </div>
+  </div>
+  <div class="stat-card stat-active">
+   <div class="stat-icon"><svg class="icon-svg" style="width:24px;height:24px;color:var(--color-success-light);"><use href="#hi-eye"/></svg></div>
+   <div class="stat-info">
+    <span class="stat-value" id="statActiveExam">0</span>
+    <span class="stat-label">Sedang Berlangsung</span>
+   </div>
+  </div>
+  <div class="stat-card stat-inactive">
+   <div class="stat-icon"><svg class="icon-svg" style="width:24px;height:24px;color:var(--color-warning-light);"><use href="#hi-users"/></svg></div>
+   <div class="stat-info">
+    <span class="stat-value" id="statTotalStudents">0</span>
+    <span class="stat-label">Total Siswa</span>
+   </div>
+  </div>
+  <div class="stat-card stat-submitted">
+   <div class="stat-icon"><svg class="icon-svg" style="width:24px;height:24px;color:#60a5fa;"><use href="#hi-check"/></svg></div>
+   <div class="stat-info">
+    <span class="stat-value" id="statSubmitted">0</span>
+    <span class="stat-label">Terkumpul</span>
+   </div>
+  </div>
+ </section>
+
+ 
+ <section class="glass-card" style="margin-top: 24px;">
+  <div class="table-header flex items-center justify-between mb-5 flex-wrap gap-3">
+   
+   <h2 style="font-size: 1.1rem; color: var(--color-primary-light); display: flex; align-items: center; gap: 8px;">
+    <svg class="icon-svg" style="color:var(--color-primary-light);"><use href="#hi-eye"/></svg> Ujian yang Saya Awasi
+   </h2>
+   <div class="table-toolbar">
+    <div class="toolbar-search-wrap">
+     <input type="text" id="pengawasSearch" class="toolbar-search-input" placeholder="Cari nama ujian, token, pembuat..." aria-label="Cari ujian">
+
+    </div>
+    <button class="toolbar-btn toolbar-btn-search" data-action="load-pengawas-exams"><svg class="icon-svg"><use href="#hi-search"/></svg> Cari</button>
+    <button class="toolbar-btn toolbar-btn-refresh" data-action="load-pengawas-exams" aria-label="Muat ulang daftar" title="Muat ulang"><svg class="icon-svg"><use href="#hi-refresh"/></svg></button>
+   </div>
+  </div>
+  <div id="pengawasExamList" style="display:flex;flex-direction:column;gap:16px;">
+   <div style="text-align:center;padding:40px;color:var(--color-text-secondary);">Memuat data...</div>
+  </div>
+  <div id="pengawasPagination" class="pagination-wrapper" style="display:none;"></div>
+ </section>
+</main>
+
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none;" aria-hidden="true">
+<symbol id="hi-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/></symbol>
+<symbol id="hi-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></symbol>
+<symbol id="hi-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+<symbol id="hi-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></symbol>
+<symbol id="hi-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></symbol>
+<symbol id="hi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4.5 12.75 6 6 9-13.5"/></symbol>
+<symbol id="hi-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></symbol>
+</svg>
+
+<style>
+.exam-monitor-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--color-glass-border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  transition: border-color 0.2s;
+}
+.exam-monitor-card:hover {
+  border-color: rgba(var(--rgb-info),0.3);
+}
+.exam-monitor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.exam-monitor-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.exam-monitor-meta {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.exam-monitor-progress {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.progress-bar-container {
+  flex: 1;
+  min-width: 100px;
+  height: 8px;
+  background: var(--glass-bg-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+.progress-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.student-list-toggle {
+  font-size: 0.8rem;
+  color: var(--color-primary-light);
+  cursor: pointer;
+  background: none;
+  border: 1px solid rgba(var(--rgb-info),0.3);
+  border-radius: 8px;
+  padding: 4px 12px;
+  transition: background 0.2s;
+}
+.student-list-toggle:hover {
+  background: rgba(var(--rgb-info),0.1);
+}
+ .log-modal-* dihapus —
+   kelas-kelas itu hanya dipakai modal riwayat akses di halaman detail yang
+   punya definisi sendiri (pengawas_detail.html). Baris .log-entry.logout::before
+   dipertahankan karena dijaga uiux-batch12-pengawasan-nav.test.mjs. */
+.log-entry.logout::before { background:var(--color-danger-bright);border-color:var(--color-danger-bright); }
+</style>
+
+<script src="/static/js/admin-core.js?v=2.7.3-983a6cca"></script>
+<script src="/static/js/admin.js?v=2.7.3-983a6cca"></script>
+<script>
+ 
+
+var PENG_CURRENT_PAGE = 1;
+
+function loadPengawasExams(page) {
+    var el = document.getElementById('pengawasExamList');
+    if (!el) return;
+
+    if (page !== undefined) PENG_CURRENT_PAGE = page;
+    var search = document.getElementById('pengawasSearch') ? document.getElementById('pengawasSearch').value.trim() : '';
+
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--color-text-secondary);">Memuat data ujian...</div>';
+
+    var url = '/admin/api/pengawas/exams?page=' + PENG_CURRENT_PAGE + '&per_page=10';
+    if (search) url += '&search=' + encodeURIComponent(search);
+
+    apiFetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            if (!res || !res.success) {
+                el.innerHTML = '<div style="text-align:center;padding:40px;color:#fca5a5;">Gagal memuat data' +
+                    ' <div style="margin-top:12px;"><button type="button" class="btn-sm btn-primary" data-action="load-pengawas-exams">Coba Lagi</button></div></div>';
+                return;
+            }
+            var exams = res.exams || [];
+            if (res.stats) {
+                setText('statTotalExam', res.stats.total_exams);
+                setText('statActiveExam', res.stats.active_exams);
+                setText('statTotalStudents', res.stats.total_students);
+                setText('statSubmitted', res.stats.total_submitted);
+            } else {
+                updateStats(exams);
+            }
+
+            if (exams.length === 0) {
+                var msg = res.is_privileged
+                    ? 'Belum ada ujian yang tersedia.'
+                    : 'Belum ada ujian yang ditugaskan kepada Anda sebagai pengawas.';
+                if (search) msg = 'Pencarian tidak ditemukan.';
+                el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--color-text-secondary);">' + msg + '</div>';
+                renderPagination(res);
+                return;
+            }
+
+            var html = '';
+            for (var i = 0; i < exams.length; i++) {
+                var ex = exams[i];
+                var total = ex.total_students || 0;
+                var sub = ex.submitted_count || 0;
+                var pct = total > 0 ? Math.round(sub / total * 100) : 0;
+                var barColor = pct >= 100 ? 'var(--color-success-light)' : (pct > 0 ? '#60a5fa' : 'var(--color-text-muted)');
+                
+                
+                
+                
+                
+                var statusHtml;
+                if (ex.status === 'active') {
+                    statusHtml = '<span class="status-badge status-active">Aktif</span>';
+                } else if (ex.tombstoned) {
+                    
+                    
+                    var tombTitle = 'Nonaktif otomatis oleh sistem saat paket berakhir/berganti atau masa aktif akun habis' + (ex.tombstoned_at ? ' (' + formatDateTimeID(ex.tombstoned_at) + ')' : '');
+                    statusHtml = '<span class="status-badge status-tombstoned" title="' + escapeHtml(jsEscape(tombTitle)) + '">Nonaktif Otomatis</span>';
+                } else {
+                    statusHtml = '<span class="status-badge status-inactive">Nonaktif</span>';
+                }
+                
+                
+                var sched = (ex.start_time && ex.end_time)
+                    ? (formatDateTimeID(ex.start_time) + ' - ' + formatDateTimeID(ex.end_time))
+                    : '—';
+
+                var startedBadge = ex.exam_started_at
+                    ? '<span style="font-size:0.65rem;color:rgba(var(--rgb-success),0.8);padding:2px 6px;border-radius:4px;background:rgba(var(--rgb-success),0.1);border:1px solid rgba(var(--rgb-success),0.2);"><svg class="icon-svg" style="width:10px;height:10px;"><use href="#hi-check"/></svg> Sedang Diawasi</span>'
+                    : '<span style="font-size:0.65rem;color:rgba(var(--rgb-warning),0.8);padding:2px 6px;border-radius:4px;background:rgba(var(--rgb-warning),0.1);border:1px solid rgba(var(--rgb-warning),0.2);">Belum Mulai Pengawasan</span>';
+                var modeBadge = ex.token_mode === 'static'
+                    ? '<span style="font-size:0.7rem;color:#60a5fa;font-weight:600;background:rgba(59,130,246,0.1);padding:1px 4px;border-radius:4px;border:1px solid rgba(59,130,246,0.2);">Statis</span>'
+                    : '<span style="font-size:0.7rem;color:#c084fc;font-weight:600;background:rgba(var(--rgb-accent),0.1);padding:1px 4px;border-radius:4px;border:1px solid rgba(var(--rgb-accent),0.2);">Dinamis</span>';
+                
+                
+                
+                var autoBadge = ex.auto_approve
+                    ? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:0.65rem;color:var(--color-success-light);font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(var(--rgb-success),0.12);border:1px solid rgba(var(--rgb-success),0.3);white-space:nowrap;" title="Auto-approve aktif — semua perangkat disetujui otomatis di server (tetap berlaku walau halaman pengawasan ditutup)"><svg class="icon-svg" style="width:10px;height:10px;"><use href="#hi-check"/></svg> Auto-approve</span>'
+                    : '';
+                html += '<div class="exam-monitor-card" id="exam-card-' + ex.id + '" style="cursor:pointer;" role="button" tabindex="0" data-action="open-pengawas-detail" data-exam-id="' + ex.id + '"' +
+                    ' aria-label="' + escapeHtml(jsEscape('Buka detail pengawasan ujian: ' + ex.name)) + '">' +
+                    '<div class="exam-monitor-header">' +
+                        '<div>' +
+                            '<div class="exam-monitor-title">' + esc(ex.name) + ' ' + startedBadge + '</div>' +
+                            '<div class="exam-monitor-meta">' +
+                                '<span style="display:inline-flex;align-items:center;gap:4px;">Mode Token: ' + modeBadge + '</span>' +
+                                '<span>Jadwal: ' + sched + '</span>' +
+                                '<span>Pembuat: ' + esc(ex.creator_name) + '</span>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div style="display:flex;align-items:center;gap:8px;">' +
+                            autoBadge +
+                            statusHtml +
+                            '<svg class="icon-svg" style="width:16px;height:16px;color:var(--color-primary-light);"><use href="#hi-chevron-right"/></svg>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="exam-monitor-progress">' +
+                        '<div class="progress-bar-container">' +
+                            '<div class="progress-bar-fill" style="width:' + pct + '%;background:' + barColor + ';"></div>' +
+                        '</div>' +
+                        '<span class="progress-text" style="color:' + barColor + ';">' + sub + '/' + total + ' (' + pct + '%)</span>' +
+                        '<a href="/admin/pengawas/' + ex.id + '" class="student-list-toggle" style="text-decoration:none;"><svg class="icon-svg" style="width:14px;height:14px;"><use href="#hi-eye"/></svg> Pantau</a>' +
+                    '</div>' +
+                '</div>';
+            }
+            el.innerHTML = html;
+            renderPagination(res);
+        })
+        .catch(function() {
+            el.innerHTML = '<div style="text-align:center;padding:40px;color:#fca5a5;">Gagal menghubungi server' +
+                ' <div style="margin-top:12px;"><button type="button" class="btn-sm btn-primary" data-action="load-pengawas-exams">Coba Lagi</button></div></div>';
+        });
+}
+
+function renderPagination(res) {
+    var pagEl = document.getElementById('pengawasPagination');
+    if (!pagEl) return;
+    if (!res.total_pages || res.total_pages <= 1) { pagEl.style.display = 'none'; return; }
+
+    
+    var perPage = 10;
+    var rangeStart = (res.page - 1) * perPage + 1;
+    var rangeEnd = Math.min(res.page * perPage, res.total);
+
+    
+    
+    var html = '<div class="pagination-wrapper">' +
+        '<span class="pagination-info">Menampilkan ' + rangeStart + '&ndash;' + rangeEnd + ' dari ' + res.total + ' ujian</span>' +
+        '<div class="pagination-links">';
+
+    if (res.page > 1) {
+        html += '<button type="button" class="pagination-page-num" data-action="load-pengawas-page" data-page="1" style="cursor:pointer;" aria-label="Halaman pertama">&laquo;</button>' +
+            '<button type="button" class="pagination-page-num" data-action="load-pengawas-page" data-page="' + (res.page - 1) + '" style="cursor:pointer;" aria-label="Halaman sebelumnya">&lsaquo;</button>';
+    }
+
+    var start = Math.max(1, res.page - 2);
+    var end = Math.min(res.total_pages, res.page + 2);
+    for (var p = start; p <= end; p++) {
+        html += '<button type="button" class="pagination-page-num' + (p === res.page ? ' page-current' : '') + '" data-action="load-pengawas-page" data-page="' + p + '" style="cursor:pointer;"' + (p === res.page ? ' aria-current="page"' : '') + '>' + p + '</button>';
+    }
+
+    if (res.page < res.total_pages) {
+        html += '<button type="button" class="pagination-page-num" data-action="load-pengawas-page" data-page="' + (res.page + 1) + '" style="cursor:pointer;" aria-label="Halaman berikutnya">&rsaquo;</button>' +
+            '<button type="button" class="pagination-page-num" data-action="load-pengawas-page" data-page="' + res.total_pages + '" style="cursor:pointer;" aria-label="Halaman terakhir">&raquo;</button>';
+    }
+
+    html += '</div></div>';
+    pagEl.innerHTML = html;
+    pagEl.style.display = 'block';
+}
+
+function updateStats(exams) {
+    var total = exams.length, active = 0, students = 0, submitted = 0;
+    for (var i = 0; i < exams.length; i++) {
+        var e = exams[i];
+        if (e.status === 'active') active++;
+        students += e.total_students || 0;
+        submitted += e.submitted_count || 0;
+    }
+    setText('statTotalExam', total);
+    setText('statActiveExam', active);
+    setText('statTotalStudents', students);
+    setText('statSubmitted', submitted);
+}
+
+function setText(id, val) { var e = document.getElementById(id); if (e) e.textContent = val; }
+
+function esc(s) {
+    if (!s) return '—';
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+}
+
+
+
+
+
+(function() {
+  if (typeof Actions === 'undefined') return;
+  Actions.register('load-pengawas-exams', function() { if (typeof loadPengawasExams === 'function') loadPengawasExams(); });
+  Actions.register('open-pengawas-detail', function(el, ev) {
+    var t = ev && ev.target;
+    while (t && t !== el) {
+      if (String(t.tagName).toUpperCase() === 'A') return;
+      t = t.parentNode;
+    }
+    var id = el.getAttribute('data-exam-id');
+    if (!id) return;
+    window.location = '/admin/pengawas/' + id;
+  });
+  Actions.register('load-pengawas-page', function(el) {
+    var p = parseInt(el.getAttribute('data-page'), 10);
+    if (isNaN(p)) return;
+    if (typeof loadPengawasExams === 'function') loadPengawasExams(p);
+  });
+})();
+
+
+
+
+
+
+(function() {
+  document.addEventListener('click', function(ev) {
+    var t = ev.target;
+    while (t && t !== document) {
+      if (t.nodeType === 1 && String(t.tagName).toUpperCase() === 'A' &&
+          String(t.className).indexOf('student-list-toggle') !== -1) {
+        ev.stopPropagation();
+        return;
+      }
+      t = t.parentNode;
+    }
+  }, true);
+})();
+
+ 
+(function() {
+    loadPengawasExams();
+})();
+
+
+
+(function() {
+    var input = document.getElementById('pengawasSearch');
+    if (!input || input.dataset.liveSearchWired) return;
+    input.dataset.liveSearchWired = '1';
+    if (typeof initLiveSearch === 'function') {
+        
+        
+        initLiveSearch(document.getElementById('pengawasSearch'), function() { loadPengawasExams(1); });
+    } else {
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); loadPengawasExams(1); }
+        });
+    }
+})();
+</script>
+
+</body>
+</html>
