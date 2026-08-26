@@ -31,12 +31,42 @@ void register_routes(Router& r, const Config& cfg){
         Response rr; rr.status=302; rr.headers["Location"]="/admin/dashboard"; return rr;
       }
     }
+    std::ifstream fr("templates/public/index.rendered.html");
+    if(fr){
+      std::ostringstream sss; sss<<fr.rdbuf();
+      std::string html=sss.str();
+      size_t p=html.find("2.7.3"); if(p!=std::string::npos){ html.replace(p, 5, cfg.version); }
+      Response rr; rr.status=200; rr.headers["Content-Type"]="text/html"; rr.body=html; return rr;
+    }
     std::ifstream f("templates/public/index.html");
     if(f){
       std::ostringstream ss; ss<<f.rdbuf();
       std::string html=ss.str();
-      size_t p=html.find("{{ version }}"); if(p!=std::string::npos) html.replace(p, 13, cfg.version);
-      p=html.find("{{version}}"); if(p!=std::string::npos) html.replace(p, 11, cfg.version);
+      std::ifstream sf("templates/public/shared.html");
+      if(sf){
+        std::ostringstream sfs; sfs<<sf.rdbuf();
+        std::string shared=sfs.str();
+        auto extract=[&](const std::string& name)->std::string{
+          std::string start="{{ define \""+name+"\" }}";
+          std::string end="{{ end }}";
+          size_t s=shared.find(start); if(s==std::string::npos) return "";
+          s+=start.size(); size_t e=shared.find(end,s); if(e==std::string::npos) return "";
+          return shared.substr(s, e-s);
+        };
+        std::string head=extract("public_head");
+        std::string foot=extract("public_foot");
+        size_t p;
+        p=html.find("{{ template \"public_head\" . }}"); if(p!=std::string::npos) html.replace(p, 28, head);
+        p=html.find("{{ template \"public_foot\" . }}"); if(p!=std::string::npos) html.replace(p, 28, foot);
+        p=html.find("{{template \"public_head\" .}}"); if(p!=std::string::npos) html.replace(p, 27, head);
+        p=html.find("{{template \"public_foot\" .}}"); if(p!=std::string::npos) html.replace(p, 27, foot);
+      }
+      auto repl=[&](const std::string& from, const std::string& to){
+        size_t p=0; while((p=html.find(from,p))!=std::string::npos){ html.replace(p, from.size(), to); p+=to.size(); }
+      };
+      repl("{{.version}}", cfg.version);
+      repl("{{ .version }}", cfg.version);
+      repl("{{ version }}", cfg.version);
       Response rr; rr.status=200; rr.headers["Content-Type"]="text/html"; rr.body=html; return rr;
     }
     Response rr; rr.status=200; rr.headers["Content-Type"]="text/html";
