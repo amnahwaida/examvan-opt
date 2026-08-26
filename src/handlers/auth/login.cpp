@@ -42,12 +42,35 @@ Response login_page(const Request&){
   return r;
 }
 
+static std::string url_decode(const std::string& s){
+  std::string out; out.reserve(s.size());
+  for(size_t i=0;i<s.size();++i){
+    if(s[i]=='+'){ out+=' '; }
+    else if(s[i]=='%' && i+2<s.size()){
+      auto hex=[](char c)->int{
+        if(c>='0'&&c<='9') return c-'0';
+        if(c>='a'&&c<='f') return c-'a'+10;
+        if(c>='A'&&c<='F') return c-'A'+10;
+        return -1;
+      };
+      int h=hex(s[i+1]), l=hex(s[i+2]);
+      if(h>=0&&l>=0){ out+=static_cast<char>((h<<4)|l); i+=2; }
+      else out+=s[i];
+    } else out+=s[i];
+  }
+  return out;
+}
+
 Response login_handler(const Request& req, const Config& cfg){
+  /* Body form adalah application/x-www-form-urlencoded — browser meng-encode
+   * + / = dalam token CSRF menjadi %2B %2F %3D. Tanpa decode, token tidak
+   * pernah match cookie aslinya → selalu 403. */
+  std::string body=url_decode(req.body);
   std::string csrf_header;
   auto it=req.headers.find("X-CSRF-Token"); if(it!=req.headers.end()) csrf_header=it->second;
   else {
-    auto f=req.body.find("csrf_token="); if(f==std::string::npos) f=req.body.find("_csrf=");
-    if(f!=std::string::npos){ size_t eq=req.body.find('=',f); size_t e=req.body.find('&',f); size_t s=eq+1; csrf_header=req.body.substr(s, e==std::string::npos? std::string::npos : e-s); }
+    auto f=body.find("csrf_token="); if(f==std::string::npos) f=body.find("_csrf=");
+    if(f!=std::string::npos){ size_t eq=body.find('=',f); size_t e=body.find('&',f); size_t s=eq+1; csrf_header=body.substr(s, e==std::string::npos? std::string::npos : e-s); }
   }
   std::string session_csrf;
   auto ck=req.headers.find("Cookie"); if(ck!=req.headers.end()){ auto c=extract_cookie(ck->second,"csrf_token"); if(!c.empty()) session_csrf=c; }
@@ -56,13 +79,13 @@ Response login_handler(const Request& req, const Config& cfg){
     Response r; r.status=403; r.json(403,"{\"error\":\"CSRF token mismatch\"}"); return r;
   }
   std::string turnstile;
-  auto tf=req.body.find("cf-turnstile-response="); if(tf!=std::string::npos){ size_t e=req.body.find('&',tf); turnstile=req.body.substr(tf+22, e==std::string::npos? std::string::npos : e-tf-22); }
+  auto tf=body.find("cf-turnstile-response="); if(tf!=std::string::npos){ size_t e=body.find('&',tf); turnstile=body.substr(tf+22, e==std::string::npos? std::string::npos : e-tf-22); }
   if(!turnstile.empty() && !middleware::verify_turnstile(turnstile, "", "")){
     Response r; r.status=403; r.json(403,"{\"error\":\"Turnstile failed\"}"); return r;
   }
   std::string username, password;
-  auto uf=req.body.find("username="); if(uf!=std::string::npos){ size_t e=req.body.find('&',uf); username=req.body.substr(uf+9, e==std::string::npos? std::string::npos : e-uf-9); }
-  auto pf=req.body.find("password="); if(pf!=std::string::npos){ size_t e=req.body.find('&',pf); password=req.body.substr(pf+9, e==std::string::npos? std::string::npos : e-pf-9); }
+  auto uf=body.find("username="); if(uf!=std::string::npos){ size_t e=body.find('&',uf); username=body.substr(uf+9, e==std::string::npos? std::string::npos : e-uf-9); }
+  auto pf=body.find("password="); if(pf!=std::string::npos){ size_t e=body.find('&',pf); password=body.substr(pf+9, e==std::string::npos? std::string::npos : e-pf-9); }
   if(username.empty()||password.empty()){
     Response r; r.status=400; r.json(400,"{\"error\":\"username and password required\"}"); return r;
   }
