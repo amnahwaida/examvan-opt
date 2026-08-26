@@ -1,15 +1,17 @@
 #include "handlers/admin/exams.hpp"
+#include "helpers/utils.hpp"
 namespace examvan::handlers::admin {
 Response list_admin_exams(const Request&){
   Response r; r.json(200,"{\"exams\":[]}"); return r;
 }
-static std::string get_param(const std::string& b, const std::string& k){
-  std::string n=k+"="; auto p=b.find(n); if(p==std::string::npos) return ""; size_t e=b.find('&',p); return b.substr(p+n.size(), e==std::string::npos? std::string::npos: e-p-n.size());
+static std::string get_param(const std::map<std::string,std::string>& form, const std::string& k){
+  auto it=form.find(k); return it!=form.end()? it->second : "";
 }
 Response create_exam(const Request& req){
-  std::string name=get_param(req.body,"name");
-  std::string fpath=get_param(req.body,"file_path");
-  std::string sz=get_param(req.body,"size_bytes");
+  auto form=helpers::parse_form(req.body);
+  std::string name=get_param(form,"name");
+  std::string fpath=get_param(form,"file_path");
+  std::string sz=get_param(form,"size_bytes");
   if(name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
   if(fpath.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"file_path required\"}"); return r; }
   long size=0; try{ size=std::stol(sz); }catch(...){}

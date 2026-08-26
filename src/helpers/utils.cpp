@@ -53,4 +53,41 @@ std::string round_to(double v, int decimals){
   std::ostringstream ss; ss<< std::fixed<< std::setprecision(decimals)<<v; return ss.str();
 }
 
+std::string url_decode(const std::string& s){
+  std::string out; out.reserve(s.size());
+  auto hex=[](char c)->int{
+    if(c>='0'&&c<='9') return c-'0';
+    if(c>='a'&&c<='f') return c-'a'+10;
+    if(c>='A'&&c<='F') return c-'A'+10;
+    return -1;
+  };
+  for(size_t i=0;i<s.size();++i){
+    if(s[i]=='+'){ out+=' '; }
+    else if(s[i]=='%' && i+2<s.size()){
+      int h=hex(s[i+1]), l=hex(s[i+2]);
+      if(h>=0&&l>=0){ out+=static_cast<char>((h<<4)|l); i+=2; }
+      else out+=s[i];
+    } else out+=s[i];
+  }
+  return out;
+}
+
+std::map<std::string,std::string> parse_form(const std::string& body){
+  std::map<std::string,std::string> m;
+  size_t start=0;
+  while(start<=body.size()){
+    size_t amp=body.find('&',start);
+    std::string pair=body.substr(start, amp==std::string::npos? std::string::npos : amp-start);
+    if(!pair.empty()){
+      size_t eq=pair.find('=');
+      std::string k = eq==std::string::npos? pair : pair.substr(0,eq);
+      std::string v = eq==std::string::npos? "" : pair.substr(eq+1);
+      m[url_decode(k)]=url_decode(v);
+    }
+    if(amp==std::string::npos) break;
+    start=amp+1;
+  }
+  return m;
+}
+
 } // namespace examvan::helpers
