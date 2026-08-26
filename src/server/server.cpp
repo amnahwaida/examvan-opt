@@ -282,11 +282,16 @@ bool Server::listen(const ServerOpts& opts) {
        * uppercase, jadi normalisasi kembali ke uppercase sebelum dispatch. */
       std::string method(req->getMethod());
       for (auto &c : method) c = toupper(static_cast<unsigned char>(c));
-      /* Body POST harus dibaca via res->onData (uWS streaming) —
-       * req tidak membawa body. Tanpa ini POST body kosong → login 403. */
+      /* Body POST dibaca via res->onData (uWS streaming). Handler GET juga
+       * dipanggil dengan body kosong (chunk="" + last=true) — aman.
+       * WAJIB: semua path harus respond, dan onAborted wajib terpasang. */
       std::string cookie(std::string_view(req->getHeader("cookie")));
       std::string xver(std::string_view(req->getHeader("x-app-version")));
       std::string origin(std::string_view(req->getHeader("origin")));
+      res->onAborted([res](){
+        res->writeStatus("500");
+        res->end();
+      });
       res->onData([router_ptr, res, method, path, cookie, xver, origin](std::string_view chunk, bool last){
         static thread_local std::string body;
         body.append(chunk);
