@@ -301,9 +301,6 @@ bool Server::listen(const ServerOpts& opts) {
         res->writeStatus(std::to_string(resp.status));
         for(auto &h: resp.headers) res->writeHeader(h.first, h.second);
         res->end(resp.body);
-      }, [res](){
-        res->writeStatus("413");
-        res->end("{\"error\":\"payload too large\"}");
       });
     });
     g_app->ws<WsData>("/ws/:room_id", {
