@@ -42,7 +42,8 @@ int main(){
   examvan::RedisClient redis(cfg.redis_url);
   redis.connect();
 #endif
-  std::cout << "DB: " << (db.ping()?"connected":"not connected") << " ("<<db.sanitized_url()<<") Redis: " << (redis.ping()?"connected":"not connected") << "\n";
+  std::string db_display = examvan::DbPool(cfg.database_url, cfg.database_max_conns).sanitized_url();
+  std::cout << "DB: " << (db.ping()?"connected":"not connected") << " ("<<db_display<<") Redis: " << (redis.ping()?"connected":"not connected") << "\n";
   examvan::Hub hub(
     [&](const std::string& k, const std::string& v){ (void)k;(void)v; },
     [&](const std::string& k){ (void)k; },
