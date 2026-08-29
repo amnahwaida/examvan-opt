@@ -1,8 +1,5 @@
 name: ci
-on:
-  workflow_dispatch:
-# disabled: kuota habis — uncomment di bawah untuk aktifkan kembali
-# on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 jobs:
   build-test:
     runs-on: ubuntu-24.04

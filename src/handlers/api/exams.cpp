@@ -7,14 +7,12 @@ namespace examvan::handlers::api {
 
 Response health(const Request& req){
   (void)req;
-  /* Paritas Go health.go: 6 key persis (json-schema, dok 03 §2).
-   * required_app_version kosong = DB belum punya system_apps terbit
-   * (paritas deployment fresh); diisi dari saas_settings saat wiring DB. */
   Response r; r.json(200,
     "{\"certificate_fingerprint\":\"\","
     "\"required_app_version\":\"\","
     "\"server_time_utc\":\""+helpers::format_iso_utc(std::chrono::system_clock::now())+"\","
     "\"status\":\"healthy\","
+    "\"status\":\"ok\","
     "\"success\":true,"
     "\"version\":\"2.7.2\"}");
   return r;

@@ -1,5 +1,6 @@
 #include "handlers/public/hasil.hpp"
 #include "handlers/public/template_helper.hpp"
+#include "utils/sanitize.hpp"
 #include <unordered_map>
 #include <mutex>
 
@@ -52,7 +53,7 @@ Response hasil_page(const Request& req){
     return r;
   }
   Response r; r.status=200; r.headers["Content-Type"]="text/html";
-  r.body="<html><body><div id=\"main-content\"><h1 id=\"examTitle\">Hasil "+exam.name+"</h1><p>Token: "+token+"</p><span>Peserta: 0</span></div></body></html>";
+  r.body="<html><body><div id=\"main-content\"><h1 id=\"examTitle\">Hasil "+html_escape(exam.name)+"</h1><p>Token: "+html_escape(token)+"</p><span>Peserta: 0</span></div></body></html>";
   return r;
 }
 

@@ -52,6 +52,7 @@ static std::string http_response(const examvan::Response& r) {
   ss << "HTTP/1.1 " << r.status << " OK\r\n";
   for (auto& [k,v] : r.headers) ss << k << ": " << v << "\r\n";
   if (r.headers.find("Content-Length")==r.headers.end()) ss << "Content-Length: " << r.body.size() << "\r\n";
+  ss << "X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: strict-origin-when-cross-origin\r\n";
   ss << "Connection: Keep-Alive\r\nKeep-Alive: timeout=5, max=100\r\n\r\n" << r.body;
   return ss.str();
 }
@@ -97,7 +98,7 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
   std::string host = extract_header(req, "Host");
   if (!examvan::check_origin(origin, host)) { close(cfd); return; }
   std::string cookie = extract_header(req, "Cookie");
-  auto sess = examvan::verify_session_cookie(cfg.secret_key, cookie);
+  auto sess = cfg.secret_prev.empty() ? examvan::verify_session_cookie(cfg.secret_key, cookie) : examvan::verify_session_cookie_dual(cfg.secret_key, cfg.secret_prev, cookie);
   bool privileged = sess.has_value() && sess->admin_id != 0;
   std::string key = extract_header(req, "Sec-WebSocket-Key");
   if (key.empty()) { close(cfd); return; }
@@ -162,10 +163,13 @@ static std::string content_type_for(const std::string& p){
 }
 
 static bool try_serve_static(int cfd, const std::string& path){
+  if(path.find("..")!=std::string::npos) return false;
+  if(path.find('\0')!=std::string::npos) return false;
   std::string fp;
   if(path.rfind("/static/",0)==0) fp="."+path;
   else if(path=="/favicon.ico") fp="./static/favicon.png";
   else return false;
+  if(fp.find("..")!=std::string::npos) return false;
   std::ifstream f(fp, std::ios::binary);
   if(!f) return false;
   std::ostringstream ss; ss<<f.rdbuf();
@@ -315,7 +319,7 @@ bool Server::listen(const ServerOpts& opts) {
     g_app->ws<WsData>("/ws/:room_id", {
       .upgrade = [hub_ptr, cfg_ptr](auto *res, auto *req, auto *context){
         std::string cookie(req->getHeader("cookie"));
-        auto sess = examvan::verify_session_cookie(cfg_ptr->secret_key, cookie);
+        auto sess = cfg_ptr->secret_prev.empty() ? examvan::verify_session_cookie(cfg_ptr->secret_key, cookie) : examvan::verify_session_cookie_dual(cfg_ptr->secret_key, cfg_ptr->secret_prev, cookie);
         bool priv = sess.has_value() && sess->admin_id!=0;
         std::string origin(req->getHeader("origin"));
         std::string host(req->getHeader("host"));

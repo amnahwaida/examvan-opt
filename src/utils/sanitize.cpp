@@ -29,4 +29,18 @@ std::string sanitize_ws_mac(const std::string& raw) {
   return s;
 }
 
+std::string html_escape(const std::string& s) {
+  std::string out;
+  out.reserve(s.size()*2);
+  for(char c: s){
+    if(c=='&') out+="&amp;";
+    else if(c=='<') out+="&lt;";
+    else if(c=='>') out+="&gt;";
+    else if(c=='"') out+="&quot;";
+    else if(c=='\'') out+="&#39;";
+    else out.push_back(c);
+  }
+  return out;
+}
+
 }

@@ -28,11 +28,18 @@ std::string marshal_socketio(const std::string& event, const std::string& payloa
   return "[" + json_string(event) + "," + payload_json + "]";
 }
 
+static size_t find_closing_quote(const std::string& s, size_t start){
+  for(size_t i=start+1;i<s.size();++i){
+    if(s[i]=='\\'){ ++i; continue; }
+    if(s[i]=='"') return i;
+  }
+  return std::string::npos;
+}
 std::optional<SocketIOMessage> parse_socketio(const std::string& data){
   if(data.size()<4 || data.front()!='[') return std::nullopt;
   size_t p1 = data.find('"',0);
   if(p1==std::string::npos) return std::nullopt;
-  size_t p2 = data.find('"',p1+1);
+  size_t p2 = find_closing_quote(data, p1);
   if(p2==std::string::npos) return std::nullopt;
   std::string event = data.substr(p1+1, p2-p1-1);
   size_t comma = data.find(',',p2);

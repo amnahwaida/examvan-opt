@@ -61,7 +61,14 @@ void Hub::broadcast_to_room(const std::string& room_id, const std::string& event
 static std::string now_rfc3339(){
   auto now = std::chrono::system_clock::now();
   std::time_t t = std::chrono::system_clock::to_time_t(now);
-  char buf[32]; std::strftime(buf,sizeof(buf),"%Y-%m-%dT%H:%M:%SZ", std::gmtime(&t));
+  char buf[32];
+  std::tm tm{};
+#if defined(_WIN32)
+  gmtime_s(&tm, &t);
+#else
+  gmtime_r(&t, &tm);
+#endif
+  std::strftime(buf,sizeof(buf),"%Y-%m-%dT%H:%M:%SZ", &tm);
   return std::string(buf);
 }
 
@@ -73,8 +80,13 @@ std::string Hub::extract_json_string(const std::string& json, const std::string&
   if(pos==std::string::npos) return "";
   pos = json.find('"',pos);
   if(pos==std::string::npos) return "";
-  auto end = json.find('"',pos+1);
-  if(end==std::string::npos) return "";
+  size_t end = pos+1;
+  while(end < json.size()){
+    if(json[end]=='\\'){ end+=2; continue; }
+    if(json[end]=='"') break;
+    end++;
+  }
+  if(end>=json.size()) return "";
   return json.substr(pos+1,end-pos-1);
 }
 
@@ -143,7 +155,8 @@ bool check_origin(const std::string& origin, const std::string& host){
   auto slash = h.find('/'); if(slash!=std::string::npos) h=h.substr(0,slash);
   if(h==host) return true;
   auto colon=h.find(':'); std::string hostname=colon==std::string::npos?h:h.substr(0,colon);
-  return hostname=="localhost"||hostname=="127.0.0.1";
+  if(hostname=="localhost"||hostname=="127.0.0.1") return true;
+  return false;
 }
 
 }  // namespace examvan

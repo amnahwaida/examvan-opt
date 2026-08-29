@@ -27,6 +27,8 @@ Config Config::load() {
   if (const char* v = std::getenv("DATABASE_URL")) c.database_url = v;
   if (const char* v = std::getenv("REDIS_URL")) c.redis_url = v;
   if (const char* v = std::getenv("EXAMVAN_SECRET")) c.secret_key = v;
+  if (const char* v = std::getenv("EXAMVAN_SECRET_PREV")) c.secret_prev = v;
+  if (const char* v = std::getenv("TURNSTILE_SECRET")) c.turnstile_secret = v;
   if (const char* v = std::getenv("EXAMVAN_ADMIN_USER")) c.admin_user = v;
   if (const char* v = std::getenv("EXAMVAN_ADMIN_PASS")) c.admin_pass = v;
   c.storage_path = env_str("STORAGE_PATH", "/app/storage");

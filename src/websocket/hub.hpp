@@ -53,8 +53,10 @@ class Hub {
 
   void handle_heartbeat(std::shared_ptr<Client> c, const std::string& payload_json);
   void handle_exam_completed(std::shared_ptr<Client> c, const std::string& payload_json);
-  static std::string extract_json_string(const std::string& json, const std::string& key);
   static bool is_valid_origin(const std::string& origin, const std::string& host);
+ public:
+  static std::string extract_json_string(const std::string& json, const std::string& key);
+ private:
 };
 
 bool check_origin(const std::string& origin, const std::string& host);

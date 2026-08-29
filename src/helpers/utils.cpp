@@ -9,7 +9,14 @@ namespace examvan::helpers {
 
 std::string format_iso_utc(std::chrono::system_clock::time_point tp){
   std::time_t t = std::chrono::system_clock::to_time_t(tp);
-  char buf[32]; std::strftime(buf,sizeof(buf),"%Y-%m-%dT%H:%M:%SZ", std::gmtime(&t));
+  char buf[32];
+  std::tm tm{};
+#if defined(_WIN32)
+  gmtime_s(&tm,&t);
+#else
+  gmtime_r(&t, &tm);
+#endif
+  std::strftime(buf,sizeof(buf),"%Y-%m-%dT%H:%M:%SZ", &tm);
   return buf;
 }
 

@@ -24,8 +24,18 @@ static std::string sha256_hex(const std::string& s){
 }
 std::string presign_url(const R2Config& cfg, const std::string& key, int expires_seconds){
   if(!cfg.enabled()) return "";
+  if(cfg.bucket.empty()) return "";
   std::time_t now=time(nullptr);
-  char date_full[32]; std::strftime(date_full,sizeof(date_full),"%Y%m%dT%H%M%SZ", std::gmtime(&now));
+  char date_full[32];
+  {
+    std::tm tm{};
+#if defined(_WIN32)
+    gmtime_s(&tm,&now);
+#else
+    gmtime_r(&now,&tm);
+#endif
+    std::strftime(date_full,sizeof(date_full),"%Y%m%dT%H%M%SZ", &tm);
+  }
   std::string date8(date_full,8);
   std::string credential_raw = cfg.access_key + "/" + date8 + "/auto/s3/aws4_request";
   std::string credential = uri_encode(credential_raw);

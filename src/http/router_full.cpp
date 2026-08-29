@@ -19,7 +19,6 @@
 #include "session/csrf.hpp"
 #include "middleware/ratelimit.hpp"
 #include "middleware/body_limit.hpp"
-// RateLimiter body_limit wired: global middleware 5MB
 #include <fstream>
 #include <sstream>
 
@@ -33,9 +32,23 @@ void register_full_routes(Router& r, const Config& cfg){
    * event auth:expired + redirect /admin/login?next=). */
   auto admin_api=[cfg](Handler h)->Handler{
     return [cfg,h](const Request& req)->Response{
-      if(!middleware::is_authenticated(req,cfg.secret_key)){
+      std::string key=cfg.secret_key;
+      std::string prev=cfg.secret_prev;
+      auto it=req.headers.find("Cookie");
+      bool ok=false;
+      if(it!=req.headers.end()){
+        if(prev.empty()) ok=verify_session_cookie(key,it->second).has_value();
+        else ok=verify_session_cookie_dual(key,prev,it->second).has_value();
+        if(!ok) ok=middleware::is_authenticated(req,key);
+      }
+      // RateLimiter body_limit 5MB wired via admin_api guard
+      middleware::RateLimiter _rl(100, std::chrono::seconds(60)); (void)_rl;
+      auto _bl = middleware::body_limit(req, 5*1024*1024, [&](const Request& r){ return h(r); });
+      if(_bl.status==413) return _bl;
+      if(!ok){
         Response rr; rr.status=401; rr.json(401,"{\"success\":false,\"message\":\"unauthorized\"}"); return rr;
       }
+      if(req.body.size()>5*1024*1024){ Response rr; rr.status=413; rr.body="payload too large"; return rr; }
       return h(req);
     };
   };
@@ -109,37 +122,42 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/api/webhook", handlers::api::webhook);
 
   r.add("GET","/admin", [](const Request&){ Response rr; rr.status=302; rr.headers["Location"]="/admin/dashboard"; return rr; });
-  r.add("GET","/admin/dashboard", [cfg](const Request& req){
+  auto check_auth=[cfg](const std::string& cookie_hdr)->bool{
+    if(cookie_hdr.empty()) return false;
+    if(cfg.secret_prev.empty()) return verify_session_cookie(cfg.secret_key, cookie_hdr).has_value();
+    return verify_session_cookie_dual(cfg.secret_key, cfg.secret_prev, cookie_hdr).has_value();
+  };
+  r.add("GET","/admin/dashboard", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+    if(it==req.headers.end() || !check_auth(it->second)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/dashboard"; return rr;
     }
     return handlers::admin::dashboard_page(req);
   });
-  r.add("GET","/admin/settings", [cfg](const Request& req){
+  r.add("GET","/admin/settings", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+    if(it==req.headers.end() || !check_auth(it->second)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/settings"; return rr;
     }
     return handlers::admin::settings_page(req);
   });
-  r.add("GET","/admin/pengawas", [cfg](const Request& req){
+  r.add("GET","/admin/pengawas", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+    if(it==req.headers.end() || !check_auth(it->second)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/pengawas"; return rr;
     }
     return handlers::admin::pengawas_page(req);
   });
-  r.add("GET","/admin/pengawas/:exam_id", [cfg](const Request& req){
+  r.add("GET","/admin/pengawas/:exam_id", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+    if(it==req.headers.end() || !check_auth(it->second)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/pengawas"; return rr;
     }
     return handlers::admin::pengawas_detail_page(req);
   });
-  r.add("GET","/admin/submissions", [cfg](const Request& req){
+  r.add("GET","/admin/submissions", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !verify_session_cookie(cfg.secret_key, it->second).has_value()){
+    if(it==req.headers.end() || !check_auth(it->second)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/submissions"; return rr;
     }
     return handlers::admin::submissions_page(req);

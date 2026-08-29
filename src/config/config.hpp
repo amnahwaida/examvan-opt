@@ -8,6 +8,8 @@ struct Config {
   std::string database_url;
   std::string redis_url;
   std::string secret_key;
+  std::string secret_prev;
+  std::string turnstile_secret;
   std::string admin_user;
   std::string admin_pass;
   std::string storage_path{"/app/storage"};

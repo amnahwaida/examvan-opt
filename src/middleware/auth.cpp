@@ -1,9 +1,12 @@
 #include "middleware/auth.hpp"
+#include "config/config.hpp"
 namespace examvan::middleware {
 bool is_authenticated(const Request& req, const std::string& secret, SessionData* out){
   auto it=req.headers.find("Cookie");
   if(it==req.headers.end()) return false;
-  auto sess=verify_session_cookie(secret, it->second);
+  std::string prev;
+  if(auto* c=getenv("EXAMVAN_SECRET_PREV")) prev=c;
+  auto sess=prev.empty()? verify_session_cookie(secret, it->second) : verify_session_cookie_dual(secret, prev, it->second);
   if(!sess) return false;
   if(out) *out=*sess;
   return sess->admin_id!=0;

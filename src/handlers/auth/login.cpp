@@ -3,51 +3,51 @@
 #include "session/cookie.hpp"
 #include "middleware/turnstile.hpp"
 #include "helpers/utils.hpp"
-#include <openssl/sha.h>
 #include <openssl/rand.h>
 #include <unordered_map>
 #include <mutex>
 #include <fstream>
 #include <sstream>
+#include <crypt.h>
 
 namespace examvan::handlers::auth {
 
 static std::unordered_map<std::string, std::string> g_users;
 static std::mutex g_mu;
-static std::string gensalt(){ // bcrypt $2b$ crypt
+static std::string gensalt(){ // bcrypt gensalt
   unsigned char buf[16];
-  RAND_bytes(buf,sizeof(buf)); // crypt $2b$12$
-  std::string s; s.reserve(32);
-  const char* hex="0123456789abcdef";
-  for(int i=0;i<16;i++){ s.push_back(hex[buf[i]>>4]); s.push_back(hex[buf[i]&0xf]); }
+  RAND_bytes(buf,sizeof(buf));
+  const char* b64="./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  std::string s;
+  s.reserve(22);
+  int v=0, bits=0;
+  for(int i=0;i<16;i++){
+    v = (v<<8)|buf[i];
+    bits+=8;
+    while(bits>=6){ bits-=6; s.push_back(b64[(v>>bits)&0x3F]); }
+  }
+  if(bits>0) s.push_back(b64[(v<<(6-bits))&0x3F]);
+  if(s.size()>22) s.resize(22);
   return s;
 }
 static std::string hash_password(const std::string& p){
   std::string salt="$2b$12$"+gensalt();
-  std::string data=salt+p; // crypt
-  unsigned char md[32];
-  SHA256(reinterpret_cast<const unsigned char*>(data.data()), data.size(), md);
-  std::string out=salt+"$"; out.reserve(97);
-  const char* hex="0123456789abcdef";
-  for(int i=0;i<32;i++){ out.push_back(hex[md[i]>>4]); out.push_back(hex[md[i]&0xf]); }
-  return out;
+  struct crypt_data cd{}; cd.initialized=0;
+  char* out=crypt_r(p.c_str(), salt.c_str(), &cd);
+  if(out) return std::string(out);
+  return salt+"$fallback";
 }
 static bool verify_password(const std::string& plain, const std::string& hashed){
-  auto pos=hashed.rfind('$');
-  if(pos==std::string::npos) return false;
-  std::string salt=hashed.substr(0,pos);
-  std::string expect=salt+"$";
-  std::string data=salt+plain;
-  unsigned char md[32];
-  SHA256(reinterpret_cast<const unsigned char*>(data.data()), data.size(), md);
-  const char* hex="0123456789abcdef";
-  std::string h; h.reserve(64);
-  for(int i=0;i<32;i++){ h.push_back(hex[md[i]>>4]); h.push_back(hex[md[i]&0xf]); }
-  expect+=h;
-  if(expect.size()!=hashed.size()) return false;
-  volatile int d=0;
-  for(size_t i=0;i<expect.size();i++) d|=expect[i]^hashed[i];
-  return d==0;
+  if(hashed.rfind("$2b$",0)==0 || hashed.rfind("$2a$",0)==0 || hashed.rfind("$2y$",0)==0){
+    struct crypt_data cd{}; cd.initialized=0;
+    char* out=crypt_r(plain.c_str(), hashed.c_str(), &cd);
+    if(!out) return false;
+    if(std::string(out).size()!=hashed.size()) return false;
+    volatile int d=0;
+    for(size_t i=0;i<hashed.size();i++) d|=out[i]^hashed[i];
+    return d==0;
+  }
+  return false;
 }
 void set_user_for_test(const std::string& u, const std::string& p, const std::string& r){
   (void)r; std::lock_guard<std::mutex> g(g_mu); g_users[u]=hash_password(p);
@@ -101,8 +101,12 @@ Response login_handler(const Request& req, const Config& cfg){
   }
   std::string turnstile;
   auto tf=form.find("cf-turnstile-response"); if(tf!=form.end()) turnstile=tf->second;
-  if(!turnstile.empty() && !middleware::verify_turnstile(turnstile, "", "")){
-    Response r; r.status=403; r.json(403,"{\"error\":\"Turnstile failed\"}"); return r;
+  if(!turnstile.empty()){
+    std::string secret = cfg.turnstile_secret;
+    if(secret.empty()) if(auto* e=getenv("TURNSTILE_SECRET")) secret=e;
+    if(!middleware::verify_turnstile(turnstile, secret, "")){
+      Response r; r.status=403; r.json(403,"{\"error\":\"Turnstile failed\"}"); return r;
+    }
   }
   std::string username, password;
   if(auto u=form.find("username"); u!=form.end()) username=u->second;
@@ -131,9 +135,8 @@ Response login_handler(const Request& req, const Config& cfg){
   }
   std::string target="/admin/dashboard";
   if(auto n=form.find("next"); n!=form.end() && !n->second.empty()){
-    /* open-redirect guard: hanya path relatif dalam situs yang diizinkan */
-    const std::string& nx=n->second;
-    if(nx[0]=='/' && (nx.size()==1 || nx[1]!='/') && nx.find("\\")==std::string::npos) target=nx;
+    std::string nx = helpers::url_decode(n->second);
+    if(!nx.empty() && nx[0]=='/' && (nx.size()==1 || nx[1]!='/') && nx.find('\\')==std::string::npos && nx.find("%2f")==std::string::npos && nx.find("%2F")==std::string::npos && nx.find("//")==std::string::npos) target=nx;
   }
   Response r; r.status=303; r.headers["Location"]=target; r.headers["Set-Cookie"]=cookie;
   return r;
