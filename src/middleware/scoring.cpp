@@ -4,16 +4,45 @@
 
 namespace examvan::scoring {
 
+static std::string extract_str(const std::string& obj, const std::string& key){
+  std::string needle="\""+key+"\"";
+  auto p=obj.find(needle); if(p==std::string::npos) return "";
+  auto c=obj.find(':',p+needle.size()); if(c==std::string::npos) return "";
+  size_t q1=obj.find('"',c); if(q1==std::string::npos) return "";
+  size_t q2=q1+1; while(q2<obj.size()){ if(obj[q2]=='\\'){ q2+=2; continue; } if(obj[q2]=='"') break; q2++; }
+  if(q2>=obj.size()) return "";
+  return obj.substr(q1+1,q2-q1-1);
+}
+static double extract_double(const std::string& obj, const std::string& key, double def){
+  std::string needle="\""+key+"\"";
+  auto p=obj.find(needle); if(p==std::string::npos) return def;
+  auto c=obj.find(':',p+needle.size()); if(c==std::string::npos) return def;
+  size_t s=obj.find_first_not_of(" \t",c+1); if(s==std::string::npos) return def;
+  if(obj[s]=='"'){ auto v=extract_str(obj,key); try{return std::stod(v);}catch(...){return def;}}
+  size_t e=obj.find_first_of(",}",s); if(e==std::string::npos) e=obj.size();
+  try{return std::stod(obj.substr(s,e-s));}catch(...){return def;}
+}
+static int extract_int(const std::string& obj, const std::string& key, int def){
+  return (int)extract_double(obj,key,def);
+}
 std::vector<Question> parse_questions(const std::string& json){
   std::vector<Question> out;
-  size_t p=0;
+  size_t pos=0;
   while(true){
-    auto n=json.find("\"number\"",p); if(n==std::string::npos) break;
-    auto colon=json.find(':',n); auto comma=json.find(',',colon);
-    Question q; try{q.number=std::stoi(json.substr(colon+1,comma-colon-1));}catch(...){}
-    auto t=json.find("\"type\"",comma); if(t!=std::string::npos){ auto c=json.find(':',t); auto q1=json.find('"',c); auto q2=json.find('"',q1+1); if(q1!=std::string::npos) q.type=json.substr(q1+1,q2-q1-1); }
-    out.push_back(q);
-    p=comma;
+    auto a=json.find('{',pos); if(a==std::string::npos) break;
+    auto b=json.find('}',a); if(b==std::string::npos) break;
+    std::string obj=json.substr(a,b-a+1);
+    if(obj.find("\"number\"")!=std::string::npos){
+      Question q;
+      q.number=extract_int(obj,"number",0);
+      q.type=extract_str(obj,"type");
+      if(q.type.empty()) q.type="single_choice";
+      q.weight=extract_double(obj,"weight",1);
+      q.key=extract_str(obj,"key");
+      if(q.key.empty()) q.key=extract_str(obj,"answer");
+      out.push_back(q);
+    }
+    pos=b+1;
   }
   return out;
 }

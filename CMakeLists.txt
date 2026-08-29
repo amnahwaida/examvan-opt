@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# ccache for faster builds
 
 add_compile_options(-Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter)
 
@@ -17,11 +18,14 @@ endif()
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
+find_library(CRYPT_LIB crypt)
 
 include(FetchContent)
 FetchContent_Declare(
   googletest
   URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz
+  URL_HASH SHA256=7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926
+  # clang-format enforcement
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
@@ -31,10 +35,12 @@ if(WITH_UWEBSOCKETS)
   FetchContent_Declare(uSockets
     GIT_REPOSITORY https://github.com/uNetworking/uSockets
     GIT_TAG v0.8.8
+    GIT_SHALLOW TRUE
   )
   FetchContent_Declare(uWebSockets
     GIT_REPOSITORY https://github.com/uNetworking/uWebSockets
     GIT_TAG v20.71.0
+    GIT_SHALLOW TRUE
   )
   FetchContent_MakeAvailable(uSockets uWebSockets)
   if(NOT TARGET uSockets)
@@ -126,7 +132,7 @@ target_include_directories(examvan_core PUBLIC
   ${CMAKE_SOURCE_DIR}/include
 )
 
-target_link_libraries(examvan_core PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+target_link_libraries(examvan_core PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads ${CRYPT_LIB})
 if(WITH_UWEBSOCKETS)
   set(_uws_src ${uWebSockets_SOURCE_DIR})
   if(NOT _uws_src)
@@ -187,6 +193,20 @@ add_executable(examvan-tests
   tests/test_f6_users.cpp
   tests/test_f6_exams.cpp
   tests/test_f7_jobs.cpp
+  tests/test_p0_tdd.cpp
+  tests/test_p1_tdd.cpp
+  tests/test_p2_tdd.cpp
+  tests/test_p3_tdd.cpp
+  tests/test_p4_tdd.cpp
+  tests/test_p5_tdd.cpp
+  tests/test_p6_tdd.cpp
+  tests/test_p7_tdd.cpp
+  tests/test_p8_tdd.cpp
+  tests/test_p9_tdd.cpp
+  tests/test_p10_tdd.cpp
+  tests/test_p11_tdd.cpp
+  tests/test_p12_tdd.cpp
+  tests/test_p13_tdd.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)

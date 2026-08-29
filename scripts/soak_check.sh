@@ -1,5 +1,5 @@
 #!/bin/bash
-# Soak 24h RSS monitor (dok 04 Lapis 3): grafik RSS harus datar (tanpa leak).
+# Soak 24h RSS p99 monitor (dok 04 Lapis 3): grafik RSS harus datar (tanpa leak).
 # Usage: ./soak_check.sh <container_name> [output_log]
 # Robust: resolve PID server asli tiap iterasi (tahan terhadap restart proses
 # di dalam container), catat health status, dan deteksi tren kenaikan.

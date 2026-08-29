@@ -31,7 +31,7 @@ jobs:
       - name: Install deps
         run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev clang-format libpq-dev libhiredis-dev libcurl4-openssl-dev
       - name: Format check
-        run: find src tests -name "*.cpp" -o -name "*.hpp" | xargs clang-format --dry-run --Werror || true
+        run: find src tests -name "*.cpp" -o -name "*.hpp" | xargs clang-format --dry-run --Werror
       - name: Build release
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
       - name: Build sanitizer
@@ -50,4 +50,4 @@ jobs:
         run: |
           for f in static/js/*.test.mjs; do node --test "$f"; done
       - name: Shadow parity dry-run
-        run: python3 scripts/parity_harness.py --help && python3 scripts/shadow_proxy.py --help || true
+        run: python3 scripts/parity_harness.py --help && python3 scripts/shadow_proxy.py --help

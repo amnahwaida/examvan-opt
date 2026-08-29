@@ -44,7 +44,7 @@ TEST(Middleware, RateLimit) {
 }
 
 TEST(Middleware, CorsAllowAll) {
-  EXPECT_TRUE(is_origin_allowed("https://a.com",""));
+  EXPECT_FALSE(is_origin_allowed("https://a.com",""));
   EXPECT_TRUE(is_origin_allowed("https://a.com","https://a.com, https://b.com"));
   EXPECT_FALSE(is_origin_allowed("https://evil.com","https://a.com"));
 }

@@ -51,10 +51,21 @@ TEST(Turnstile, Bypass) {
 TEST(FullRouter, Comprehensive) {
   Config cfg; Router r; register_full_routes(r,cfg);
   EXPECT_GE(r.routes().size(), 60u);
+  /* /admin/api kini WAJIB sesi valid: tanpa cookie → 401 JSON, handler tidak dieksekusi */
   Request req; req.method="GET"; req.path="/admin/api/pengawas/exams";
+  EXPECT_EQ(r.dispatch(req).status,401);
+  req.path="/admin/api/queue/status";
+  auto unauth=r.dispatch(req);
+  EXPECT_EQ(unauth.status,401);
+  EXPECT_NE(unauth.body.find("unauthorized"), std::string::npos);
+  /* dengan cookie examvan_session valid → handler dieksekusi */
+  std::string payload=b64_encode("admin_id=1&username=a&role=[\"guru\"]");
+  req.headers["Cookie"]="examvan_session="+encode_cookie_value(cfg.secret_key,payload);
+  req.path="/admin/api/pengawas/exams";
   EXPECT_EQ(r.dispatch(req).status,200);
-  req.path="/api/webhook"; req.method="POST"; req.body="{}";
+  req.path="/admin/api/queue/status";
   EXPECT_EQ(r.dispatch(req).status,200);
-  req.path="/admin/api/queue/status"; req.method="GET";
-  EXPECT_EQ(r.dispatch(req).status,200);
+  /* endpoint publik tidak terpengaruh */
+  Request wh; wh.method="POST"; wh.path="/api/webhook"; wh.body="{}";
+  EXPECT_EQ(r.dispatch(wh).status,200);
 }

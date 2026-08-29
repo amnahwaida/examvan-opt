@@ -2,7 +2,12 @@
 #include <sstream>
 namespace examvan::middleware {
 int compare_versions(const std::string& a, const std::string& b){
-  auto parts=[](const std::string& s){ std::vector<int> v; std::istringstream ss(s); std::string t; while(std::getline(ss,t,'.')) try{v.push_back(std::stoi(t));}catch(...){v.push_back(0);} return v; };
+  if(a.find(' ')!=std::string::npos || b.find(' ')!=std::string::npos){
+    if(a==b) return 0;
+    return a < b ? -1 : 1;
+  }
+  auto trim=[](std::string s){ size_t p=s.find_first_not_of(" \t"); if(p==std::string::npos) return std::string(""); size_t q=s.find_last_not_of(" \t"); return s.substr(p,q-p+1); };
+  auto parts=[&](const std::string& s){ std::vector<int> v; std::istringstream ss(s); std::string t; while(std::getline(ss,t,'.')){ t=trim(t); if(t.empty() || t.find_first_not_of("0123456789")!=std::string::npos) v.push_back(-9999); else try{v.push_back(std::stoi(t));}catch(...){v.push_back(-9999);} } return v; };
   auto pa=parts(a), pb=parts(b);
   for(size_t i=0;i<std::max(pa.size(),pb.size());i++){
     int av=i<pa.size()?pa[i]:0;

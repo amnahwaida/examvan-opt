@@ -2,7 +2,8 @@
 #include <sstream>
 namespace examvan::middleware {
 bool is_origin_allowed(const std::string& origin, const std::string& csv){
-  if(csv.empty()) return true;
+  if(csv.empty()) return false;
+  if(origin.empty()) return false;
   std::istringstream ss(csv); std::string t;
   while(std::getline(ss,t,',')){
     t.erase(0,t.find_first_not_of(" \t")); t.erase(t.find_last_not_of(" \t")+1);

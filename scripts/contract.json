@@ -128,5 +128,19 @@
     "method": "GET",
     "path": "/admin",
     "auth": "unknown"
-  }
+  },
+  {"method": "GET", "path": "/api/health", "auth": "unknown"},
+  {"method": "GET", "path": "/api/time", "auth": "unknown"},
+  {"method": "GET", "path": "/admin/dashboard", "auth": "admin"},
+  {"method": "GET", "path": "/admin/api/exams", "auth": "admin"},
+  {"method": "POST", "path": "/admin/api/exams", "auth": "admin"},
+  {"method": "GET", "path": "/admin/api/users", "auth": "admin"},
+  {"method": "POST", "path": "/admin/api/users", "auth": "admin"},
+  {"method": "GET", "path": "/admin/api/vouchers", "auth": "admin"},
+  {"method": "POST", "path": "/admin/api/vouchers", "auth": "admin"},
+  {"method": "GET", "path": "/admin/api/submissions", "auth": "admin"},
+  {"method": "GET", "path": "/admin/api/export/csv", "auth": "admin"},
+  {"method": "GET", "path": "/admin/api/export/xlsx", "auth": "admin"},
+  {"method": "GET", "path": "/admin/api/r2/presign", "auth": "admin"},
+  {"method": "POST", "path": "/api/exams/submit", "auth": "unknown"}
 ]

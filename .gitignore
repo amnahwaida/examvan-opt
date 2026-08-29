@@ -6,3 +6,5 @@ build-san/
 postgres_data/
 build-uws/
 soak-logs/
+internal/
+ccache

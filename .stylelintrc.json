@@ -2,7 +2,7 @@
   "_docs": [
     "EXAMVAN — guard anti-regresi design token (Batch 4, temuan S15 fase 1).",
     "ATURAN: nilai warna hex/rgba hanya boleh didefinisikan di",
-    "webui/static/css/theme.css (single source of truth). Stylesheet lain",
+    "static/css/theme.css (single source of truth). Stylesheet lain",
     "(admin-base.css, hasil.css, public-*.css) wajib memakai var(--token).",
     "theme.css adalah SATU-SATUNYA pengecualian (ignoreFiles) karena di sanalah",
     "token didefinisikan.",
@@ -11,7 +11,7 @@
     "Stylelint belum terinstal dan sengaja TIDAK ditambahkan ke package.json",
     "di Batch 4 agar tidak menarik dependensi npm tanpa persetujuan.",
     "Untuk mengaktifkan:",
-    "  npm install --save-dev stylelint && npx stylelint \"webui/static/css/*.css\""
+    "  npm install --save-dev stylelint && npx stylelint \"static/css/*.css\""
   ],
   "ignoreFiles": [
     "**/node_modules/**",

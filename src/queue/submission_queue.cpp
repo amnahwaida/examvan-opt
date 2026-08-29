@@ -13,12 +13,49 @@ std::string generate_job_id(){
   return ss.str();
 }
 
+static std::string json_escape(const std::string& s){
+  std::string o; o.reserve(s.size()+8);
+  for(unsigned char c: s){
+    switch(c){
+      case '"': o+="\\\""; break;
+      case '\\': o+="\\\\"; break;
+      case '\b': o+="\\b"; break;
+      case '\f': o+="\\f"; break;
+      case '\n': o+="\\n"; break;
+      case '\r': o+="\\r"; break;
+      case '\t': o+="\\t"; break;
+      default:
+        if(c<0x20){ char buf[7]; snprintf(buf,sizeof(buf),"\\u%04x",c); o+=buf; }
+        else o+=char(c);
+    }
+  }
+  return o;
+}
+static std::string json_unescape(const std::string& s){
+  std::string o; o.reserve(s.size());
+  for(size_t i=0;i<s.size();){
+    if(s[i]=='\\' && i+1<s.size()){
+      char n=s[i+1];
+      if(n=='"') o+='"';
+      else if(n=='\\') o+='\\';
+      else if(n=='n') o+='\n';
+      else if(n=='r') o+='\r';
+      else if(n=='t') o+='\t';
+      else if(n=='b') o+='\b';
+      else if(n=='f') o+='\f';
+      else if(n=='u' && i+5<s.size()){ int v=0; for(int k=2;k<6;k++){ char h=s[i+k]; v*=16; if(h>='0'&&h<='9') v+=h-'0'; else if(h>='a'&&h<='f') v+=h-'a'+10; else if(h>='A'&&h<='F') v+=h-'A'+10; } o+=char(v); i+=6; continue; }
+      else o+=n;
+      i+=2;
+    } else { o+=s[i]; i++; }
+  }
+  return o;
+}
 std::string SubmissionJob::to_json() const {
   std::ostringstream ss;
-  ss<<"{\"job_id\":\""<<job_id<<"\",\"exam_id\":"<<exam_id
-    <<",\"student_name\":\""<<student_name<<"\",\"exam_number\":\""<<exam_number
-    <<"\",\"student_class\":\""<<student_class<<"\",\"mac_address\":\""<<mac_address
-    <<"\",\"retries\":"<<retries<<",\"enqueued_at\":\""<<enqueued_at<<"\"}";
+  ss<<"{\"job_id\":\""<<json_escape(job_id)<<"\",\"exam_id\":"<<exam_id
+    <<",\"student_name\":\""<<json_escape(student_name)<<"\",\"exam_number\":\""<<json_escape(exam_number)
+    <<"\",\"student_class\":\""<<json_escape(student_class)<<"\",\"mac_address\":\""<<json_escape(mac_address)
+    <<"\",\"retries\":"<<retries<<",\"enqueued_at\":\""<<json_escape(enqueued_at)<<"\"}";
   return ss.str();
 }
 
@@ -30,7 +67,16 @@ std::optional<SubmissionJob> SubmissionJob::from_json(const std::string& s){
     auto c=s.find(':',p); if(c==std::string::npos) return "";
     size_t q1=s.find_first_not_of(" \t",c+1);
     if(q1==std::string::npos) return "";
-    if(s[q1]=='"'){ auto q2=s.find('"',q1+1); if(q2==std::string::npos) return ""; return s.substr(q1+1,q2-q1-1); }
+    if(s[q1]=='"'){
+      size_t q2=q1+1;
+      while(q2<s.size()){
+        if(s[q2]=='\\'){ q2+=2; continue; }
+        if(s[q2]=='"') break;
+        q2++;
+      }
+      if(q2>=s.size()) return "";
+      return json_unescape(s.substr(q1+1,q2-q1-1));
+    }
     size_t q2=s.find_first_of(",}",q1);
     if(q2==std::string::npos) return "";
     std::string v=s.substr(q1,q2-q1);

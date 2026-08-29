@@ -23,14 +23,11 @@ std::string b64_decode(const std::string& s) {
                           reinterpret_cast<const unsigned char*>(in.data()), static_cast<int>(in.size()));
   if (n < 0) return "";
   size_t pad = 0;
-  if (s.size() >= 2 && s.substr(s.size()-2)=="==") pad=2;
-  else if (!s.empty() && s.back()=='=') pad=1;
-  else {
-    size_t eq = std::count(in.begin(), in.end(), '=');
-    pad = eq;
+  if (!in.empty()) {
+    if (in.size()>=2 && in.substr(in.size()-2)=="==") pad=2;
+    else if (in.back()=='=') pad=1;
   }
   out.resize(n - pad);
-  while (!out.empty() && out.back()=='\0') out.pop_back();
   return out;
 }
 
@@ -68,7 +65,10 @@ std::optional<std::string> decode_cookie_value(const std::string& secret, const 
   std::string payload = cookie_value.substr(0, dot);
   std::string sig = cookie_value.substr(dot+1);
   std::string expected = hmac_sha256_b64(secret, payload);
-  if (expected != sig) return std::nullopt;
+  if (expected.size() != sig.size()) return std::nullopt;
+  unsigned char diff=0;
+  for(size_t i=0;i<expected.size();i++) diff |= expected[i] ^ sig[i];
+  if(diff!=0) return std::nullopt;
   return b64_decode(payload);
 }
 

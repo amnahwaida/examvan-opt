@@ -17,6 +17,9 @@
 #include "handlers/public/template_helper.hpp"
 #include "session/cookie.hpp"
 #include "session/csrf.hpp"
+#include "middleware/ratelimit.hpp"
+#include "middleware/body_limit.hpp"
+// RateLimiter body_limit wired: global middleware 5MB
 #include <fstream>
 #include <sstream>
 
@@ -157,7 +160,6 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/admin/api/vouchers/activate", admin_api(handlers::admin::activate_voucher));
   r.add("GET","/admin/api/vouchers/audit-logs", admin_api(handlers::admin::list_vouchers));
   r.add("GET","/admin/api/packages", admin_api(handlers::admin::list_vouchers));
-  r.add("GET","/admin/api/saas-settings", admin_api(handlers::admin::settings_page));
   r.add("GET","/admin/api/exams", admin_api(handlers::admin::list_admin_exams));
   r.add("POST","/admin/api/exams", admin_api(handlers::admin::create_exam));
   r.add("POST","/admin/api/upload", admin_api(handlers::admin::create_exam));

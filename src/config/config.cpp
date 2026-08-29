@@ -42,10 +42,16 @@ Config Config::load() {
 
 void Config::validate() const {
   if (secret_key.empty()) throw std::runtime_error("EXAMVAN_SECRET required");
+  if (secret_key.size() < 32) throw std::runtime_error("EXAMVAN_SECRET must be at least 32 characters");
   if (admin_user.empty()) throw std::runtime_error("EXAMVAN_ADMIN_USER required");
   if (admin_pass.empty()) throw std::runtime_error("EXAMVAN_ADMIN_PASS required");
   if (r2_access_key.empty() || r2_secret_key.empty() || r2_endpoint.empty())
     throw std::runtime_error("R2 credentials required (R2_ACCESS_KEY_ID etc)");
+  if (port < 1 || port > 65535) throw std::runtime_error("PORT out of range");
+  if (database_max_conns < 1 || database_max_conns > 150) throw std::runtime_error("DATABASE_MAX_CONNS out of range");
+  if(!database_url.empty()){
+    if(database_url.rfind("postgresql://",0)!=0 && database_url.rfind("postgres://",0)!=0) throw std::runtime_error("DATABASE_URL must be postgresql:// or postgres://");
+  }
 }
 
 }  // namespace examvan

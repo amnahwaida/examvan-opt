@@ -17,7 +17,7 @@
 #include <openssl/evp.h>
 #ifdef HAS_UWEBSOCKETS
 #include "App.h"
-struct WsData { std::string room; bool privileged; std::string id; };
+struct WsData { std::string room; bool privileged; std::string id; std::shared_ptr<examvan::Client> client; };
 #endif
 
 namespace examvan::server {
@@ -52,7 +52,7 @@ static std::string http_response(const examvan::Response& r) {
   ss << "HTTP/1.1 " << r.status << " OK\r\n";
   for (auto& [k,v] : r.headers) ss << k << ": " << v << "\r\n";
   if (r.headers.find("Content-Length")==r.headers.end()) ss << "Content-Length: " << r.body.size() << "\r\n";
-  ss << "Connection: close\r\n\r\n" << r.body;
+  ss << "Connection: Keep-Alive\r\nKeep-Alive: timeout=5, max=100\r\n\r\n" << r.body;
   return ss.str();
 }
 
@@ -122,7 +122,7 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
     uint64_t len = buf[1] & 0x7F;
     size_t off = 2;
     if (len == 126) { if (n < 4) break; len = (uint8_t(buf[2]) << 8) | uint8_t(buf[3]); off = 4; }
-    else if (len == 127) { break; }
+    else if (len == 127) { if (n < 10) break; len = 0; for(int i=0;i<8;i++) len = (len<<8) | uint8_t(buf[2+i]); off = 10; }
     unsigned char mask[4] = {0};
     if (masked) { if ((size_t)n < off + 4) break; memcpy(mask, buf + off, 4); off += 4; }
     if ((size_t)n < off + len) break;
@@ -171,8 +171,9 @@ static bool try_serve_static(int cfd, const std::string& path){
   std::ostringstream ss; ss<<f.rdbuf();
   std::string body=ss.str();
   std::string ct=content_type_for(fp);
+  std::string etag="\""+std::to_string(std::hash<std::string>{}(body) & 0xffffffff)+"\"";
   std::ostringstream out;
-  out<<"HTTP/1.1 200 OK\r\nContent-Type: "<<ct<<"\r\nContent-Length: "<<body.size()<<"\r\nCache-Control: public, max-age=31536000, immutable\r\nConnection: close\r\n\r\n"<<body;
+  out<<"HTTP/1.1 200 OK\r\nContent-Type: "<<ct<<"\r\nContent-Length: "<<body.size()<<"\r\nETag: "<<etag<<"\r\nCache-Control: public, max-age=31536000, immutable\r\nConnection: Keep-Alive\r\nKeep-Alive: timeout=5, max=100\r\n\r\n"<<body;
   std::string s=out.str();
   send(cfd, s.c_str(), s.size(), 0);
   close(cfd);
@@ -271,8 +272,11 @@ bool Server::listen(const ServerOpts& opts) {
           if(fp.size()>=4 && fp.substr(fp.size()-4)==".css") ct="text/css";
           else if(fp.size()>=3 && fp.substr(fp.size()-3)==".js") ct="application/javascript";
           else if(fp.size()>=4 && fp.substr(fp.size()-4)==".png") ct="image/png";
+          std::string etag="\""+std::to_string(std::hash<std::string>{}(body) & 0xffffffff)+"\"";
           res->writeHeader("Content-Type",ct);
+          res->writeHeader("ETag",etag);
           res->writeHeader("Cache-Control","public, max-age=31536000, immutable");
+          res->writeHeader("Connection","Keep-Alive");
           res->end(body);
           return;
         }
@@ -317,20 +321,21 @@ bool Server::listen(const ServerOpts& opts) {
         std::string host(req->getHeader("host"));
         if(!examvan::check_origin(origin, host)){ res->close(); return; }
         std::string room(req->getParameter(0));
-        res->template upgrade<WsData>({room, priv, ""}, req->getHeader("sec-websocket-key"), req->getHeader("sec-websocket-protocol"), req->getHeader("sec-websocket-extensions"), context);
+        res->template upgrade<WsData>({room, priv, "", nullptr}, req->getHeader("sec-websocket-key"), req->getHeader("sec-websocket-protocol"), req->getHeader("sec-websocket-extensions"), context);
       },
       .open = [hub_ptr](auto *ws){
         auto* d = ws->getUserData();
-        auto c = std::make_shared<examvan::Client>();
-        c->room = d->room; c->privileged = d->privileged;
-        hub_ptr->add_client(c);
+        // shared_ptr<Client> persisted in WsData
+        d->client = std::make_shared<examvan::Client>();
+        d->client->room = d->room; d->client->privileged = d->privileged;
+        hub_ptr->add_client(d->client);
         d->id = std::to_string((uintptr_t)ws);
       },
       .message = [hub_ptr](auto *ws, std::string_view msg, uWS::OpCode op){
         if(op!=uWS::OpCode::TEXT) return;
         auto* d = ws->getUserData();
-        auto c = std::make_shared<examvan::Client>();
-        c->room = d->room; c->privileged = d->privileged;
+        auto c = d->client;
+        if(!c) return;
         hub_ptr->handle_message(c, std::string(msg));
         while(!c->send_queue.empty()){
           std::string m;
@@ -340,9 +345,8 @@ bool Server::listen(const ServerOpts& opts) {
       },
       .close = [hub_ptr](auto *ws, int, std::string_view){
         auto* d = ws->getUserData();
-        auto c = std::make_shared<examvan::Client>();
-        c->room = d->room;
-        hub_ptr->remove_client(c);
+        auto c = d->client;
+        if(c) hub_ptr->remove_client(c);
       }
     });
     g_app->listen(port, [](auto *token){

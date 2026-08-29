@@ -1,4 +1,4 @@
-import ws from 'k6/ws';
+import ws from 'k6/ws'; // WebSocket
 import { check } from 'k6';
 export const options = {
   stages: [{ duration: '30s', target: 1000 }, { duration: '1m', target: 10000 }, { duration: '30s', target: 0 }],

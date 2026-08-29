@@ -4,7 +4,13 @@
 #include "http/router_full.hpp"
 #include "websocket/hub.hpp"
 #include "db/pool.hpp"
+#ifdef HAS_LIBPQ
+#include "db/pool_real.hpp"
+#endif
 #include "redis/client.hpp"
+#ifdef HAS_HIREDIS
+#include "redis/redis_real.hpp"
+#endif
 #include "jobs/jobs.hpp"
 #include "server/server.hpp"
 #include "queue/submission_queue.hpp"
@@ -20,10 +26,22 @@ int main(){
     return 1;
   }
   std::cout << "EXAMVAN C++ v" << cfg.version << " starting on :" << cfg.port << "\n";
+#ifdef HAS_LIBPQ
+  std::string conninfo = examvan::pg_conninfo_from_url(cfg.database_url);
+  examvan::db::RealPool db(conninfo.empty()? cfg.database_url:conninfo, cfg.database_max_conns);
+#else
   examvan::DbPool db(cfg.database_url, cfg.database_max_conns);
+#endif
   db.connect();
+#ifdef HAS_HIREDIS
+  auto redis_ctx = examvan::redis_real::connect_redis(cfg.redis_url);
+  examvan::RedisClient redis(cfg.redis_url);
+  bool redis_ok = redis_ctx && examvan::redis_real::redis_ping(redis_ctx.get());
+  if(redis_ok) redis.connect();
+#else
   examvan::RedisClient redis(cfg.redis_url);
   redis.connect();
+#endif
   std::cout << "DB: " << (db.ping()?"connected":"not connected") << " ("<<db.sanitized_url()<<") Redis: " << (redis.ping()?"connected":"not connected") << "\n";
   examvan::Hub hub(
     [&](const std::string& k, const std::string& v){ (void)k;(void)v; },

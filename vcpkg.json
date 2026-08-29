@@ -5,6 +5,8 @@
     "openssl",
     "libpq",
     "hiredis",
-    "gtest"
+    "gtest",
+    "libcurl",
+    "zlib"
   ]
 }

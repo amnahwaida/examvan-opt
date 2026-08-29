@@ -29,10 +29,50 @@ TEST(F5Login, Success200SetsCookie) {
   examvan::Request req; req.body="username=guru&password=pass123&_csrf=test-csrf-token";
   req.headers["Cookie"]="csrf_token=test-csrf-token";
   req.headers["X-CSRF-Token"]="test-csrf-token";
+  /* klien API (fetch/AJAX) minta JSON secara eksplisit */
+  req.headers["Accept"]="application/json";
   auto res=login_handler(req,cfg);
   EXPECT_EQ(res.status,200);
   EXPECT_NE(res.body.find("success"), std::string::npos);
   EXPECT_NE(res.headers["Set-Cookie"].find("examvan_session"), std::string::npos);
+  clear_users_for_test();
+}
+
+TEST(F5Login, FormPostRedirectsToDashboard) {
+  clear_users_for_test();
+  set_user_for_test("guru","pass123","guru");
+  examvan::Config cfg; cfg.secret_key="test-secret-1234567890abcdef12345678";
+  /* form HTML biasa: tanpa header Accept/X-Requested-With */
+  examvan::Request req; req.body="username=guru&password=pass123&_csrf=test-csrf-token";
+  req.headers["Cookie"]="csrf_token=test-csrf-token";
+  auto res=login_handler(req,cfg);
+  EXPECT_EQ(res.status,303);
+  EXPECT_EQ(res.headers["Location"],"/admin/dashboard");
+  EXPECT_NE(res.headers["Set-Cookie"].find("examvan_session"), std::string::npos);
+  clear_users_for_test();
+}
+
+TEST(F5Login, FormPostHonorsNextParam) {
+  clear_users_for_test();
+  set_user_for_test("guru","pass123","guru");
+  examvan::Config cfg; cfg.secret_key="test-secret-1234567890abcdef12345678";
+  examvan::Request req; req.body="username=guru&password=pass123&_csrf=test-csrf-token&next=%2Fadmin%2Fsettings";
+  req.headers["Cookie"]="csrf_token=test-csrf-token";
+  auto res=login_handler(req,cfg);
+  EXPECT_EQ(res.status,303);
+  EXPECT_EQ(res.headers["Location"],"/admin/settings");
+  clear_users_for_test();
+}
+
+TEST(F5Login, NextParamRejectsOpenRedirect) {
+  clear_users_for_test();
+  set_user_for_test("guru","pass123","guru");
+  examvan::Config cfg; cfg.secret_key="test-secret-1234567890abcdef12345678";
+  examvan::Request req; req.body="username=guru&password=pass123&_csrf=test-csrf-token&next=https%3A%2F%2Fevil.example.com";
+  req.headers["Cookie"]="csrf_token=test-csrf-token";
+  auto res=login_handler(req,cfg);
+  EXPECT_EQ(res.status,303);
+  EXPECT_EQ(res.headers["Location"],"/admin/dashboard");
   clear_users_for_test();
 }
 
@@ -54,6 +94,8 @@ TEST(F5Login, TurnstileBypass) {
   examvan::Request req; req.body="username=guru&password=pass&_csrf=test-csrf-token&cf-turnstile-response=test-bypass-token";
   req.headers["Cookie"]="csrf_token=test-csrf-token";
   req.headers["X-CSRF-Token"]="test-csrf-token";
+  /* sukses via form HTML = 303 redirect (bukan lagi JSON 200) */
   auto res=login_handler(req,cfg);
-  EXPECT_EQ(res.status,200);
+  EXPECT_EQ(res.status,303);
+  EXPECT_NE(res.headers.find("Location"), res.headers.end());
 }
