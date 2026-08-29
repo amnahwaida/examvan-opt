@@ -30,8 +30,16 @@ void register_full_routes(Router& r, const Config& cfg){
   /* Guard sesi untuk SEMUA route /admin/api: tanpa cookie examvan_session yang valid,
    * handler tidak dieksekusi → 401 JSON (format dipahami apiFetch admin-core.js:
    * event auth:expired + redirect /admin/login?next=). */
+  static middleware::RateLimiter g_admin_rl(100, std::chrono::seconds(60));
   auto admin_api=[cfg](Handler h)->Handler{
     return [cfg,h](const Request& req)->Response{
+      if(req.body.size()>5*1024*1024){ Response rr; rr.status=413; rr.body="payload too large"; return rr; }
+      std::string ip="global";
+      auto it_ip=req.headers.find("X-Real-IP");
+      if(it_ip!=req.headers.end()) ip=it_ip->second;
+      if(!g_admin_rl.allow(ip)){ Response rr; rr.status=429; rr.json(429,"{\"error\":\"rate limit exceeded\"}"); return rr; }
+      auto _bl = middleware::body_limit(req, 5*1024*1024, [&](const Request& r){ return h(r); });
+      if(_bl.status==413) return _bl;
       std::string key=cfg.secret_key;
       std::string prev=cfg.secret_prev;
       auto it=req.headers.find("Cookie");
@@ -41,14 +49,9 @@ void register_full_routes(Router& r, const Config& cfg){
         else ok=verify_session_cookie_dual(key,prev,it->second).has_value();
         if(!ok) ok=middleware::is_authenticated(req,key);
       }
-      // RateLimiter body_limit 5MB wired via admin_api guard
-      middleware::RateLimiter _rl(100, std::chrono::seconds(60)); (void)_rl;
-      auto _bl = middleware::body_limit(req, 5*1024*1024, [&](const Request& r){ return h(r); });
-      if(_bl.status==413) return _bl;
       if(!ok){
         Response rr; rr.status=401; rr.json(401,"{\"success\":false,\"message\":\"unauthorized\"}"); return rr;
       }
-      if(req.body.size()>5*1024*1024){ Response rr; rr.status=413; rr.body="payload too large"; return rr; }
       return h(req);
     };
   };
@@ -67,7 +70,8 @@ void register_full_routes(Router& r, const Config& cfg){
     size_t p=html.find("CSRF_PLACEHOLDER");
     while(p!=std::string::npos){ html.replace(p,16,csrf); p=html.find("CSRF_PLACEHOLDER",p+csrf.size()); }
     Response res; res.status=200; res.headers["Content-Type"]="text/html";
-    res.headers["Set-Cookie"]="csrf_token="+csrf+"; Path=/";
+    std::string ck="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax"; if(!Config::load().is_development()) ck+="; Secure";
+    res.headers["Set-Cookie"]=ck;
     res.body=html.empty()?"<html>Register</html>":html; return res;
   });
   r.add("POST","/register", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
@@ -84,7 +88,8 @@ void register_full_routes(Router& r, const Config& cfg){
     size_t p=html.find("CSRF_PLACEHOLDER");
     while(p!=std::string::npos){ html.replace(p,16,csrf); p=html.find("CSRF_PLACEHOLDER",p+csrf.size()); }
     Response res; res.status=200; res.headers["Content-Type"]="text/html";
-    res.headers["Set-Cookie"]="csrf_token="+csrf+"; Path=/";
+    std::string ck="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax"; if(!Config::load().is_development()) ck+="; Secure";
+    res.headers["Set-Cookie"]=ck;
     res.body=html.empty()?"<html>Forgot</html>":html; return res;
   });
   r.add("POST","/forgot-password", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
@@ -94,7 +99,8 @@ void register_full_routes(Router& r, const Config& cfg){
     size_t p=html.find("CSRF_PLACEHOLDER");
     while(p!=std::string::npos){ html.replace(p,16,csrf); p=html.find("CSRF_PLACEHOLDER",p+csrf.size()); }
     Response res; res.status=200; res.headers["Content-Type"]="text/html";
-    res.headers["Set-Cookie"]="csrf_token="+csrf+"; Path=/";
+    std::string ck="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax"; if(!Config::load().is_development()) ck+="; Secure";
+    res.headers["Set-Cookie"]=ck;
     res.body=html.empty()?"<html>Reset</html>":html; return res;
   });
   r.add("POST","/reset-password", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });

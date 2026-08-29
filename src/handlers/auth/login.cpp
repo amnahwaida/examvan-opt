@@ -16,7 +16,7 @@ static std::unordered_map<std::string, std::string> g_users;
 static std::mutex g_mu;
 static std::string gensalt(){ // bcrypt gensalt
   unsigned char buf[16];
-  RAND_bytes(buf,sizeof(buf));
+  if(RAND_bytes(buf,sizeof(buf))!=1){ for(int i=0;i<16;i++) buf[i]=rand() & 0xFF; }
   const char* b64="./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   std::string s;
   s.reserve(22);
@@ -72,10 +72,14 @@ Response login_page(const Request&){
       html.replace(p, 16, csrf);
       p=html.find("CSRF_PLACEHOLDER", p+csrf.size());
     }
-    Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]="csrf_token="+csrf+"; Path=/";
+    std::string ck="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax";
+    if(!Config::load().is_development()) ck+="; Secure";
+    Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=ck;
     r.body=html; return r;
   }
-  Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]="csrf_token="+csrf+"; Path=/";
+  std::string ck2="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax";
+  if(!Config::load().is_development()) ck2+="; Secure";
+  Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=ck2;
   r.body="<html><body><form method=\"POST\" action=\"/login\"><input name=\"username\"><input name=\"password\" type=\"password\"><input type=\"hidden\" name=\"_csrf\" value=\""+csrf+"\"><button>Login</button></form></body></html>";
   return r;
 }
@@ -136,7 +140,8 @@ Response login_handler(const Request& req, const Config& cfg){
   std::string target="/admin/dashboard";
   if(auto n=form.find("next"); n!=form.end() && !n->second.empty()){
     std::string nx = helpers::url_decode(n->second);
-    if(!nx.empty() && nx[0]=='/' && (nx.size()==1 || nx[1]!='/') && nx.find('\\')==std::string::npos && nx.find("%2f")==std::string::npos && nx.find("%2F")==std::string::npos && nx.find("//")==std::string::npos) target=nx;
+    nx = helpers::url_decode(nx);
+    if(!nx.empty() && nx[0]=='/' && (nx.size()==1 || nx[1]!='/') && nx.find('\\')==std::string::npos && nx.find("%2f")==std::string::npos && nx.find("%2F")==std::string::npos && nx.find("%5c")==std::string::npos && nx.find("%5C")==std::string::npos && nx.find("//")==std::string::npos && nx.find("..")==std::string::npos && nx.find(':')==std::string::npos) target=nx;
   }
   Response r; r.status=303; r.headers["Location"]=target; r.headers["Set-Cookie"]=cookie;
   return r;

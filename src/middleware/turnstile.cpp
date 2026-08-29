@@ -24,7 +24,12 @@ static bool curl_verify(const std::string& token, const std::string& secret, con
 bool verify_turnstile(const std::string& token, const std::string& secret, const std::string& ip){
   (void)ip;
   if(token.empty()) return false;
-  if(token=="test-bypass-token") return true;
+  bool is_prod=false;
+  if(auto* e=getenv("APP_ENV")) is_prod=std::string(e)=="production";
+  if(token=="test-bypass-token"){
+    if(is_prod) return false;
+    return true;
+  }
   const char* env = std::getenv("TURNSTILE_BYPASS");
   if(env && std::string(env)=="1") return true;
   if(secret.empty()) return false;

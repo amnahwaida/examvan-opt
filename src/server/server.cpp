@@ -217,13 +217,28 @@ static void handle_client(int cfd, examvan::Router* router, const examvan::Confi
   if(!cl_s.empty()){
     try{
       size_t cl=std::stoul(cl_s);
+      if(cl > 5*1024*1024){
+        std::string too="HTTP/1.1 413 Payload Too Large\r\nContent-Length: 18\r\nConnection: close\r\n\r\npayload too large";
+        send(cfd, too.c_str(), too.size(), 0);
+        close(cfd); return;
+      }
       while(body.size()<cl){
         n=recv(cfd, buf, sizeof(buf), 0);
         if(n<=0) break;
+        if(body.size()+n > 5*1024*1024){
+          std::string too="HTTP/1.1 413 Payload Too Large\r\nContent-Length: 18\r\nConnection: close\r\n\r\npayload too large";
+          send(cfd, too.c_str(), too.size(), 0);
+          close(cfd); return;
+        }
         body.append(buf, n);
       }
       if(body.size()>cl) body.resize(cl);
     }catch(...){}
+  }
+  if(body.size()>5*1024*1024){
+    std::string too="HTTP/1.1 413 Payload Too Large\r\nContent-Length: 18\r\nConnection: close\r\n\r\npayload too large";
+    send(cfd, too.c_str(), too.size(), 0);
+    close(cfd); return;
   }
   std::string cookie_hdr = extract_header(req, "Cookie");
   std::string xver = extract_header(req, "X-App-Version");

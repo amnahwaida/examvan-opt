@@ -147,15 +147,25 @@ void Hub::handle_exam_completed(std::shared_ptr<Client> c, const std::string& pa
   broadcast_to_room(c->room,"student_update",payload);
 }
 
+static std::string strip_port(const std::string& s){
+  auto c=s.find(':');
+  if(c!=std::string::npos) return s.substr(0,c);
+  return s;
+}
 bool check_origin(const std::string& origin, const std::string& host){
   if(origin.empty()) return true;
   std::string h = origin;
   auto p = h.find("://");
   if(p!=std::string::npos) h=h.substr(p+3);
   auto slash = h.find('/'); if(slash!=std::string::npos) h=h.substr(0,slash);
-  if(h==host) return true;
   auto colon=h.find(':'); std::string hostname=colon==std::string::npos?h:h.substr(0,colon);
   if(hostname=="localhost"||hostname=="127.0.0.1") return true;
+  std::string host_no_port=host;
+  auto slash2=host_no_port.find('/'); if(slash2!=std::string::npos) host_no_port=host_no_port.substr(0,slash2);
+  std::string host_h=strip_port(host_no_port);
+  std::string origin_h=strip_port(h);
+  if(origin_h==host_h) return true;
+  if(h==host) return true;
   return false;
 }
 

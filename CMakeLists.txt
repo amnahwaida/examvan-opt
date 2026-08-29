@@ -208,6 +208,7 @@ add_executable(examvan-tests
   tests/test_p12_tdd.cpp
   tests/test_p13_tdd.cpp
   tests/test_tdd_fixes.cpp
+  tests/test_tdd_round2.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)

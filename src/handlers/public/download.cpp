@@ -19,6 +19,11 @@ Response download_apk(const Request& req){
   (void)req;
   auto cfg=cfg_from_env();
   if(!cfg.enabled()){
+    bool is_prod=false; if(auto* e=getenv("APP_ENV")) is_prod=std::string(e)=="production";
+    if(is_prod){
+      Response r; r.status=503; r.json(503,"{\"code\":\"R2_NOT_CONFIGURED\",\"error\":\"Cloudflare R2 tidak dikonfigurasi.\"}");
+      return r;
+    }
     cfg = r2::R2Config{"test-access","test-secret","https://test.r2.cloudflarestorage.com","test-bucket"};
   }
   std::string key=r2::object_key_for_app("2.7.2","student");
@@ -31,6 +36,11 @@ Response download_system_app(const Request& req){
   if(it==req.params.end()){ Response r; r.status=404; r.json(404,"{\"error\":\"not found\"}"); return r; }
   auto cfg=cfg_from_env();
   if(!cfg.enabled()){
+    bool is_prod=false; if(auto* e=getenv("APP_ENV")) is_prod=std::string(e)=="production";
+    if(is_prod){
+      Response r; r.status=503; r.json(503,"{\"code\":\"R2_NOT_CONFIGURED\"}");
+      return r;
+    }
     cfg = r2::R2Config{"test-access","test-secret","https://test.r2.cloudflarestorage.com","test-bucket"};
   }
   std::string key="apps/android/"+it->second+"/app.apk";
