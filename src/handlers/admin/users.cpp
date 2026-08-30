@@ -2,7 +2,7 @@
 #include "models/user.hpp"
 #include "helpers/utils.hpp"
 #include "session/cookie.hpp"
-#include <cstdlib>
+#include "config/config.hpp"
 #include <string>
 namespace examvan::handlers::admin {
 
@@ -26,8 +26,9 @@ Response create_user(const Request& req){
     std::string cookie;
     auto itc=req.headers.find("Cookie");
     if(itc!=req.headers.end()) cookie=itc->second;
-    std::string cur=getenv("EXAMVAN_SECRET")?getenv("EXAMVAN_SECRET"):"";
-    std::string prev=getenv("EXAMVAN_SECRET_PREV")?getenv("EXAMVAN_SECRET_PREV"):"";
+    auto cfg = Config::load();
+    std::string cur=cfg.secret_key;
+    std::string prev=cfg.secret_prev;
     auto sess=prev.empty()?verify_session_cookie(cur, cookie):verify_session_cookie_dual(cur, prev, cookie);
     bool is_super=false;
     if(sess){

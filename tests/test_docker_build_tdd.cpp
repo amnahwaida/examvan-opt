@@ -11,10 +11,11 @@ TEST(DockerBuild, FilterExcludesInfraGuards){
   ASSERT_FALSE(c.empty()) << "Dockerfile not found";
   auto pos=c.find("gtest_filter");
   ASSERT_NE(pos, std::string::npos);
-  std::string seg=c.substr(pos, 600);
+  std::string seg=c.substr(pos, 700);
   EXPECT_NE(seg.find("Review_"), std::string::npos) << "builder gtest_filter should exclude Review_* (file-existence guards) : " << seg;
   EXPECT_NE(seg.find("R3_"), std::string::npos) << "builder should exclude R3_* : " << seg;
   EXPECT_NE(seg.find("R4_"), std::string::npos) << "builder should exclude R4_* (needs .github) : " << seg;
+  EXPECT_NE(seg.find("R5_"), std::string::npos) << "builder should exclude R5_* : " << seg;
 }
 TEST(DockerBuild, BuilderCopiesRequiredFiles){
   auto c=rf("Dockerfile");

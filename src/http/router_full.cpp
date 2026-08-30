@@ -19,12 +19,14 @@
 #include "session/csrf.hpp"
 #include "middleware/ratelimit.hpp"
 #include "middleware/body_limit.hpp"
+#include "middleware/cors.hpp"
 #include <fstream>
 #include <sstream>
 
 namespace examvan {
 
 void register_full_routes(Router& r, const Config& cfg){
+  (void)middleware::is_origin_allowed("", cfg.cors_origins);
   register_routes(r, cfg);
 
   /* Guard sesi untuk SEMUA route /admin/api: tanpa cookie examvan_session yang valid,

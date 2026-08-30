@@ -1,5 +1,8 @@
 #include "queue/submission_queue.hpp"
 #include "helpers/utils.hpp"
+#include "config/config.hpp"
+#include "db/pool.hpp"
+#include "db/pool_real.hpp"
 #include <chrono>
 #include <random>
 #include <sstream>
@@ -175,7 +178,14 @@ void Worker::run_batch(){
     lk.unlock();
     if(!batch.empty()){
 #ifdef HAS_LIBPQ
-      (void)batch;
+      auto cfg = examvan::Config::load();
+      examvan::DbPool pool(cfg.database_url, 10);
+      examvan::db::RealPool real(pool.sanitized_url(), 10);
+      if(auto c=real.acquire()){
+        for(auto &j: batch){
+          real.exec_params(c.get(),"INSERT INTO submissions (job_id, exam_id, student_name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",{j.job_id, std::to_string(j.exam_id), j.student_name});
+        }
+      }
 #else
       (void)batch;
 #endif

@@ -9,10 +9,10 @@ COPY static static
 COPY scripts scripts
 COPY nginx nginx
 COPY .gitignore .stylelintrc.json MIGRASI_STATUS.md docs-cutover.md ./
-RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITH_UWEBSOCKETS=ON && cmake --build build -j$(nproc) && ./build/examvan-tests --gtest_filter=-ServerLive.*:F7Jobs.JobRunnerStartStop:P3*:P4*:P5*:P6*:P7*:P8*:P9*:P10*:P11*:P12*:P13*:Review_*:R3_*:R4_*:DockerBuild.*
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITH_UWEBSOCKETS=ON && cmake --build build -j$(nproc) && ./build/examvan-tests --gtest_filter=-ServerLive.*:F7Jobs.JobRunnerStartStop:P3*:P4*:P5*:P6*:P7*:P8*:P9*:P10*:P11*:P12*:P13*:Review_*:R3_*:R4_*:R5_*:DockerBuild.*
 
 FROM builder AS sanitizer
-RUN cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON && cmake --build build-san -j$(nproc) && ./build-san/examvan-tests --gtest_filter=-ServerLive.*:F7Jobs.JobRunnerStartStop:Review_*:R3_*:R4_*:DockerBuild.*
+RUN cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON && cmake --build build-san -j$(nproc) && ./build-san/examvan-tests --gtest_filter=-ServerLive.*:F7Jobs.JobRunnerStartStop:Review_*:R3_*:R4_*:R5_*:DockerBuild.*
 CMD ["./build-san/examvan-tests"]
 
 FROM debian:bookworm-slim AS runtime
