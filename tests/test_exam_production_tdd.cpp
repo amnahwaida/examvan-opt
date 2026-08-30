@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "handlers/admin/exams.hpp"
+#include "handlers/admin/dashboard.hpp"
 #include "helpers/utils.hpp"
 #include "handlers/r2/r2.hpp"
 #include "models/exam.hpp"
@@ -944,4 +945,71 @@ TEST(ExamStoreMemory, Remove_CleansClaimedToken){
   EXPECT_TRUE(store.remove(e1.id));
   // setelah remove, token bisa di-claim lagi
   EXPECT_TRUE(store.claim_token("BBBB2222")) << "token exam yang dihapus harus bisa dipakai lagi";
+}
+
+// ======================================================================
+// GROUP I: Fix pass 8 — "undefined" toast & dashboard live render (TDD)
+// ======================================================================
+
+// Bug A: 201 response harus ada field "message" (admin.js:206 baca res.message)
+TEST(ExamProduction, CreateExam_ResponseHasMessageField){
+  with_clean_store();
+  set_r2_env(true);
+  Request req; req.body=form_body("MsgTest","/tmp/a.pdf","100");
+  auto res=create_exam(req);
+  ASSERT_EQ(res.status,201);
+  EXPECT_NE(res.body.find("\"message\""), std::string::npos)
+    << "201 response harus punya field message: " << res.body;
+  EXPECT_NE(res.body.find("Ujian berhasil diunggah"), std::string::npos)
+    << "message harus berisi 'Ujian berhasil diunggah': " << res.body;
+}
+
+// Bug B: dashboard_page harus render exam dari live store (bukan static empty-state)
+TEST(ExamProduction, DashboardPage_RendersExamFromLiveStore){
+  with_clean_store();
+  set_r2_env(true);
+  // buat 2 ujian
+  Request r1; r1.body=form_body("DashboardA","/tmp/a.pdf","100");
+  Request r2; r2.body=form_body("DashboardB","/tmp/b.pdf","200");
+  ASSERT_EQ(create_exam(r1).status,201);
+  ASSERT_EQ(create_exam(r2).status,201);
+  // render dashboard
+  Request req;
+  auto res=dashboard_page(req);
+  EXPECT_EQ(res.status,200);
+  // kedua ujian harus muncul sebagai exam-row
+  EXPECT_NE(res.body.find("exam-row-"), std::string::npos)
+    << "Dashboard harus render baris exam dari live store";
+  // Dua baris harus dirender (masing-masing memakai id monotonik store).
+  auto first_row=res.body.find("<tr id=\"exam-row-");
+  ASSERT_NE(first_row, std::string::npos);
+  EXPECT_NE(res.body.find("<tr id=\"exam-row-", first_row+1), std::string::npos)
+    << "Dashboard harus render kedua exam dari live store";
+  EXPECT_NE(res.body.find("DashboardA"), std::string::npos)
+    << "Dashboard harus render nama ujian A";
+  EXPECT_NE(res.body.find("DashboardB"), std::string::npos)
+    << "Dashboard harus render nama ujian B";
+}
+
+// Dashboard tanpa ujian harus tampilkan empty-state
+TEST(ExamProduction, DashboardPage_EmptyStateWhenNoExams){
+  with_clean_store();
+  Request req;
+  auto res=dashboard_page(req);
+  EXPECT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("Belum ada ujian"), std::string::npos)
+    << "Dashboard kosong harus tampilkan 'Belum ada ujian'";
+}
+
+// Dashboard dengan ujian TIDAK boleh tampilkan empty-state
+TEST(ExamProduction, DashboardPage_NoEmptyStateWhenExamsExist){
+  with_clean_store();
+  set_r2_env(true);
+  Request r1; r1.body=form_body("NoEmpty","/tmp/a.pdf","100");
+  ASSERT_EQ(create_exam(r1).status,201);
+  Request req;
+  auto res=dashboard_page(req);
+  EXPECT_EQ(res.status,200);
+  EXPECT_EQ(res.body.find("Belum ada ujian"), std::string::npos)
+    << "Dashboard dengan ujian tidak boleh tampilkan empty-state";
 }
