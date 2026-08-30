@@ -223,6 +223,7 @@ add_executable(examvan-tests
   tests/test_audit_fix_tdd.cpp
   tests/test_csrf_fix_tdd.cpp
   tests/test_exam_creation_prod_tdd.cpp
+  tests/test_exam_full_prod_tdd.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)

@@ -1,6 +1,7 @@
 #include "handlers/admin/exams.hpp"
 #include "helpers/utils.hpp"
 #include "config/config.hpp"
+#include "handlers/r2/r2.hpp"
 #include <atomic>
 #include <cctype>
 #include <unordered_set>
@@ -172,6 +173,24 @@ Response create_exam(const Request& req){
   if(name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
   if(name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return r; }
   if(fpath.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"file_path required\"}"); return r; }
+  if(fpath.find("..")!=std::string::npos || fpath.find("\\")!=std::string::npos){
+    Response r; r.status=400; r.json(400,"{\"error\":\"file_path must not contain traversal\"}"); return r;
+  }
+  // R2 mandatory fail-closed: hanya untuk upload file biner (multipart)
+  {
+    auto cfg_r2 = Config::load();
+    r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
+    if(!file_data.empty() && !rc.enabled()){
+      Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
+    }
+    if(!file_data.empty() && rc.enabled()){
+      r2::R2Client client{rc};
+      std::string key = r2::object_key_for_exam(0, fpath);
+      if(!client.upload(key, file_data)){
+        Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return r;
+      }
+    }
+  }
   // size
   long size=0;
   try{ if(!sz.empty()) size=std::stol(sz); else if(!file_data.empty()) size=file_data.size(); }catch(...){}
