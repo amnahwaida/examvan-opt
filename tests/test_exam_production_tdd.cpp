@@ -765,8 +765,71 @@ TEST(ExamProduction, Filename_Sanitized_MaxLength128){
 }
 
 // ----------------------------------------------------------------------
-// Group D: Store Unit Tests
+// Group G: Review Pass 5 — size validation + protobuf response completeness
 // ----------------------------------------------------------------------
+
+// Security: negative size_bytes harus ditolak atau di-clamp ke 0 (bisa disimpan negatif)
+TEST(ExamProduction, SizeBytes_Negative_IsRejected){
+  with_clean_store();
+  Request req; req.body=form_body("NegSize","/tmp/a.pdf","-100");
+  auto res=create_exam(req);
+  // Harus ditolak (400) atau minimal size_bytes tidak negatif di response
+  if(res.status==201){
+    // Jika diterima, pastikan size_bytes tidak negatif di JSON response
+    EXPECT_EQ(res.body.find("\"size_bytes\":-100"), std::string::npos)
+      << "size_bytes tidak boleh negatif di response: " << res.body;
+  } else {
+    EXPECT_EQ(res.status,400) << "size_bytes negatif harus 400: " << res.body;
+  }
+}
+
+#ifdef HAS_PROTOBUF
+// Protobuf response untuk toggle harus mengandung id yang valid
+TEST(ExamProduction, UpdateExam_ProtobufToggleResponse){
+  with_clean_store();
+  set_r2_env(true);
+  Request cr; cr.body=form_body("ToggleProto","/tmp/a.pdf","100");
+  auto c=create_exam(cr);
+  ASSERT_EQ(c.status,201) << c.body;
+  // ekstrak id
+  auto pid=c.body.find("\"id\":");
+  std::string id_str=c.body.substr(pid+5);
+  id_str=id_str.substr(0,id_str.find(','));
+  // toggle via protobuf Accept
+  Request ru; ru.params["id"]=id_str; ru.path="/"+id_str+"/toggle";
+  ru.headers["Accept"]="application/x-protobuf";
+  auto res=update_exam(ru);
+  EXPECT_EQ(res.status,200) << res.body;
+  EXPECT_EQ(res.headers.at("Content-Type"),"application/x-protobuf");
+  examvan::v1::UpdateExamResponse pb;
+  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body bukan UpdateExamResponse protobuf";
+  EXPECT_TRUE(pb.success());
+  EXPECT_TRUE(pb.ok());
+  EXPECT_EQ(pb.id(),std::stoi(id_str));
+}
+
+// Protobuf response untuk delete harus sukses
+TEST(ExamProduction, DeleteExam_ProtobufResponse){
+  with_clean_store();
+  set_r2_env(true);
+  Request cr; cr.body=form_body("DeleteProto","/tmp/a.pdf","100");
+  auto c=create_exam(cr);
+  ASSERT_EQ(c.status,201) << c.body;
+  auto pid=c.body.find("\"id\":");
+  std::string id_str=c.body.substr(pid+5);
+  id_str=id_str.substr(0,id_str.find(','));
+  // delete via protobuf Accept
+  Request dr; dr.params["id"]=id_str;
+  dr.headers["Accept"]="application/x-protobuf";
+  auto res=delete_exam(dr);
+  EXPECT_EQ(res.status,200) << res.body;
+  EXPECT_EQ(res.headers.at("Content-Type"),"application/x-protobuf");
+  examvan::v1::DeleteExamResponse pb;
+  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body bukan DeleteExamResponse protobuf";
+  EXPECT_TRUE(pb.success());
+  EXPECT_TRUE(pb.ok());
+}
+#endif
 
 // add() menolak token duplikat
 TEST(ExamStoreMemory, Add_RejectsDuplicateToken){

@@ -312,6 +312,8 @@ Response create_exam(const Request& req){
   // size_bytes=0/1 tapi file_data besar → pastikan tidak bypass 5MB check).
   long size=0;
   try{ if(!sz.empty()) size=std::stol(sz); else if(!file_data.empty()) size=file_data.size(); }catch(...){}
+  // Bug 12: size_bytes negatif (std::stol menerima "-100") — clamp ke 0
+  if(size<0) size=0;
   if(!file_data.empty()) size=std::max(size, (long)file_data.size());
   const long MAX_PDF = 5*1024*1024;
   if(size>MAX_PDF){ Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return r; }
