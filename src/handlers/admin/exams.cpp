@@ -159,11 +159,10 @@ static std::string sanitize_filename(const std::string& name){
       safe.push_back(c);
   }
   if(safe.empty()) safe="exam.pdf";
-  if(safe.size()>128) safe=safe.substr(0,128);
-  // Force .pdf extension
+  // Force .pdf extension DULU, baru truncate — supaya hasil akhir ≤128 (Bug 10)
   auto dot=safe.rfind('.');
-  if(dot==std::string::npos) safe+=".pdf";
-  else safe=safe.substr(0,dot)+".pdf";
+  safe = (dot==std::string::npos) ? safe + ".pdf" : safe.substr(0,dot) + ".pdf";
+  if(safe.size()>128) safe=safe.substr(0,128);
   return safe;
 }
 Response list_admin_exams(const Request& req){
@@ -427,11 +426,13 @@ Response update_exam(const Request& req){
       if(exams().claim_token(new_token)){ ok=true; break; }
     }
     if(ok){
-      bool found = exams().update(id, [&](models::Exam& e){ e.token=new_token; });
+      std::string old_token;
+      bool found = exams().update(id, [&](models::Exam& e){ old_token=e.token; e.token=new_token; });
       if(!found){
         exams().unclaim_token(new_token); // cleanup — exam tidak ditemukan
         Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
       }
+      if(!old_token.empty()) exams().unclaim_token(old_token); // Bug 1: lepas token lama dari seen_tokens_
       utils::log_info("exam_token_regenerated","id="+id_str);
       Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"token\":\""+json_escape(new_token)+"\"}"); return r;
     } else {
@@ -449,11 +450,14 @@ Response update_exam(const Request& req){
       auto form=helpers::parse_form(req.body);
       new_name = form.count("name")? form["name"] : "";
     }
-    if(!new_name.empty()){
-      new_name=helpers::sanitize_student_input(new_name);
-      if(new_name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
-      if(new_name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return r; }
+    // Bug 3: edit wajib ada param name — error spesifik, bukan generik
+    if(new_name.empty()){
+      Response r; r.status=400; r.json(400,"{\"error\":\"edit requires name field\"}"); return r;
     }
+    new_name=helpers::sanitize_student_input(new_name);
+    if(new_name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
+    if(has_null_bytes(new_name)){ Response r; r.status=400; r.json(400,"{\"error\":\"name contains invalid characters\"}"); return r; }
+    if(new_name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return r; }
   }
   std::string result_status;
   std::string result_name;

@@ -140,11 +140,12 @@ TEST(ProtobufHandlers, ListAdminExams_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, CreateExam_ProtobufInboundDecode) {
+  examvan::handlers::admin::clear_exams_for_testing(); // isolasi — token unik per suite
   examvan::v1::CreateExamRequest req_pb;
   req_pb.set_name("Ujian TDD Proto");
   req_pb.set_file_path("/tmp/tdd.pdf");
   req_pb.set_size_bytes(1024);
-  req_pb.set_custom_token("ABCD1234");
+  req_pb.set_custom_token("PBTEST01");
   std::string encoded;
   ASSERT_TRUE(req_pb.SerializeToString(&encoded));
   auto req = pb_content("POST", encoded);
@@ -156,7 +157,7 @@ TEST(ProtobufHandlers, CreateExam_ProtobufInboundDecode) {
   ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid CreateExamResponse protobuf";
   EXPECT_TRUE(pb.success());
   EXPECT_EQ(pb.name(), "Ujian TDD Proto");
-  EXPECT_EQ(pb.token(), "ABCD1234");
+  EXPECT_EQ(pb.token(), "PBTEST01");
 }
 
 TEST(ProtobufHandlers, CreateExam_MultipartStillWorks) {

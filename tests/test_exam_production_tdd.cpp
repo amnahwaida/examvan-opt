@@ -634,6 +634,137 @@ TEST(ExamProduction, Name_WithNullBytes_Rejected){
 }
 
 // ----------------------------------------------------------------------
+// Group E: Review Pass 3 — regenerate old-token cleanup, edit validation
+// ----------------------------------------------------------------------
+
+// Bug 1: regenerate token (auto-gen) → old token harus di-unclaim supaya bisa dipakai lagi.
+// Catatan: bug ini terjadi pada token AUTO-GEN (bukan custom) karena auto-gen
+// menggunakan claim_token() yang menambah ke seen_tokens_. Ketika regenerate
+// mengganti token tanpa unclaim lama, token lama permanen di seen_tokens_.
+TEST(ExamProduction, RegenerateToken_OldAutoTokenRemovedFromSeen){
+  with_clean_store();
+  // buat exam pertama dengan auto-gen token → id=next_id()
+  Request r1; r1.body=form_body("AutoExam","/tmp/a.pdf","100");
+  auto cr=create_exam(r1);
+  ASSERT_EQ(cr.status,201) << cr.body;
+  // ekstrak token auto-gen dari response
+  auto pt=cr.body.find("\"token\":\"");
+  ASSERT_NE(pt, std::string::npos);
+  std::string old_token=cr.body.substr(pt+9, 8);
+  // ekstrak id
+  auto pid=cr.body.find("\"id\":");
+  std::string id_str=cr.body.substr(pid+5);
+  id_str=id_str.substr(0, id_str.find(','));
+  // set generator → selalu hasilkan NEWTOK01
+  set_token_generator_for_test([](int){ return std::string("NEWTOK01"); });
+  // regenerate via path suffix
+  Request ru; ru.params["id"]=id_str; ru.path="/"+id_str+"/regenerate-token";
+  auto res=update_exam(ru);
+  EXPECT_EQ(res.status,200) << res.body;
+  // OLD auto-gen token harus bisa di-claim lagi (di-unclaim setelah regenerate)
+  EXPECT_TRUE(store::active_store()->claim_token(old_token))
+    << "old auto-gen token harus bisa di-claim lagi setelah regenerate";
+  // NEWTOK01 harus sudah di-claim
+  EXPECT_FALSE(store::active_store()->claim_token("NEWTOK01"))
+    << "new token sudah aktif — tidak bisa di-claim ulang";
+}
+
+// Bug 2: edit name dengan null-byte → 400 (log injection vector)
+TEST(ExamProduction, UpdateExam_EditName_NullBytesRejected){
+  with_clean_store();
+  // buat exam dulu
+  Request r1; r1.body=form_body("Normal","/tmp/a.pdf","100");
+  auto cr=create_exam(r1);
+  ASSERT_EQ(cr.status,201) << cr.body;
+  auto pid=cr.body.find("\"id\":");
+  ASSERT_NE(pid, std::string::npos);
+  std::string id_str=cr.body.substr(pid+5);
+  id_str=id_str.substr(0, id_str.find(','));
+  // edit dengan null-byte di nama via path /edit
+  Request ru; ru.params["id"]=id_str; ru.path="/"+id_str+"/edit";
+  std::string badname="test"; badname+='\0'; badname+="evil";
+  ru.params["name"]=badname;
+  auto res=update_exam(ru);
+  EXPECT_EQ(res.status,400) << "edit dengan null-byte harus ditolak: " << res.body;
+}
+
+// Bug 3: edit tanpa param name → harus 400 dengan pesan spesifik tentang "name"
+TEST(ExamProduction, UpdateExam_EditEmptyName_BetterError){
+  with_clean_store();
+  Request r1; r1.body=form_body("SomeName","/tmp/a.pdf","100");
+  auto cr=create_exam(r1);
+  ASSERT_EQ(cr.status,201) << cr.body;
+  auto pid=cr.body.find("\"id\":");
+  ASSERT_NE(pid, std::string::npos);
+  std::string id_str=cr.body.substr(pid+5);
+  id_str=id_str.substr(0, id_str.find(','));
+  // edit tanpa params["name"] — handler harusnya 400 dan sebutkan "name"
+  Request ru; ru.params["id"]=id_str; ru.path="/"+id_str+"/edit";
+  // name kosong (tidak di-set) — handler harus reject dengan pesan spesifik
+  auto res=update_exam(ru);
+  EXPECT_EQ(res.status,400) << "edit tanpa name harus 400: " << res.status;
+  EXPECT_NE(res.body.find("name"), std::string::npos)
+    << "pesan error harus menyebutkan 'name': " << res.body;
+}
+
+// ----------------------------------------------------------------------
+// Group F: Review Pass 4 — boundary + sanitization + protobuf responses
+// ----------------------------------------------------------------------
+
+// Custom token 7 chars → 400 (too short, harus 8)
+TEST(ExamProduction, CustomToken_7Chars_Rejected){
+  with_clean_store();
+  Request req; req.body=form_body("Short","/tmp/a.pdf","100","ABCDEFG");
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,400) << "token 7 chars harus ditolak: " << res.status;
+}
+
+// Custom token 9 chars → 400 (too long, harus 8)
+TEST(ExamProduction, CustomToken_9Chars_Rejected){
+  with_clean_store();
+  Request req; req.body=form_body("Long","/tmp/a.pdf","100","ABCDEFGHI");
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,400) << "token 9 chars harus ditolak: " << res.status;
+}
+
+// Filename .exe harus dipaksa jadi .pdf oleh sanitize_filename
+TEST(ExamProduction, Filename_Sanitized_ForcePdfExtension){
+  with_clean_store();
+  set_r2_env(true);
+  std::string captured_key;
+  set_upload_mock_for_test([&](const std::string& key, const std::string&){ captured_key=key; });
+  std::string boundary="----BV9";
+  auto body=multipart_body(boundary, {{"name","SanitizeExt"}}, "pdf_file","malware.exe","%PDF-1.4\n%%EOF\n");
+  Request req; req.body=body;
+  req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,201) << res.body;
+  // R2 key harus mengandung .pdf, bukan .exe
+  EXPECT_NE(captured_key.rfind(".pdf"), std::string::npos)
+    << "ekstensi harus dipaksa .pdf, key: " << captured_key;
+}
+
+// Filename sangat panjang → truncate ke 128 chars + .pdf
+TEST(ExamProduction, Filename_Sanitized_MaxLength128){
+  with_clean_store();
+  set_r2_env(true);
+  std::string captured_key;
+  set_upload_mock_for_test([&](const std::string& key, const std::string&){ captured_key=key; });
+  std::string boundary="----BV10";
+  std::string longname(200, 'X');
+  longname+=".pdf";
+  auto body=multipart_body(boundary, {{"name","Truncate"}}, "pdf_file",longname,"%PDF-1.4\n%%EOF\n");
+  Request req; req.body=body;
+  req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,201) << res.body;
+  // R2 key = "exams/{id}/filename" — hitung bagian filename setelah last /
+  auto slash_pos = captured_key.rfind('/');
+  std::string fname = captured_key.substr(slash_pos + 1);
+  EXPECT_LE(fname.size(), 128u) << "filename harus di-truncate <=128: " << fname;
+}
+
+// ----------------------------------------------------------------------
 // Group D: Store Unit Tests
 // ----------------------------------------------------------------------
 
