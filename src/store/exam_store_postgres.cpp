@@ -9,7 +9,7 @@ namespace {
 constexpr const char* kColumns = "id,name,file_path,size_bytes,token,active_token,questions_json,status,security_level,strict_mode,public_results,show_answers,created_by,created_at,identity_fields,panel_color,start_time,end_time,delegated_to,token_mode,token_reset_interval,token_last_reset_at,exam_started_at,tombstoned_at,congrats_message,auto_approve";
 constexpr const char* kSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS exams (
- id INTEGER PRIMARY KEY,
+ id INTEGER PRIMARY KEY DEFAULT nextval('exams_id_seq'),
  name TEXT NOT NULL,
  file_path TEXT NOT NULL,
  size_bytes BIGINT NOT NULL DEFAULT 0,
@@ -96,11 +96,12 @@ bool ExamStorePostgres::execute_transaction(const std::vector<std::pair<std::str
   auto c=pool_.acquire();
   if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
   auto begin=pool_.exec_params(c.get(),"BEGIN",{});
-  if(!begin || PQresultStatus(begin.get())!=PGRES_COMMAND_OK) return false;
+  if(!begin || PQresultStatus(begin.get())!=PGRES_COMMAND_OK){ pool_.release(c.release()); return false; }
   for(const auto& statement: statements){
     auto result=pool_.exec_params(c.get(),statement.first,statement.second);
     if(!result || PQresultStatus(result.get())!=PGRES_COMMAND_OK){
       (void)pool_.exec_params(c.get(),"ROLLBACK",{});
+      pool_.release(c.release());
       return false;
     }
   }
@@ -131,7 +132,7 @@ bool ExamStorePostgres::ready() const { std::lock_guard<std::mutex> lock(mu_); r
 
 int ExamStorePostgres::next_id(){
   std::lock_guard<std::mutex> lock(mu_);
-  auto result=pool_.exec_params_pooled("SELECT COALESCE(MAX(id),0)+1 FROM exams",{});
+  auto result=pool_.exec_params_pooled("SELECT nextval(pg_get_serial_sequence('exams','id'))",{});
   if(!result || PQresultStatus(result.get())!=PGRES_TUPLES_OK || PQntuples(result.get())==0) return 1;
   try { return std::stoi(PQgetvalue(result.get(),0,0)); } catch(...) { return 1; }
 }
