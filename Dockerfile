@@ -8,6 +8,7 @@ COPY templates templates
 COPY static static
 COPY scripts scripts
 COPY nginx nginx
+COPY Dockerfile ./
 COPY .gitignore .stylelintrc.json MIGRASI_STATUS.md docs-cutover.md ./
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITH_UWEBSOCKETS=ON && cmake --build build -j$(nproc) && ./build/examvan-tests --gtest_filter=-ServerLive.*:F7Jobs.JobRunnerStartStop:P3*:P4*:P5*:P6*:P7*:P8*:P9*:P10*:P11*:P12*:P13*:Review_*:R3_*:R4_*:R5_*:DockerBuild.*:DockerRuntime.*
 
