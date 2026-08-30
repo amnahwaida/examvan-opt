@@ -9,6 +9,12 @@
 #include <fstream>
 #include <sstream>
 #include <crypt.h>
+#include <cctype>
+#include <algorithm>
+#ifdef HAS_LIBPQ
+#include "db/pool_real.hpp"
+#include "db/pool.hpp"
+#endif
 
 namespace examvan::handlers::auth {
 
@@ -157,16 +163,55 @@ Response login_handler(const Request& req, const Config& cfg){
   std::string username, password;
   if(auto u=form.find("username"); u!=form.end()) username=u->second;
   if(username.empty()) username=json_field(req.body,"username");
+  if(username.empty()) username=json_field(req.body,"email");
+  if(auto eu=form.find("email"); eu!=form.end() && username.empty()) username=eu->second;
   if(auto p=form.find("password"); p!=form.end()) password=p->second;
   if(password.empty()) password=json_field(req.body,"password");
   if(username.empty()||password.empty()){
     Response r; r.status=400; r.json(400,"{\"error\":\"username and password required\"}"); return r;
   }
+  auto trim_lc=[](std::string s){
+    size_t a=s.find_first_not_of(" \t\r\n"); if(a==std::string::npos) return std::string();
+    size_t b=s.find_last_not_of(" \t\r\n"); s=s.substr(a,b-a+1);
+    for(char &c: s) c=tolower((unsigned char)c);
+    return s;
+  };
+  std::string uname_norm=trim_lc(username);
   std::string stored;
-  { std::lock_guard<std::mutex> g(g_mu); auto f=g_users.find(username); if(f!=g_users.end()) stored=f->second; }
-  if(stored.empty() || !verify_password(password, stored)){
+  { std::lock_guard<std::mutex> g(g_mu); 
+    auto f=g_users.find(username); if(f!=g_users.end()) stored=f->second;
+    else { auto f2=g_users.find(uname_norm); if(f2!=g_users.end()) stored=f2->second; }
+  }
+  bool ok = !stored.empty() && verify_password(password, stored);
+  if(!ok){
+#ifdef HAS_LIBPQ
+    try{
+      std::string db_url=cfg.database_url;
+      if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+      if(!db_url.empty()){
+        std::string ci=pg_conninfo_from_url(db_url);
+        if(ci.empty()) ci=db_url;
+        db::RealPool pool(ci, 2);
+        if(pool.connect()){
+          if(auto c=pool.acquire()){
+            auto res=pool.exec_params(c.get(),"SELECT password_hash FROM admin_users WHERE lower(username)=lower($1) LIMIT 1",{uname_norm});
+            if(res && PQntuples(res.get())>0){
+              std::string db_hash=PQgetvalue(res.get(),0,0);
+              if(verify_password(password, db_hash)){
+                ok=true;
+                stored=db_hash;
+              }
+            }
+          }
+        }
+      }
+    }catch(...){}
+#endif
+  }
+  if(!ok){
     Response r; r.status=401; r.json(401,"{\"error\":\"invalid credentials\"}"); return r;
   }
+  username=uname_norm;
   std::string payload=b64_encode("admin_id=1&username="+username+"&role=[\"guru\"]");
   std::string cookie="examvan_session="+encode_cookie_value(cfg.secret_key, payload)+"; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400";
   if(!cfg.is_development()) cookie+="; Secure";

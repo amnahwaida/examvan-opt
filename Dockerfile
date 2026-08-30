@@ -16,8 +16,10 @@ FROM builder AS sanitizer
 RUN cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON && cmake --build build-san -j$(nproc) && ./build-san/examvan-tests --gtest_filter=-ServerLive.*:F7Jobs.JobRunnerStartStop:Review_*:R3_*:R4_*:R5_*:DockerBuild.*:DockerRuntime.*
 CMD ["./build-san/examvan-tests"]
 
-FROM gcc:13-bookworm AS runtime
+FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y libpq5 libhiredis-dev libcurl4 libcrypt1 curl ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /usr/local/lib64/libstdc++.so.6.0.32 /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.32
+RUN ln -sf libstdc++.so.6.0.32 /usr/lib/x86_64-linux-gnu/libstdc++.so.6 && ldconfig
 # Docker hardening: no-new-privileges
 COPY --from=builder /app/build/examvan-server /usr/local/bin/examvan-server
 COPY --from=builder /app/templates /app/templates
