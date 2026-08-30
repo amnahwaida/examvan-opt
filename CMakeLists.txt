@@ -218,6 +218,7 @@ add_executable(examvan-tests
   tests/test_review_round4_tdd.cpp
   tests/test_docker_build_tdd.cpp
   tests/test_review_round5_tdd.cpp
+  tests/test_docker_runtime_tdd.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)
