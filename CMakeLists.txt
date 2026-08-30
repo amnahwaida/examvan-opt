@@ -247,4 +247,10 @@ add_executable(examvan-tests
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)
-gtest_discover_tests(examvan-tests)
+# Banyak test TDD membaca file sumber via relative path (mis. "src/...",
+# "nginx/nginx.conf", ".github/..."). Default CWD ctest adalah build dir,
+# sehingga path tsb resolve ke build/src/... yang tidak ada -> ifstream kosong
+# -> semua assertion file-content gagal. Tetapkan WORKING_DIRECTORY ke project
+# root agar test path-relative berfungsi.
+gtest_discover_tests(examvan-tests
+  PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

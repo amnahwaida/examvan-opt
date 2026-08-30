@@ -216,6 +216,13 @@ Response create_exam(const Request& req){
   if(fpath.find("..")!=std::string::npos || fpath.find("\\")!=std::string::npos){
     Response r; r.status=400; r.json(400,"{\"error\":\"file_path must not contain traversal\"}"); return r;
   }
+  // MIME check for multipart pdf - require %PDF magic (content-type can be spoofed)
+  // Validate file content before R2 config check — invalid files should be
+  // rejected regardless of R2 availability.
+  if(is_multipart_pb && !file_data.empty()){
+    bool is_pdf_magic = file_data.rfind("%PDF",0)==0;
+    if(!is_pdf_magic){ Response r; r.status=400; r.json(400,"{\"error\":\"file must be PDF\"}"); return r; }
+  }
   // R2 mandatory fail-closed: hanya untuk upload file biner (multipart)
   {
     auto cfg_r2 = Config::load();
@@ -237,11 +244,6 @@ Response create_exam(const Request& req){
   const long MAX_PDF = 5*1024*1024;
   // also respect SaaS default 1M if available? For now enforce 5M global as contract 102M is large, but keep 5M for prod
   if(size>MAX_PDF){ Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return r; }
-  // MIME check for multipart pdf - require %PDF magic (content-type can be spoofed)
-  if(is_multipart_pb && !file_data.empty()){
-    bool is_pdf_magic = file_data.rfind("%PDF",0)==0;
-    if(!is_pdf_magic){ Response r; r.status=400; r.json(400,"{\"error\":\"file must be PDF\"}"); return r; }
-  }
   // custom_token validasi
   std::string token;
   if(!custom.empty()){
