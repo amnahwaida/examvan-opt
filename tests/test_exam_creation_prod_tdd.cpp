@@ -3,6 +3,7 @@
 #include "helpers/utils.hpp"
 #include "handlers/r2/r2.hpp"
 #include "config/config.hpp"
+#include "store/exam_store.hpp"
 #include <string>
 using namespace examvan;
 using namespace examvan::handlers::admin;
@@ -49,6 +50,18 @@ static std::string multipart_body(const std::string& boundary,
 }
 
 // 1. Backward compat: urlencoded lama tetap sukses (existing tests)
+TEST(ExamCreationProd, IdempotencyKeyReplaysSameResponse){
+  Request first; first.body=form_body("Replay", "/tmp/replay.pdf", "100"); first.headers["Idempotency-Key"]="idem-replay-1";
+  auto a=create_exam(first); ASSERT_EQ(a.status,201);
+  auto b=create_exam(first); EXPECT_EQ(b.status,201); EXPECT_EQ(b.body,a.body); EXPECT_EQ(examvan::store::active_store()->count(),1u);
+}
+TEST(ExamCreationProd, IdempotencyKeyConflictRejected){
+  Request first; first.body=form_body("Conflict A", "/tmp/a.pdf", "100"); first.headers["Idempotency-Key"]="idem-conflict-1";
+  ASSERT_EQ(create_exam(first).status,201);
+  Request second=first; second.body=form_body("Conflict B", "/tmp/b.pdf", "100");
+  auto r=create_exam(second); EXPECT_EQ(r.status,409); EXPECT_NE(r.body.find("IDEMPOTENCY_CONFLICT"),std::string::npos);
+}
+
 TEST(ExamCreationProd, UrlEncodedStillWorks){
   Request req; req.body=form_body("Ujian MAT","/tmp/a.pdf","1024");
   auto res=create_exam(req);

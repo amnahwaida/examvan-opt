@@ -14,6 +14,8 @@
 #include <vector>
 #include <functional>
 #include <algorithm>
+#include <mutex>
+#include <unordered_map>
 namespace examvan::handlers::admin {
 using namespace examvan::utils;
 static std::string get_param(const std::map<std::string,std::string>& form, const std::string& k){
@@ -112,6 +114,14 @@ static store::ExamStore& exams(){
 /* Test hooks: callback untuk mock upload & token generation */
 static std::function<void(const std::string&,const std::string&)> g_upload_mock;
 static std::function<std::string(int)> g_token_gen_override;
+struct IdempotencyRecord { std::string fingerprint; Response response; };
+static std::mutex g_idem_mu;
+static std::unordered_map<std::string, IdempotencyRecord> g_idem;
+static std::string idempotency_fingerprint(const Request& req){
+  std::string fp=req.method+"\\n"+req.path+"\\n"+req.body;
+  // A stable, bounded representation is sufficient for process-local replay.
+  return std::to_string(std::hash<std::string>{}(fp))+":"+std::to_string(fp.size());
+}
 
 void set_upload_mock_for_test(std::function<void(const std::string&,const std::string&)> mock){
   g_upload_mock = std::move(mock);
@@ -122,6 +132,7 @@ void set_token_generator_for_test(std::function<std::string(int)> gen){
 
 void clear_exams_for_testing(){
   exams().clear_all();
+  { std::lock_guard<std::mutex> lock(g_idem_mu); g_idem.clear(); }
   g_upload_mock = nullptr;
   g_token_gen_override = nullptr;
 }
@@ -213,6 +224,18 @@ Response list_admin_exams(const Request& req){
   Response r; r.json(200,"{\"success\":true,\"exams\":"+json+",\"total\":"+std::to_string(snapshot.size())+"}"); return r;
 }
 Response create_exam(const Request& req){
+  std::string idem;
+  for(const auto& kv:req.headers){ std::string k=kv.first; for(char& c:k) c=tolower((unsigned char)c); if(k=="idempotency-key") { idem=kv.second; break; } }
+  if(!idem.empty()){
+    if(idem.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid Idempotency-Key\"}"); return r; }
+    const auto fp=idempotency_fingerprint(req);
+    std::lock_guard<std::mutex> lock(g_idem_mu);
+    auto it=g_idem.find(idem);
+    if(it!=g_idem.end()){
+      if(it->second.fingerprint!=fp){ Response r; r.status=409; r.json(409,"{\"error\":\"Idempotency-Key conflict\",\"error_code\":\"IDEMPOTENCY_CONFLICT\"}"); return r; }
+      return it->second.response;
+    }
+  }
   std::map<std::string,std::string> form;
   std::string file_name, file_data, file_ct;
   std::string ct;
@@ -419,7 +442,9 @@ Response create_exam(const Request& req){
   std::string esc_name=json_escape(name);
   std::string esc_fpath=json_escape(fpath);
   std::string esc_token=json_escape(token);
-  Response r; r.status=201; r.json(201,"{\"success\":true,\"id\":"+std::to_string(id)+",\"token\":\""+esc_token+"\",\"name\":\""+esc_name+"\",\"file_path\":\""+esc_fpath+"\",\"status\":\"inactive\",\"size_bytes\":"+std::to_string(size)+",\"created_at\":\""+exam.created_at+"\",\"message\":\"Ujian berhasil diunggah\"}"); return r;
+  Response r; r.status=201; r.json(201,"{\"success\":true,\"id\":"+std::to_string(id)+",\"token\":\""+esc_token+"\",\"name\":\""+esc_name+"\",\"file_path\":\""+esc_fpath+"\",\"status\":\"inactive\",\"size_bytes\":"+std::to_string(size)+",\"created_at\":\""+exam.created_at+"\",\"message\":\"Ujian berhasil diunggah\"}");
+  if(!idem.empty()){ std::lock_guard<std::mutex> lock(g_idem_mu); g_idem.emplace(idem, IdempotencyRecord{idempotency_fingerprint(req),r}); }
+  return r;
 }
 static std::string get_exam_id(const Request& req){
   auto it=req.params.find("id");
