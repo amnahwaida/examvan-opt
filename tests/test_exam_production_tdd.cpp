@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "handlers/admin/exams.hpp"
 #include "handlers/admin/dashboard.hpp"
+#include "http/router_full.hpp"
 #include "helpers/utils.hpp"
 #include "handlers/r2/r2.hpp"
 #include "models/exam.hpp"
@@ -1012,4 +1013,155 @@ TEST(ExamProduction, DashboardPage_NoEmptyStateWhenExamsExist){
   EXPECT_EQ(res.status,200);
   EXPECT_EQ(res.body.find("Belum ada ujian"), std::string::npos)
     << "Dashboard dengan ujian tidak boleh tampilkan empty-state";
+}
+
+// ======================================================================
+// GROUP J: Fix Pass 9 — route shadowing, response contract, live stats,
+//          dashboard active_token/token_mode, list fields (TDD)
+// ======================================================================
+
+// Bug A: /admin/api/submissions/export tidak boleh di-shadow oleh /:id/detail
+TEST(ExamProduction, ExportRoute_NotShadowedByDetailRoute){
+  Config cfg; Router r; register_full_routes(r,cfg);
+  auto routes=r.routes();
+  // cari indeks export dan /:id/detail dalam daftar GET routes
+  size_t export_idx=routes.size(), detail_idx=routes.size();
+  for(size_t i=0;i<routes.size();++i){
+    if(routes[i].find("GET")==0){
+      if(routes[i].find("/admin/api/submissions/export")!=std::string::npos) export_idx=i;
+      else if(routes[i].find("/admin/api/submissions/:id/detail")!=std::string::npos) detail_idx=i;
+    }
+  }
+  ASSERT_NE(export_idx,routes.size()) << "/admin/api/submissions/export route harus ada";
+  ASSERT_NE(detail_idx,routes.size()) << "/admin/api/submissions/:id/detail route harus ada";
+  EXPECT_LT(export_idx,detail_idx)
+    << "export route harus didaftarkan SEBELUM :id/detail agar tidak di-shadow";
+}
+
+// Bug B (TDD RED): toggle response harus mengandung "new_status" dan "message"
+TEST(ExamProduction, ToggleResponse_HasNewStatusAndMessage){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("MsgToggle","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/toggle";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200);
+  // frontend admin.js:270 membaca res.new_status — HARUS ada
+  EXPECT_NE(res.body.find("\"new_status\""), std::string::npos)
+    << "toggle harus return new_status untuk badge update: " << res.body;
+  // frontend admin.js:279 membaca res.message — HARUS ada
+  EXPECT_NE(res.body.find("\"message\""), std::string::npos)
+    << "toggle harus return message untuk toast: " << res.body;
+  EXPECT_NE(res.body.find("Status diperbarui"), std::string::npos) << res.body;
+}
+
+// Bug B: delete response harus mengandung "message"
+TEST(ExamProduction, DeleteResponse_HasMessage){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("MsgDelete","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request rd; rd.params["id"]=id;
+  auto res=delete_exam(rd);
+  ASSERT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("\"message\""), std::string::npos)
+    << "delete harus return message untuk toast: " << res.body;
+  EXPECT_NE(res.body.find("Ujian dihapus"), std::string::npos) << res.body;
+}
+
+// Bug B: edit response harus mengandung "message"
+TEST(ExamProduction, EditResponse_HasMessage){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("MsgEdit","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/edit";
+  ru.params["name"]="Edited";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("\"message\""), std::string::npos)
+    << "edit harus return message untuk toast: " << res.body;
+  EXPECT_NE(res.body.find("Nama diperbarui"), std::string::npos) << res.body;
+}
+
+// Bug B: regenerate-token response harus mengandung "message"
+TEST(ExamProduction, RegenerateTokenResponse_HasMessage){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("MsgRegen","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["id"]=id; ru.params["action"]="regenerate-token";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("\"message\""), std::string::npos)
+    << "regenerate-token harus return message: " << res.body;
+}
+
+// Bug C: dashboard_stats harus return live counts dari store
+TEST(ExamProduction, DashboardStats_ReturnsLiveCounts){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("StatsExam","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  // stats harus menunjukkan 1 exam
+  Request req;
+  auto res=dashboard_stats(req);
+  EXPECT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("\"exams\":1"), std::string::npos)
+    << "stats harus tampilkan jumlah exam dari store: " << res.body;
+  // toggle exam ke active
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/toggle";
+  update_exam(ru);
+  // stats harus menunjukkan 1 active
+  auto res2=dashboard_stats(req);
+  EXPECT_NE(res2.body.find("\"active\":1"), std::string::npos)
+    << "stats harus tampilkan active=1 setelah toggle: " << res2.body;
+}
+
+// Bug D: dashboard row harus tampilkan active_token (bukan token dasar) + token mode
+TEST(ExamProduction, DashboardRow_UsesActiveTokenAndTokenMode){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("DashToken","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  // set active_token dan token_mode via store
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.active_token="ACTIVE01";
+    e.token_mode="dynamic";
+  });
+  Request req;
+  auto res=dashboard_page(req);
+  EXPECT_EQ(res.status,200);
+  // active_token harus muncul (bukan token dasar)
+  EXPECT_NE(res.body.find("ACTIVE01"), std::string::npos)
+    << "dashboard harus tampilkan active_token, bukan token dasar";
+  // token_mode select harus ada
+  EXPECT_NE(res.body.find("token-mode-select"), std::string::npos)
+    << "dashboard harus tampilkan token-mode-select control";
+  // tombstoned_at: set tombstoned, pastikan badge "Nonaktif Otomatis" muncul
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.tombstoned_at="2026-01-01T00:00:00Z";
+  });
+  auto res2=dashboard_page(req);
+  EXPECT_NE(res2.body.find("Nonaktif Otomatis"), std::string::npos)
+    << "dashboard harus tampilkan 'Nonaktif Otomatis' untuk tombstoned exam";
+}
+
+// Bug E/G: list_admin_exams harus mengandung field lengkap
+TEST(ExamProduction, ListExams_IncludesAllModelFields){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("FullList","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  Request rl;
+  auto res=list_admin_exams(rl);
+  ASSERT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("\"active_token\""), std::string::npos)
+    << "list harus expose active_token: " << res.body;
+  EXPECT_NE(res.body.find("\"token_mode\""), std::string::npos)
+    << "list harus expose token_mode: " << res.body;
+  EXPECT_NE(res.body.find("\"auto_approve\""), std::string::npos)
+    << "list harus expose auto_approve: " << res.body;
+  EXPECT_NE(res.body.find("\"tombstoned_at\""), std::string::npos)
+    << "list harus expose tombstoned_at: " << res.body;
 }

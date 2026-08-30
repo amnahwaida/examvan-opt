@@ -196,7 +196,17 @@ Response list_admin_exams(const Request& req){
   for(size_t i=0;i<snapshot.size();++i){
     if(i) json+=",";
     auto &e=snapshot[i];
-    json+="{\"id\":"+std::to_string(e.id)+",\"name\":\""+json_escape(e.name)+"\",\"token\":\""+json_escape(e.token)+"\",\"file_path\":\""+json_escape(e.file_path)+"\",\"size_bytes\":"+std::to_string(e.size_bytes)+",\"status\":\""+json_escape(e.status)+"\",\"created_at\":\""+json_escape(e.created_at)+"\"}";
+    json+="{\"id\":"+std::to_string(e.id)
+      +",\"name\":\""+json_escape(e.name)+"\""
+      +",\"token\":\""+json_escape(e.token)+"\""
+      +",\"active_token\":\""+json_escape(e.active_token.empty()?e.token:e.active_token)+"\""
+      +",\"file_path\":\""+json_escape(e.file_path)+"\""
+      +",\"size_bytes\":"+std::to_string(e.size_bytes)
+      +",\"status\":\""+json_escape(e.status)+"\""
+      +",\"token_mode\":\""+json_escape(e.get_token_mode())+"\""
+      +",\"auto_approve\":"+(e.auto_approve?"true":"false")
+      +",\"tombstoned_at\":"+(e.tombstoned_at?("\""+json_escape(*e.tombstoned_at)+"\""):"null")
+      +",\"created_at\":\""+json_escape(e.created_at)+"\"}";
   }
   json+="]";
   Response r; r.json(200,"{\"success\":true,\"exams\":"+json+",\"total\":"+std::to_string(snapshot.size())+"}"); return r;
@@ -448,7 +458,7 @@ Response update_exam(const Request& req){
       }
       if(!old_token.empty()) exams().unclaim_token(old_token); // Bug 1: lepas token lama dari seen_tokens_
       utils::log_info("exam_token_regenerated","id="+id_str);
-      Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"token\":\""+json_escape(new_token)+"\"}"); return r;
+      Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"token\":\""+json_escape(new_token)+"\",\"message\":\"Token berhasil dibuat ulang\"}"); return r;
     } else {
       // Bug 8: claim selalu gagal → return 500, bukan 200 dengan token lama
       utils::log_error("exam_token_regenerate_failed","id="+id_str+" reason=token_collision_exhausted");
@@ -499,11 +509,11 @@ Response update_exam(const Request& req){
 #endif
   if(!result_status.empty()){
     utils::log_info("exam_updated","id="+id_str+" action="+action+" status="+result_status);
-    Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"status\":\""+result_status+"\"}"); return r;
+    Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"status\":\""+result_status+"\",\"new_status\":\""+result_status+"\",\"message\":\"Status diperbarui\"}"); return r;
   }
   if(!result_name.empty()){
     utils::log_info("exam_updated","id="+id_str+" action=edit name="+result_name);
-    Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"name\":\""+json_escape(result_name)+"\"}"); return r;
+    Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"name\":\""+json_escape(result_name)+"\",\"message\":\"Nama diperbarui\"}"); return r;
   }
   // tidak ada action dikenal / tidak ada perubahan -> 400
   Response r; r.status=400; r.json(400,"{\"error\":\"no valid update field\"}"); return r;
@@ -525,7 +535,7 @@ Response delete_exam(const Request& req){
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+"}"); return r;
+  Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"message\":\"Ujian dihapus\"}"); return r;
 }
 Response export_xlsx(const Request&){
   // Bug D: export_xlsx belum diimplementasi — jangan balas 200 dengan

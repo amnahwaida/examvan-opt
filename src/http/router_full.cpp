@@ -199,8 +199,9 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/admin/api/exams/:exam_id/regenerate-token", admin_api(handlers::admin::update_exam));
   r.add("GET","/admin/api/exams/:id/export", admin_api(handlers::admin::export_xlsx));
   r.add("GET","/admin/api/submissions", admin_api(handlers::admin::list_submissions));
-  r.add("GET","/admin/api/submissions/:id/detail", admin_api(handlers::admin::submission_detail));
+  // Static export route must precede /:id/detail (router uses first-match).
   r.add("GET","/admin/api/submissions/export", admin_api(handlers::admin::export_xlsx));
+  r.add("GET","/admin/api/submissions/:id/detail", admin_api(handlers::admin::submission_detail));
   r.add("GET","/admin/api/queue/status", admin_api(handlers::admin::queue_status));
   r.add("POST","/admin/api/submissions/:id/delete", admin_api(handlers::admin::delete_submission));
   r.add("GET","/admin/api/pengawas/exams", admin_api(handlers::admin::pengawas_exams));
