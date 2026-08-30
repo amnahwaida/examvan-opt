@@ -25,8 +25,10 @@ public:
   // Ambil id berikutnya (monotonic, tidak pernah kembali).
   virtual int next_id() = 0;
 
-  // Tambahkan exam ke store (idi biasanya dari next_id()).
-  virtual void add(const models::Exam& e) = 0;
+  // Tambahkan exam ke store. Mengembalikan false jika token sudah
+  // dipakai (collision). Operasi atomic: cek + insert dalam satu lock.
+  // ID exam tidak di-set oleh add() — handler harus set exam.id = next_id().
+  virtual bool add(const models::Exam& e) = 0;
 
   virtual std::optional<models::Exam> get_by_id(int id) = 0;
 
@@ -37,8 +39,13 @@ public:
   virtual bool token_exists(const std::string& token, int exclude_id = 0) = 0;
 
   // Cek token ke dalam kumpulan token yang sudah pernah dikeluarkan (auto-gen).
+  // Juga cek terhadap exams_[] token yang sudah ada (termasuk custom token).
   // Mengembalikan false jika sudah ada (collision).
   virtual bool claim_token(const std::string& token) = 0;
+
+  // Lepaskan token dari seen_tokens_ (dipanggil setelah claim_token sukses
+  // namun operasi berikutnya gagal).
+  virtual void unclaim_token(const std::string& token) = 0;
 
   // Mutasi exam dengan id tertentu di dalam lock store. Mengembalikan
   // false jika id tidak ditemukan.

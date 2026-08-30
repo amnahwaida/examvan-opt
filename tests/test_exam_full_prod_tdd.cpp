@@ -45,7 +45,7 @@ TEST(ExamFullProd, R2MandatoryFailsClosed){
   set_r2_env(false);
   std::string boundary="----TestR2";
   std::string body="--"+boundary+"\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nUjian R2\r\n";
-  body+="--"+boundary+"\r\nContent-Disposition: form-data; name=\"pdf_file\"; filename=\"soal.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4 fake\r\n";
+  body+="--"+boundary+"\r\nContent-Disposition: form-data; name=\"pdf_file\"; filename=\"soal.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4 fake\r\n%%EOF\r\n";
   body+="--"+boundary+"--\r\n";
   Request req; req.body=body;
   req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
@@ -62,7 +62,7 @@ TEST(ExamFullProd, R2EnabledUploadStub){
   EXPECT_TRUE(cfg.enabled());
   r2::R2Client client{cfg};
   EXPECT_TRUE(client.enabled());
-  EXPECT_TRUE(client.upload("exams/1/soal.pdf","%PDF fake"));
+  EXPECT_TRUE(client.upload("exams/1/soal.pdf","%PDF-1.4 fake content\n%%EOF\n"));
   // handler dengan R2 enabled harus tetap 201
   Request req; req.body="name=Ujian R2 OK&file_path=/tmp/a.pdf&size_bytes=100";
   auto res=create_exam(req);

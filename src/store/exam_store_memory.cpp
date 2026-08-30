@@ -27,9 +27,14 @@ int ExamStoreMemory::next_id(){
   return next_id_.fetch_add(1);
 }
 
-void ExamStoreMemory::add(const models::Exam& e){
+bool ExamStoreMemory::add(const models::Exam& e){
   std::lock_guard<std::mutex> g(mu_);
+  // Cek token duplikat hanya terhadap exams_[] (bukan seen_tokens_).
+  // Token auto-gen sudah di-claim via claim_token() sebelum add();
+  // seen_tokens_ hanya dipakai untuk tracking claim/unclaim.
+  for(auto& ex: exams_) if(ex.token==e.token) return false;
   exams_.push_back(e);
+  return true;
 }
 
 std::optional<models::Exam> ExamStoreMemory::get_by_id(int id){
@@ -54,10 +59,16 @@ bool ExamStoreMemory::token_exists(const std::string& token, int exclude_id){
 
 bool ExamStoreMemory::claim_token(const std::string& token){
   std::lock_guard<std::mutex> g(mu_);
-  auto it=std::find(seen_tokens_.begin(), seen_tokens_.end(), token);
-  if(it!=seen_tokens_.end()) return false;
-  seen_tokens_.push_back(token);
+  // Cek seen_tokens_ (auto-gen) DAN exams_[] (custom token yang sudah ada)
+  if(seen_tokens_.count(token)) return false;
+  for(auto& e: exams_) if(e.token==token) return false;
+  seen_tokens_.insert(token);
   return true;
+}
+
+void ExamStoreMemory::unclaim_token(const std::string& token){
+  std::lock_guard<std::mutex> g(mu_);
+  seen_tokens_.erase(token);
 }
 
 bool ExamStoreMemory::update(int id, const std::function<void(models::Exam&)>& mutator){
@@ -70,9 +81,14 @@ bool ExamStoreMemory::update(int id, const std::function<void(models::Exam&)>& m
 
 bool ExamStoreMemory::remove(int id){
   std::lock_guard<std::mutex> g(mu_);
-  auto before=exams_.size();
-  exams_.erase(std::remove_if(exams_.begin(), exams_.end(), [id](const models::Exam& e){ return e.id==id; }), exams_.end());
-  return exams_.size()!=before;
+  for(auto it=exams_.begin();it!=exams_.end();++it){
+    if(it->id==id){
+      seen_tokens_.erase(it->token);
+      exams_.erase(it);
+      return true;
+    }
+  }
+  return false;
 }
 
 size_t ExamStoreMemory::count(){
@@ -84,7 +100,7 @@ void ExamStoreMemory::clear_all(){
   std::lock_guard<std::mutex> g(mu_);
   exams_.clear();
   seen_tokens_.clear();
-  next_id_.store(1);
+  // next_id_ TIDAK di-reset — counter monotonik (Bug 5 fix)
 }
 
 } // namespace examvan::store

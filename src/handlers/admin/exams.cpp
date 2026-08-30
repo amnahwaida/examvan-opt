@@ -128,6 +128,44 @@ static bool has_null_bytes(const std::string& s){
   for(char c: s) if(c=='\0') return true;
   return false;
 }
+
+/* Security Gap 1: validasi PDF — magic header + %%EOF marker + polyglot detection.
+ * Go reference: validatePDF() — cek %PDF, %%EOF di 1024 byte terakhir, blokir
+ * <script/<html/<iframe/javascript:/<body. */
+static bool validate_pdf_content(const std::string& data){
+  if(data.size()<5) return false;
+  // Must start with %PDF magic header
+  if(data.rfind("%PDF",0)!=0) return false;
+  // Must contain %%EOF marker in last 1024 bytes (confirms complete PDF)
+  size_t tail_start = data.size()>1024 ? data.size()-1024 : 0;
+  if(data.find("%%EOF",tail_start)==std::string::npos) return false;
+  // Polyglot detection — reject if file contains HTML/JS signatures
+  std::string lower=data;
+  for(auto& c: lower) c=tolower((unsigned char)c);
+  const char* bad[]={"<script","<html","<iframe","javascript:","<body","</script"};
+  for(auto sig: bad) if(lower.find(sig)!=std::string::npos) return false;
+  return true;
+}
+
+/* Security Gap 2: sanitasi filename — hapus path separator, strip ke
+ * [a-zA-Z0-9._-], paksa ekstensi .pdf. Go reference: cleanUploadedFilename(). */
+static std::string sanitize_filename(const std::string& name){
+  // Ambil basename (hapus path/separator)
+  auto slash=name.find_last_of("/\\");
+  std::string base= slash==std::string::npos? name : name.substr(slash+1);
+  std::string safe;
+  for(char c: base){
+    if(std::isalnum((unsigned char)c) || c=='.' || c=='-' || c=='_')
+      safe.push_back(c);
+  }
+  if(safe.empty()) safe="exam.pdf";
+  if(safe.size()>128) safe=safe.substr(0,128);
+  // Force .pdf extension
+  auto dot=safe.rfind('.');
+  if(dot==std::string::npos) safe+=".pdf";
+  else safe=safe.substr(0,dot)+".pdf";
+  return safe;
+}
 Response list_admin_exams(const Request& req){
   auto snapshot = exams().list_all(); // ambil snapshot (thread-safe)
 #ifdef HAS_PROTOBUF
@@ -182,10 +220,15 @@ Response create_exam(const Request& req){
     }
     name = pb.name();
     fpath = pb.file_path();
-    if(pb.size_bytes()!=0) sz = std::to_string(pb.size_bytes());
+    // Bug 2: gunakan actual size dari pdf_data, bukan client-reported size_bytes
+    // (client bisa set size_bytes=1 lalu kirim 4.9MB → bypass 5MB check)
+    sz = file_data.empty() && pb.size_bytes()!=0 ? std::to_string(pb.size_bytes()) : "";
     custom = pb.custom_token();
     file_data = pb.pdf_data();
-    if(!file_data.empty() && fpath.empty()) fpath = "upload.pdf";
+    if(!file_data.empty()){
+      sz = std::to_string(file_data.size());
+      if(fpath.empty()) fpath = "upload.pdf";
+    }
     if(!file_data.empty()) file_name = fpath;
 #else
     Response r; r.status=415; r.json(415,"{\"error\":\"protobuf not enabled\",\"error_code\":\"PROTOBUF_REQUIRED\"}"); return r;
@@ -239,34 +282,51 @@ Response create_exam(const Request& req){
     name=trimmed;
   }
   if(name.empty()){ utils::log_error("exam_create_failed","reason=name_required"); Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
+  // Security Gap 3: reject null bytes in name (log injection vector)
+  if(has_null_bytes(name)){ Response r; r.status=400; r.json(400,"{\"error\":\"name contains invalid characters\"}"); return r; }
   if(name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return r; }
   if(fpath.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"file_path required\"}"); return r; }
-  // file_path hardening: null-byte, traversal bertingkat, backslash
-  if(has_null_bytes(fpath) || fpath.find("..")!=std::string::npos || fpath.find("\\")!=std::string::npos){
+  // file_path hardening: null-byte, traversal bertingkat, backslash.
+  // Skenario file_path EKSPLISIT dari form dipakai sebagai path server →
+  // tolak traversal eksplisit. Skenario multipart (file_name dari filename
+  // browser yang tidak bisa dipercaya) → sanitize ke basename di bawah.
+  bool is_multipart_upload = !file_name.empty();
+  if(has_null_bytes(fpath) || fpath.find("\\")!=std::string::npos){
+    Response r; r.status=400; r.json(400,"{\"error\":\"file_path must not contain invalid characters\"}"); return r;
+  }
+  if(!is_multipart_upload && fpath.find("..")!=std::string::npos){
     Response r; r.status=400; r.json(400,"{\"error\":\"file_path must not contain traversal\"}"); return r;
   }
-  // MIME check for multipart pdf - require %PDF magic (content-type can be spoofed)
-  if(is_multipart_pb && !file_data.empty()){
-    bool is_pdf_magic = file_data.rfind("%PDF",0)==0;
-    if(!is_pdf_magic){ Response r; r.status=400; r.json(400,"{\"error\":\"file must be PDF\"}"); return r; }
+  // Security Gap 2: sanitasi file_path — hapus traversal/separator, strip ke
+  // alnum/./-/_, paksa ekstensi .pdf. Dilakukan SEBELUM validasi lain supaya
+  // path bersih untuk semua check berikutnya (R2 key, logging, dll).
+  fpath = sanitize_filename(fpath);
+  // PDF validation di SEMUA path (multipart dan protobuf) — Bug 1:
+  // magic header + %%EOF marker + polyglot detection (Security Gap 1)
+  if(!file_data.empty()){
+    if(!validate_pdf_content(file_data)){
+      Response r; r.status=400; r.json(400,"{\"error\":\"file must be valid PDF\"}"); return r;
+    }
   }
-  // size validation — sebelum R2 upload (hemat bandwidth)
+  // size validation — sebelum R2 upload (hemat bandwidth).
+  // Bug 9: cross-check terhadap ukuran file_data aktual (client bisa kirim
+  // size_bytes=0/1 tapi file_data besar → pastikan tidak bypass 5MB check).
   long size=0;
   try{ if(!sz.empty()) size=std::stol(sz); else if(!file_data.empty()) size=file_data.size(); }catch(...){}
+  if(!file_data.empty()) size=std::max(size, (long)file_data.size());
   const long MAX_PDF = 5*1024*1024;
   if(size>MAX_PDF){ Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return r; }
   // custom_token validasi & collision check
+  // Bug 4: TIDAK pakai token_exists() di sini — periksa-ke-simpan terpisah
+  // = TOCTOU race (2 thread bisa lolos). Collision di-enforce atomically
+  // oleh add() (return false = token sudah dipakai) di bawah.
   std::string token;
   if(!custom.empty()){
     for(char &c: custom) c=toupper((unsigned char)c);
     if(!helpers::is_valid_exam_token(custom) || custom.size()!=8){
       Response r; r.status=400; r.json(400,"{\"error\":\"custom_token must be 8 A-Z0-9\"}"); return r;
     }
-    // custom token harus unik terhadap semua exam existing
-    token=custom; // assign SEBELUM collision check supaya perbandingan benar
-    if(exams().token_exists(token)){
-      Response r; r.status=409; r.json(409,"{\"error\":\"custom_token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return r;
-    }
+    token=custom;
   } else {
     // generate unique — error eksplisit jika seluruh attempt collide
     bool found=false;
@@ -286,6 +346,7 @@ Response create_exam(const Request& req){
     auto cfg_r2 = Config::load();
     r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
     if(!file_data.empty() && !rc.enabled()){
+      exams().unclaim_token(token); // Bug 7: lepaskan token yang sudah di-claim
       Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
     }
     if(!file_data.empty() && rc.enabled()){
@@ -295,23 +356,27 @@ Response create_exam(const Request& req){
       } else {
         r2::R2Client client{rc};
         if(!client.upload(key, file_data)){
+          exams().unclaim_token(token); // Bug 7: lepaskan token yang sudah di-claim
           Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return r;
         }
       }
     }
   }
   // Store via models::Exam (lengkap, bukan triplet)
-  {
-    models::Exam exam;
-    exam.id=id;
-    exam.name=name;
-    exam.file_path=fpath;
-    exam.size_bytes=size;
-    exam.token=token;
-    exam.status="inactive";
-    exam.security_level="medium";
-    exam.created_at=helpers::format_iso_utc(std::chrono::system_clock::now());
-    exams().add(exam);
+  // Bug 4: gunakan return value add() sebagai atomic collision guard
+  // (token_exists + add terpisah = TOCTOU race → 2 exam token sama)
+  models::Exam exam;
+  exam.id=id;
+  exam.name=name;
+  exam.file_path=fpath;
+  exam.size_bytes=size;
+  exam.token=token;
+  exam.status="inactive";
+  exam.security_level="medium";
+  exam.created_at=helpers::format_iso_utc(std::chrono::system_clock::now());
+  if(!exams().add(exam)){
+    exams().unclaim_token(token); // cleanup
+    Response r; r.status=409; r.json(409,"{\"error\":\"custom_token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return r;
   }
   utils::log_info("exam_created","id="+std::to_string(id)+" token="+token+" name="+name);
 #ifdef HAS_PROTOBUF
@@ -361,18 +426,19 @@ Response update_exam(const Request& req){
       new_token=gen_token(8);
       if(exams().claim_token(new_token)){ ok=true; break; }
     }
-    bool found=false;
     if(ok){
-      found = exams().update(id, [&](models::Exam& e){ e.token=new_token; });
+      bool found = exams().update(id, [&](models::Exam& e){ e.token=new_token; });
+      if(!found){
+        exams().unclaim_token(new_token); // cleanup — exam tidak ditemukan
+        Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
+      }
+      utils::log_info("exam_token_regenerated","id="+id_str);
+      Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"token\":\""+json_escape(new_token)+"\"}"); return r;
     } else {
-      // claim selalu gagal -> tolak (bukan silent reuse)
-      found = exams().get_by_id(id).has_value();
+      // Bug 8: claim selalu gagal → return 500, bukan 200 dengan token lama
+      utils::log_error("exam_token_regenerate_failed","id="+id_str+" reason=token_collision_exhausted");
+      Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"token generation failed after retries\",\"error_code\":\"TOKEN_COLLISION\"}"); return r;
     }
-    if(!found){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
-    utils::log_info("exam_token_regenerated","id="+id_str);
-    auto cur = exams().get_by_id(id);
-    std::string shown = cur? cur->token : "";
-    Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"token\":\""+json_escape(shown)+"\"}"); return r;
   }
   // semua action lain: mutasi via store.update() (mutator jalan dalam lock store)
   // pre-validasi nama hanya untuk action edit

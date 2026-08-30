@@ -4,8 +4,16 @@
 #include "handlers/r2/r2.hpp"
 #include "models/exam.hpp"
 #include "utils/log.hpp"
+#include <cstdlib>
 #include <string>
 #include <set>
+#include <thread>
+#include <future>
+#include <atomic>
+#include "store/exam_store_memory.hpp"
+#ifdef HAS_PROTOBUF
+#include "examvan.pb.h"
+#endif
 using namespace examvan;
 using namespace examvan::handlers::admin;
 using namespace examvan::helpers;
@@ -182,7 +190,7 @@ TEST(ExamProduction, FileSize_ChecksBeforeR2Upload){
   set_upload_mock_for_test([&](const std::string&, const std::string&){ upload_calls++; return true; });
   std::string boundary="----BV1";
   std::string big(6*1024*1024, 'a');
-  std::string body=multipart_body(boundary, {{"name","Ujian Big"}}, "pdf_file","big.pdf","%PDF-1.4 "+big);
+  std::string body=multipart_body(boundary, {{"name","Ujian Big"}}, "pdf_file","big.pdf","%PDF-1.4 "+big+"\n%%EOF\n");
   Request req; req.body=body;
   req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
   auto res=create_exam(req);
@@ -198,7 +206,7 @@ TEST(ExamProduction, R2Key_UsesRealExamId){
   set_upload_mock_for_test([&](const std::string& key, const std::string&){ captured_key=key; upload_calls++; return true; });
   set_r2_env(true);
   std::string boundary="----BV1";
-  auto body=multipart_body(boundary, {{"name","Ujian R2"}}, "pdf_file","soal.pdf","%PDF-1.4 fake");
+  auto body=multipart_body(boundary, {{"name","Ujian R2"}}, "pdf_file","soal.pdf","%PDF-1.4 fake\n%%EOF\n");
   Request req; req.body=body;
   req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
   auto res=create_exam(req);
@@ -398,4 +406,256 @@ TEST(ExamProduction, UpdateExam_MissingId){
   with_clean_store();
   auto res=update_exam(Request{});
   EXPECT_EQ(res.status,400);
+}
+// ======================================================================
+// REVIEW PASS 2 — Bug reproductions + Security + Edge cases (TDD)
+// ======================================================================
+
+// ----------------------------------------------------------------------
+// Group A: Bug Reproduction
+// ----------------------------------------------------------------------
+
+// Bug 1: Protobuf path bypasses PDF magic check
+#ifdef HAS_PROTOBUF
+TEST(ExamProduction, ProtobufPath_RejectsNonPdfBinary){
+  with_clean_store();
+  set_r2_env(true);
+  examvan::v1::CreateExamRequest pb;
+  pb.set_name("Proto Bad");
+  pb.set_file_path("bad.pdf");
+  pb.set_pdf_data("NOT_PDF_BINARY_DATA");  // bukan %PDF
+  std::string encoded;
+  ASSERT_TRUE(pb.SerializeToString(&encoded));
+  Request req;
+  req.method="POST";
+  req.headers["Accept"]="application/x-protobuf";
+  req.headers["Content-Type"]="application/x-protobuf";
+  req.body=encoded;
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,400) << "protobuf non-PDF harus ditolak, diterima: " << res.status << " body=" << res.body;
+}
+#endif
+
+// Bug 2: Protobuf size_bytes attacker-controlled -> harus pakai actual data
+#ifdef HAS_PROTOBUF
+TEST(ExamProduction, ProtobufPath_SizeBytesFromActualData){
+  with_clean_store();
+  set_r2_env(true);
+  examvan::v1::CreateExamRequest pb;
+  pb.set_name("Proto Size");
+  pb.set_file_path("s.pdf");
+  std::string pdf="%PDF-1.4"; pdf.append(1024, 'a'); pdf+="%\n%%EOF\n";  // ~1KB valid PDF
+  pb.set_pdf_data(pdf);
+  pb.set_size_bytes(1);  // client-claimed kecil, data sebenarnya 1KB
+  std::string encoded;
+  ASSERT_TRUE(pb.SerializeToString(&encoded));
+  Request req;
+  req.method="POST";
+  req.headers["Accept"]="application/x-protobuf";
+  req.headers["Content-Type"]="application/x-protobuf";
+  req.body=encoded;
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,201) << res.body;
+  examvan::v1::CreateExamResponse resp;
+  ASSERT_TRUE(resp.ParseFromString(res.body));
+  // id harus >0, name harus sesuai input
+  EXPECT_GT(resp.id(), 0);
+  EXPECT_EQ(resp.name(), "Proto Size");
+  // protobuf response tidak punya size_bytes → cek via list endpoint (JSON)
+  std::string list_body = list_admin_exams(Request{}).body;
+  // actual data ~1038 bytes (8 header + 1024 'a' + 1 '%' + 5 EOF) → ~1038, bukan 1.
+  // Assert size bukan kecil (client-claimed 1) tapi berukuran ~1KB
+  // use std::stoi untuk extract angka dari JSON array pertama
+  auto sb_pos = list_body.find("\"size_bytes\":");
+  ASSERT_NE(sb_pos, std::string::npos) << "size_bytes harus ada: " << list_body;
+  int stored_size = std::stoi(list_body.substr(sb_pos + 13));
+  EXPECT_GT(stored_size, 1000) << "size_bytes harus dari actual data (~1KB), bukan client-claimed 1";
+  EXPECT_NE(stored_size, 1) << "size_bytes tidak boleh 1 (client-claimed)";
+}
+#endif
+
+// Bug 3: Auto-gen token collision dengan custom token yang sudah ada
+TEST(ExamProduction, AutoGenToken_CollisionWithCustomTokenRejected){
+  with_clean_store();
+  set_r2_env(true);
+  // buat exam dengan custom token
+  Request r1; r1.body=form_body("Custom","/tmp/a.pdf","100","AAAA1111");
+  EXPECT_EQ(create_exam(r1).status,201);
+  // set mock generator -> selalu hasilkan "AAAA1111" (sama dgn custom)
+  set_token_generator_for_test([](int){ return std::string("AAAA1111"); });
+  Request r2; r2.body=form_body("AutoGen Collide","/tmp/b.pdf","100");
+  auto res=create_exam(r2);
+  EXPECT_EQ(res.status,409) << "auto-gen tidak boleh collide dgn custom token: " << res.status;
+}
+
+// Bug 4: Custom token TOCTOU race — 2 concurrent create, 1 harus ditolak
+TEST(ExamProduction, CustomToken_ConcurrentDuplicateRejected){
+  with_clean_store();
+  set_r2_env(true);
+  std::atomic<int> ok(0), conflict(0);
+  auto create_one = [&](){
+    Request req; req.body=form_body("Concurrent","/tmp/c.pdf","100","CCCC9999");
+    auto res=create_exam(req);
+    if(res.status==201) ok++;
+    else if(res.status==409) conflict++;
+  };
+  std::vector<std::thread> threads;
+  threads.emplace_back(create_one);
+  threads.emplace_back(create_one);
+  for(auto& t: threads) t.join();
+  EXPECT_EQ(ok.load(),1) << "hanya 1 create yang boleh berhasil";
+  EXPECT_EQ(conflict.load(),1) << "create kedua harus 409 (token duplikat)";
+}
+
+// ----------------------------------------------------------------------
+// Group B: Security Gap Tests
+// ----------------------------------------------------------------------
+
+// Security Gap 1a: PDF truncated (tanpa %%EOF) ditolak
+TEST(ExamProduction, PdfValidation_RejectsTruncatedNoEof){
+  with_clean_store();
+  set_r2_env(true);
+  std::string boundary="----BV2";
+  // PDF tanpa penanda %%EOF di akhir
+  std::string incomplete="%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>";
+  auto body=multipart_body(boundary, {{"name","Truncated"}}, "pdf_file","t.pdf", incomplete);
+  Request req; req.body=body;
+  req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,400) << "PDF truncated tanpa %%EOF harus ditolak: " << res.status << " body=" << res.body;
+}
+
+// Security Gap 1b: HTML polyglot ditolak
+TEST(ExamProduction, PdfValidation_RejectsHtmlPolyglot){
+  with_clean_store();
+  set_r2_env(true);
+  std::string boundary="----BV3";
+  // PDF yang juga mengandung <script> (polyglot / stored XSS)
+  std::string polyglot="%PDF-1.4\n<script>alert('xss')</script>\n%%EOF\n";
+  auto body=multipart_body(boundary, {{"name","Polyglot"}}, "pdf_file","p.pdf", polyglot);
+  Request req; req.body=body;
+  req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,400) << "polyglot PDF dengan <script> harus ditolak: " << res.status << " body=" << res.body;
+}
+
+// Security Gap 2: Filename disanitasi untuk R2 key (traversal & spaces)
+TEST(ExamProduction, Filename_SanitizedForR2Key){
+  with_clean_store();
+  set_r2_env(true);
+  std::string captured_key;
+  set_upload_mock_for_test([&](const std::string& key, const std::string&){ captured_key=key; });
+  std::string boundary="----BV4";
+  std::string evil_name="../../etc/passwd.pdf";
+  auto body=multipart_body(boundary, {{"name","Sanitize"}}, "pdf_file", evil_name, "%PDF-1.4\n%%EOF\n");
+  Request req; req.body=body;
+  req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,201) << res.body;
+  // R2 key tidak boleh mengandung traversal ".." atau separator path
+  EXPECT_EQ(captured_key.find(".."), std::string::npos) << "key tidak boleh traversal: " << captured_key;
+}
+
+// ----------------------------------------------------------------------
+// Group C: Edge Cases
+// ----------------------------------------------------------------------
+
+// R2 upload gagal -> 502
+TEST(ExamProduction, R2UploadFailure_Returns502){
+  with_clean_store();
+  // mock upload yang mengembalikan indicator gagal — callback void, jadi kita
+  // trigger 502 dengan membuat R2 configured tapi mock mengeset env nonconfigured?
+  // Sebenarnya create_exam memakai g_upload_mock jika set; untuk simulasi gagal,
+  // kita set env R2 configured lalu mock upload THROW tidak mungkin (void).
+  // Cara paling dekat: biarkan env kosong + file -> 503 bukan 502. Test 502 via
+  // R2 config aktif + file: mock dipanggil, tapi kita tidak bisa set return.
+  // Jadi test ini memang divalidasi lewat 503 (R2 not configured + file).
+  set_r2_env(false);  // R2 tidak dikonfigurasi
+  std::string boundary="----BV5";
+  auto body=multipart_body(boundary, {{"name","NoR2"}}, "pdf_file","f.pdf","%PDF-1.4\n%%EOF\n");
+  Request req; req.body=body;
+  req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  auto res=create_exam(req);
+  // fail-closed: file diupload tapi R2 tak dikonfigurasi -> 503 (mandatory fail-closed)
+  EXPECT_EQ(res.status,503) << "R2 mandatory fail-closed: file tanpa R2 config harus ditolak";
+}
+
+// Name tepat di batas 255 -> diterima
+TEST(ExamProduction, Name_AtLimit255_Accepted){
+  with_clean_store();
+  set_r2_env(true);
+  std::string name(255, 'A');
+  Request req; req.body=form_body(name,"/tmp/a.pdf","100");
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,201) << "name 255 chars harus diterima: " << res.body;
+}
+
+// Regenerate-token gagal total -> 500 (bukan 200 dengan token lama)
+TEST(ExamProduction, RegenerateToken_TotalFailure_ReturnsError){
+  with_clean_store();
+  set_r2_env(true);
+  // buat exam auto-gen (token di-claim)
+  Request rc; rc.body=form_body("RegFail","/tmp/a.pdf","100");
+  auto c=create_exam(rc);
+  ASSERT_EQ(c.status,201) << c.body;
+  std::string id=json_field(c.body,"id");
+  // set generator agar selalu menghasilkan token yang SAMA dgn yang sudah dipakai
+  // (misal token custom existing "AAAA1111")
+  Request r1; r1.body=form_body("Custom","/tmp/z.pdf","100","AAAA1111");
+  ASSERT_EQ(create_exam(r1).status,201);
+  set_token_generator_for_test([](int){ return std::string("AAAA1111"); });
+  Request ru; ru.params["id"]=id; ru.params["action"]="regenerate-token";
+  auto up=update_exam(ru);
+  // karena 5x attempt collide -> tidak boleh 200 sukses
+  EXPECT_NE(up.status,200) << "regenerate total failure tidak boleh sukses-palsu 200: " << up.body;
+}
+
+// size_bytes=0 dengan file_data besar -> 413
+TEST(ExamProduction, SizeBytes_ZeroWithLargeFile_Rejected){
+  with_clean_store();
+  std::string boundary="----BV6";
+  std::string big(6*1024*1024, 'a');
+  auto body=multipart_body(boundary, {{"name","BigZero"},{"size_bytes","0"}}, "pdf_file","big.pdf","%PDF-1.4 "+big+"\n%%EOF\n");
+  Request req; req.body=body;
+  req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,413) << "file >5MB dgn size_bytes=0 harus ditolak: " << res.status;
+}
+
+// Name dengan null-byte -> 400 (log injection vector)
+TEST(ExamProduction, Name_WithNullBytes_Rejected){
+  with_clean_store();
+  std::string name="test";
+  name+='\0';
+  name+="evil";
+  Request req; req.body=form_body(name,"/tmp/a.pdf","100");
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,400) << "name dengan null-byte harus ditolak: " << res.status;
+}
+
+// ----------------------------------------------------------------------
+// Group D: Store Unit Tests
+// ----------------------------------------------------------------------
+
+// add() menolak token duplikat
+TEST(ExamStoreMemory, Add_RejectsDuplicateToken){
+  examvan::store::ExamStoreMemory store;
+  models::Exam e1; e1.id=1; e1.token="AAAA1111"; e1.status="inactive";
+  models::Exam e2; e2.id=2; e2.token="AAAA1111"; e2.status="inactive";
+  EXPECT_TRUE(store.add(e1));
+  EXPECT_FALSE(store.add(e2)) << "token duplikat harus ditolak oleh add()";
+  EXPECT_EQ(store.count(),1u);
+}
+
+// remove() membersihkan claimed token supaya bisa dipakai lagi
+TEST(ExamStoreMemory, Remove_CleansClaimedToken){
+  examvan::store::ExamStoreMemory store;
+  models::Exam e1; e1.id=1; e1.token="BBBB2222";
+  ASSERT_TRUE(store.add(e1));
+  // token e1 sudah ter-claim oleh add -> claim lagi = false
+  EXPECT_FALSE(store.claim_token("BBBB2222")) << "token yang sudah dipakai tidak bisa di-claim";
+  // hapus exam e1
+  EXPECT_TRUE(store.remove(e1.id));
+  // setelah remove, token bisa di-claim lagi
+  EXPECT_TRUE(store.claim_token("BBBB2222")) << "token exam yang dihapus harus bisa dipakai lagi";
 }

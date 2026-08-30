@@ -165,7 +165,7 @@ TEST(ProtobufHandlers, CreateExam_MultipartStillWorks) {
     "Content-Disposition: form-data; name=\"name\"\r\n\r\nUjian Multipart\r\n"
     "------TestPB\r\n"
     "Content-Disposition: form-data; name=\"pdf_file\"; filename=\"soal.pdf\"\r\n"
-    "Content-Type: application/pdf\r\n\r\n%PDF-1.4 fake\r\n"
+    "Content-Type: application/pdf\r\n\r\n%PDF-1.4 fake\r\n%%EOF\r\n"
     "------TestPB--\r\n";
   Request req;
   req.method = "POST";
