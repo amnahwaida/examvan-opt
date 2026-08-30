@@ -11,7 +11,7 @@ static std::string get_param(const std::map<std::string,std::string>& form, cons
 }
 
 Response list_users(const Request&){
-  Response r; r.json(200,"{\"users\":[],\"total\":0}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"users\":[],\"total\":0}"); return r;
 }
 
 Response create_user(const Request& req){
@@ -37,18 +37,18 @@ Response create_user(const Request& req){
     if(!is_super){ Response r; r.status=403; r.json(403,"{\"error\":\"hanya superadmin bisa buat operator\"}"); return r; }
   }
   if(role!="guru" && role!="pengawas" && role!="operator"){ Response r; r.status=400; r.json(400,"{\"error\":\"role tidak valid\"}"); return r; }
-  Response r; r.status=201; r.json(201,"{\"ok\":true,\"id\":1,\"username\":\""+username+"\",\"role\":\""+role+"\"}"); return r;
+  Response r; r.status=201; r.json(201,"{\"success\":true,\"ok\":true,\"id\":1,\"username\":\""+username+"\",\"role\":\""+role+"\"}"); return r;
 }
 Response edit_user(const Request&){
-  Response r; r.json(200,"{\"ok\":true}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"ok\":true}"); return r;
 }
 Response delete_user(const Request&){
-  Response r; r.json(200,"{\"ok\":true}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"ok\":true}"); return r;
 }
 Response instansi_update(const Request& req){
   auto form=helpers::parse_form(req.body);
   std::string name=get_param(form,"instansi");
   if(name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"instansi required\"}"); return r; }
-  Response r; r.json(200,"{\"ok\":true,\"instansi\":\""+name+"\"}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"ok\":true,\"instansi\":\""+name+"\"}"); return r;
 }
 } // namespace examvan::handlers::admin
