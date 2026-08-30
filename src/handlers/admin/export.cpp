@@ -5,11 +5,20 @@
 namespace examvan::handlers::admin {
 static std::string csv_escape(const std::string& s){
   if(s.empty()) return s;
-  char c=s[0];
-  if(c=='='||c=='+'||c=='-'||c=='@'||c=='|'||c=='%'){
-    return "'"+s;
+  size_t start=s.find_first_not_of(" \t\r\n");
+  char c = (start==std::string::npos? '\0': s[start]);
+  bool is_formula = (c=='='||c=='+'||c=='-'||c=='@'||c=='|'||c=='%');
+  bool need_quote = s.find(',')!=std::string::npos || s.find('"')!=std::string::npos || s.find('\n')!=std::string::npos || s.find('\r')!=std::string::npos;
+  if(is_formula){
+    std::string esc="'"+s;
+    if(need_quote){
+      std::string o="\"";
+      for(char ch: esc){ if(ch=='"') o+="\"\""; else o+=ch; }
+      o+="\""; return o;
+    }
+    return esc;
   }
-  if(s.find(',')!=std::string::npos || s.find('"')!=std::string::npos || s.find('\n')!=std::string::npos){
+  if(need_quote){
     std::string o="\"";
     for(char ch: s){ if(ch=='"') o+="\"\""; else o+=ch; }
     o+="\""; return o;

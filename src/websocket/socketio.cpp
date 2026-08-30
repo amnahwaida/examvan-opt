@@ -5,12 +5,16 @@ namespace examvan {
 
 std::string json_string(const std::string& s) {
   std::string out="\"";
-  for(char c: s){
+  for(unsigned char c: s){
     if(c=='"') out+="\\\"";
     else if(c=='\\') out+="\\\\";
+    else if(c=='\b') out+="\\b";
+    else if(c=='\f') out+="\\f";
     else if(c=='\n') out+="\\n";
     else if(c=='\r') out+="\\r";
-    else out+=c;
+    else if(c=='\t') out+="\\t";
+    else if(c<0x20){ char buf[7]; snprintf(buf,sizeof(buf),"\\u%04x",c); out+=buf; }
+    else out+=char(c);
   }
   out+="\"";
   return out;

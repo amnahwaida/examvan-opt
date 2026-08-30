@@ -11,7 +11,7 @@ if(CCACHE_FOUND)
   set(CMAKE_C_COMPILER_LAUNCHER ccache)
 endif()
 
-add_compile_options(-Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter)
+add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
 
 option(ENABLE_SANITIZERS "Build with ASan+UBSan" OFF)
 if(ENABLE_SANITIZERS)
@@ -136,6 +136,7 @@ target_include_directories(examvan_core PUBLIC
   ${CMAKE_SOURCE_DIR}/include
 )
 
+target_compile_options(examvan_core PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter)
 target_link_libraries(examvan_core PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads ${CRYPT_LIB})
 if(WITH_UWEBSOCKETS)
   set(_uws_src ${uWebSockets_SOURCE_DIR})
@@ -219,6 +220,8 @@ add_executable(examvan-tests
   tests/test_docker_build_tdd.cpp
   tests/test_review_round5_tdd.cpp
   tests/test_docker_runtime_tdd.cpp
+  tests/test_audit_fix_tdd.cpp
+  tests/test_csrf_fix_tdd.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)

@@ -81,7 +81,7 @@ TEST(Hub, BackpressureDrop) {
 }
 
 TEST(Hub, OriginCheck) {
-  EXPECT_TRUE(check_origin("","example.com"));
+  EXPECT_FALSE(check_origin("","example.com"));
   EXPECT_TRUE(check_origin("https://example.com","example.com"));
   EXPECT_TRUE(check_origin("http://localhost:3000","example.com"));
   EXPECT_FALSE(check_origin("https://evil.com","example.com"));

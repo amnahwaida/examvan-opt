@@ -75,7 +75,7 @@ TEST(TDD_DualKey, VerifyWithPrev) {
 TEST(TDD_Origin, EvilBypassBlocked) {
     EXPECT_TRUE(check_origin("https://evil.com","evil.com"));
     EXPECT_FALSE(check_origin("https://evil.com","examvan.id"));
-    EXPECT_TRUE(check_origin("","anything"));
+    EXPECT_FALSE(check_origin("","anything"));
     EXPECT_TRUE(check_origin("http://localhost:3000","localhost:3000"));
     EXPECT_TRUE(check_origin("http://127.0.0.1:5000","127.0.0.1:5000"));
 }

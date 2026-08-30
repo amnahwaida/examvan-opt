@@ -105,7 +105,7 @@ TEST(P1_Hub, OriginRejectsWrongHost) {
   EXPECT_FALSE(check_origin("https://evil.com","examvan.example.com"));
   EXPECT_FALSE(check_origin("https://examvan.example.com.evil.com","examvan.example.com"));
   EXPECT_TRUE(check_origin("https://examvan.example.com","examvan.example.com"));
-  EXPECT_TRUE(check_origin("","anything"));
+  EXPECT_FALSE(check_origin("","anything"));
   EXPECT_TRUE(check_origin("http://localhost:3000","examvan.example.com"));
   EXPECT_TRUE(check_origin("http://127.0.0.1:5000","examvan.example.com"));
 }

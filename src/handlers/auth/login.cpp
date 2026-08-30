@@ -35,7 +35,7 @@ static std::string hash_password(const std::string& p){
   struct crypt_data cd{}; cd.initialized=0;
   char* out=crypt_r(p.c_str(), salt.c_str(), &cd);
   if(out) return std::string(out);
-  return salt+"$fallback";
+  throw std::runtime_error("crypt_r failed");
 }
 static bool verify_password(const std::string& plain, const std::string& hashed){
   if(hashed.rfind("$2b$",0)==0 || hashed.rfind("$2a$",0)==0 || hashed.rfind("$2y$",0)==0){
@@ -63,15 +63,32 @@ Response login_page(const Request&){
   if(fr){
     std::ostringstream ss; ss<<fr.rdbuf();
     std::string html=ss.str();
-    size_t p=html.find("{{.csrf_token}}"); if(p!=std::string::npos) html.replace(p, 15, csrf);
-    p=html.find("{{ .csrf_token }}"); if(p!=std::string::npos) html.replace(p, 17, csrf);
-    /* rendered.html hasil capture Go berisi token HARDCODE — ganti semua
-     * kemunculannya (meta + hidden input) dengan csrf sesi ini. */
-    p=html.find("CSRF_PLACEHOLDER");
-    while(p!=std::string::npos){
-      html.replace(p, 16, csrf);
-      p=html.find("CSRF_PLACEHOLDER", p+csrf.size());
-    }
+    auto replace_all=[&](const std::string& from){
+      size_t p=0; while((p=html.find(from,p))!=std::string::npos){ html.replace(p,from.size(),csrf); p+=csrf.size(); }
+    };
+    replace_all("{{.csrf_token}}");
+    replace_all("{{ .csrf_token }}");
+    replace_all("{{.csrf_token }}");
+    replace_all("{{ .csrf_token}}");
+    replace_all("CSRF_PLACEHOLDER");
+    auto replace_attr=[&](const std::string& needle){
+      size_t pos=0;
+      while((pos=html.find(needle,pos))!=std::string::npos){
+        size_t q1=html.find('"',pos+needle.size()-1);
+        if(q1==std::string::npos) q1=html.find('\'',pos+needle.size()-1);
+        if(q1==std::string::npos) break;
+        char qc=html[q1];
+        size_t q2=html.find(qc,q1+1);
+        if(q2==std::string::npos) break;
+        html.replace(q1+1,q2-q1-1,csrf);
+        pos=q2+1;
+      }
+    };
+    replace_attr("csrf-token\" content=\"");
+    replace_attr("csrf_token\" value=\"");
+    replace_attr("_csrf\" value=\"");
+    replace_attr("csrf-token' content='");
+    replace_attr("csrf_token' value='");
     std::string ck="csrf_token="+csrf+"; Path=/; SameSite=Lax";
     if(!Config::load().is_development()) ck+="; Secure";
     Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=ck;
@@ -84,19 +101,43 @@ Response login_page(const Request&){
   return r;
 }
 
+static std::string get_hdr_ci(const Request& req, const std::string& name){
+  for(auto &kv: req.headers){
+    if(kv.first.size()!=name.size()) continue;
+    bool eq=true; for(size_t i=0;i<name.size();i++) if(tolower((unsigned char)kv.first[i])!=tolower((unsigned char)name[i])){eq=false;break;}
+    if(eq) return kv.second;
+  }
+  return "";
+}
+static std::string json_field(const std::string& body, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t n=body.size(); bool in_str=false; bool esc=false;
+  for(size_t i=0;i<n;){
+    if(!in_str && !esc && i+needle.size()<=n && body.compare(i,needle.size(),needle)==0){
+      size_t c=i+needle.size(); while(c<n && (body[c]==' '||body[c]=='\t'||body[c]=='\n'||body[c]=='\r')) c++;
+      if(c<n && body[c]==':'){ size_t v=c+1; while(v<n && (body[v]==' '||body[v]=='\t'||body[v]=='\n'||body[v]=='\r')) v++;
+        if(v<n && body[v]=='"'){ size_t q=v; size_t e=q+1; while(e<n){ if(body[e]=='\\'){e+=2;continue;} if(body[e]=='"') break; e++; } if(e<n) return body.substr(q+1,e-q-1); }
+        else if(v<n){ size_t e=v; while(e<n && body[e]!=',' && body[e]!='}' && body[e]!='"') e++; std::string val=body.substr(v,e-v); size_t a=val.find_first_not_of(" \t\r\n"); size_t b=val.find_last_not_of(" \t\r\n"); if(a!=std::string::npos) val=val.substr(a,b-a+1); return val; }
+      }
+    }
+    char ch=body[i]; if(esc) esc=false; else if(ch=='\\' && in_str) esc=true; else if(ch=='"') in_str=!in_str; i++;
+  }
+  return "";
+}
 Response login_handler(const Request& req, const Config& cfg){
-  /* Body form adalah application/x-www-form-urlencoded — browser meng-encode
-   * + / = dalam token CSRF menjadi %2B %2F %3D. Tanpa decode, token tidak
-   * pernah match cookie aslinya → selalu 403. */
   auto form=helpers::parse_form(req.body);
-  std::string csrf_header;
-  auto it=req.headers.find("X-CSRF-Token"); if(it!=req.headers.end()) csrf_header=it->second;
-  else {
-    auto f=form.find("csrf_token"); if(f==form.end()) f=form.find("_csrf");
-    if(f!=form.end()) csrf_header=f->second;
+  std::string csrf_header=get_hdr_ci(req,"X-CSRF-Token");
+  if(csrf_header.empty()) csrf_header=get_hdr_ci(req,"X-XSRF-Token");
+  if(csrf_header.empty()){
+    auto f=form.find("csrf_token"); if(f==form.end()) f=form.find("_csrf"); if(f==form.end()) f=form.find("csrf"); if(f!=form.end()) csrf_header=f->second;
+    if(csrf_header.empty()) csrf_header=json_field(req.body,"csrf_token");
+    if(csrf_header.empty()) csrf_header=json_field(req.body,"_csrf");
+    if(csrf_header.empty()) csrf_header=json_field(req.body,"csrf");
+    if(csrf_header.empty()) csrf_header=json_field(req.body,"x-csrf-token");
   }
   std::string session_csrf;
-  auto ck=req.headers.find("Cookie"); if(ck!=req.headers.end()){ auto c=extract_cookie(ck->second,"csrf_token"); if(!c.empty()) session_csrf=c; }
+  std::string cookie_hdr=get_hdr_ci(req,"Cookie");
+  if(!cookie_hdr.empty()){ auto c=extract_cookie(cookie_hdr,"csrf_token"); if(!c.empty()) session_csrf=c; }
   if(session_csrf.empty()){
     Response r; r.status=403; r.json(403,"{\"error\":\"CSRF token mismatch\"}"); return r;
   }
@@ -105,6 +146,7 @@ Response login_handler(const Request& req, const Config& cfg){
   }
   std::string turnstile;
   auto tf=form.find("cf-turnstile-response"); if(tf!=form.end()) turnstile=tf->second;
+  if(turnstile.empty()) turnstile=json_field(req.body,"cf-turnstile-response");
   if(!turnstile.empty()){
     std::string secret = cfg.turnstile_secret;
     if(secret.empty()) if(auto* e=getenv("TURNSTILE_SECRET")) secret=e;
@@ -114,7 +156,9 @@ Response login_handler(const Request& req, const Config& cfg){
   }
   std::string username, password;
   if(auto u=form.find("username"); u!=form.end()) username=u->second;
+  if(username.empty()) username=json_field(req.body,"username");
   if(auto p=form.find("password"); p!=form.end()) password=p->second;
+  if(password.empty()) password=json_field(req.body,"password");
   if(username.empty()||password.empty()){
     Response r; r.status=400; r.json(400,"{\"error\":\"username and password required\"}"); return r;
   }
@@ -130,16 +174,20 @@ Response login_handler(const Request& req, const Config& cfg){
    * F1 §5. Form HTML biasa tidak punya header tersebut → 303 redirect agar
    * browser langsung menuju dashboard/next, bukan menampilkan JSON mentah. */
   bool wants_json=false;
-  if(auto h=req.headers.find("Accept"); h!=req.headers.end() && h->second.find("application/json")!=std::string::npos) wants_json=true;
-  if(auto x=req.headers.find("X-Requested-With"); x!=req.headers.end() && x->second=="XMLHttpRequest") wants_json=true;
+  if(get_hdr_ci(req,"Accept").find("application/json")!=std::string::npos) wants_json=true;
+  if(get_hdr_ci(req,"X-Requested-With")=="XMLHttpRequest") wants_json=true;
+  if(!wants_json){ std::string ct=get_hdr_ci(req,"Content-Type"); if(ct.find("application/json")!=std::string::npos) wants_json=true; }
   if(wants_json){
     Response r; r.json(200,"{\"success\":true,\"username\":\""+username+"\"}");
     r.headers["Set-Cookie"]=cookie;
     return r;
   }
   std::string target="/admin/dashboard";
-  if(auto n=form.find("next"); n!=form.end() && !n->second.empty()){
-    std::string nx = helpers::url_decode(n->second);
+  std::string next_val;
+  if(auto n=form.find("next"); n!=form.end() && !n->second.empty()) next_val=n->second;
+  else { next_val=json_field(req.body,"next"); }
+  if(!next_val.empty()){
+    std::string nx = helpers::url_decode(next_val);
     nx = helpers::url_decode(nx);
     if(!nx.empty() && nx[0]=='/' && (nx.size()==1 || nx[1]!='/') && nx.find('\\')==std::string::npos && nx.find("%2f")==std::string::npos && nx.find("%2F")==std::string::npos && nx.find("%5c")==std::string::npos && nx.find("%5C")==std::string::npos && nx.find("//")==std::string::npos && nx.find("..")==std::string::npos && nx.find(':')==std::string::npos) target=nx;
   }

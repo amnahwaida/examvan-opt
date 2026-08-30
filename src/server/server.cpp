@@ -115,40 +115,66 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
   auto client = std::make_shared<examvan::Client>();
   client->room = room; client->privileged = privileged;
   if (hub) hub->add_client(client);
-  char buf[4096];
-  while (true) {
-    ssize_t n = recv(cfd, buf, sizeof(buf), 0);
-    if (n <= 0) break;
-    if (n < 2) continue;
-    unsigned char opcode = buf[0] & 0x0F;
-    bool masked = buf[1] & 0x80;
-    uint64_t len = buf[1] & 0x7F;
-    size_t off = 2;
-    if (len == 126) { if (n < 4) break; len = (uint8_t(buf[2]) << 8) | uint8_t(buf[3]); off = 4; }
-    else if (len == 127) { if (n < 10) break; len = 0; for(int i=0;i<8;i++) len = (len<<8) | uint8_t(buf[2+i]); off = 10; }
-    unsigned char mask[4] = {0};
-    if (masked) { if ((size_t)n < off + 4) break; memcpy(mask, buf + off, 4); off += 4; }
-    if ((size_t)n < off + len) break;
-    std::string payload(len, '\0');
-    for (uint64_t i = 0; i < len; ++i) payload[i] = buf[off + i] ^ (masked ? mask[i % 4] : 0);
-    if (opcode == 0x8) break;
-    if (opcode == 0x9) {
-      std::string pong; pong.push_back(char(0x8A)); pong.push_back(char(len));
-      pong += payload; send(cfd, pong.c_str(), pong.size(), 0); continue;
+  std::vector<char> acc; acc.reserve(8192);
+  std::string frag_buf; bool frag_in=false; [[maybe_unused]] unsigned char frag_op=0;
+  char tmp[4096];
+  auto flush_queue=[&](){
+    while (!client->send_queue.empty()) {
+      std::string msg;
+      { std::lock_guard<std::mutex> g(client->mu); if (client->send_queue.empty()) break; msg = client->send_queue.front(); client->send_queue.pop(); }
+      std::string frame; frame.push_back(char(0x81));
+      if (msg.size() < 126) frame.push_back(char(msg.size()));
+      else if (msg.size() < 65536) { frame.push_back(char(126)); frame.push_back(char(msg.size() >> 8)); frame.push_back(char(msg.size() & 0xFF)); }
+      else { uint64_t l=msg.size(); frame.push_back(char(127)); for(int i=7;i>=0;--i) frame.push_back(char((l>>(i*8))&0xFF)); }
+      frame += msg;
+      send(cfd, frame.c_str(), frame.size(), 0);
     }
-    if (opcode == 0x1 && hub) {
-      hub->handle_message(client, payload);
-      while (!client->send_queue.empty()) {
-        std::string msg;
-        { std::lock_guard<std::mutex> g(client->mu); if (client->send_queue.empty()) break; msg = client->send_queue.front(); client->send_queue.pop(); }
-        std::string frame; frame.push_back(char(0x81));
-        if (msg.size() < 126) frame.push_back(char(msg.size()));
-        else if (msg.size() < 65536) { frame.push_back(char(126)); frame.push_back(char(msg.size() >> 8)); frame.push_back(char(msg.size() & 0xFF)); }
-        else break;
-        frame += msg;
-        send(cfd, frame.c_str(), frame.size(), 0);
+  };
+  while (true) {
+    ssize_t n = recv(cfd, tmp, sizeof(tmp), 0);
+    if (n <= 0) break;
+    acc.insert(acc.end(), tmp, tmp+n);
+    size_t cursor=0;
+    while (true) {
+      if (acc.size()-cursor < 2) break;
+      unsigned char b0=acc[cursor]; unsigned char b1=acc[cursor+1];
+      bool fin = b0 & 0x80;
+      unsigned char opcode = b0 & 0x0F;
+      bool masked = b1 & 0x80;
+      uint64_t len = b1 & 0x7F;
+      size_t off=cursor+2;
+      if (len==126){ if(acc.size()-cursor < 4) break; len=(uint8_t(acc[off])<<8)|uint8_t(acc[off+1]); off+=2; }
+      else if(len==127){ if(acc.size()-cursor < 10) break; len=0; for(int i=0;i<8;i++) len=(len<<8)|uint8_t(acc[off+i]); off+=8; if(len>5*1024*1024) { close(cfd); return; } }
+      size_t mask_off=off;
+      if(masked){ if(acc.size() < off+4) break; off+=4; }
+      if(acc.size() < off+len) break;
+      unsigned char mask[4]={0}; if(masked) memcpy(mask, &acc[mask_off],4);
+      std::string payload; payload.resize(len);
+      for(uint64_t i=0;i<len;i++) payload[i]=acc[off+i] ^ (masked?mask[i%4]:0);
+      cursor=off+len;
+      if(opcode==0x8) { acc.clear(); if(hub) hub->remove_client(client); close(cfd); return; }
+      if(opcode==0x9){
+        std::string pong; pong.push_back(char(0x8A));
+        if(payload.size()<126) pong.push_back(char(payload.size()));
+        else if(payload.size()<65536){ pong.push_back(char(126)); pong.push_back(char(payload.size()>>8)); pong.push_back(char(payload.size()&0xFF)); }
+        else { pong.push_back(char(127)); for(int i=7;i>=0;--i) pong.push_back(char((payload.size()>>(i*8))&0xFF)); }
+        pong+=payload; send(cfd,pong.c_str(),pong.size(),0); continue;
+      }
+      if(opcode==0x0){
+        if(!frag_in) continue;
+        frag_buf+=payload;
+        if(fin){ std::string complete=frag_buf; frag_buf.clear(); frag_in=false; if(hub) hub->handle_message(client, complete); flush_queue(); }
+        continue;
+      }
+      if(opcode==0x1 || opcode==0x2){
+        if(!fin){ frag_in=true; frag_op=opcode; frag_buf=payload; continue; }
+        if(hub) hub->handle_message(client, payload);
+        flush_queue();
+        continue;
       }
     }
+    if(cursor>0) acc.erase(acc.begin(), acc.begin()+cursor);
+    if(acc.size()>5*1024*1024) break;
   }
   if (hub) hub->remove_client(client);
   close(cfd);
@@ -165,9 +191,8 @@ static std::string content_type_for(const std::string& p){
 }
 
 static bool try_serve_static(int cfd, const std::string& path){
-  std::string dec = path;
-  // url_decode path to catch %2e etc, handle double encode
-  for(int iter=0; iter<2; ++iter){
+  std::string dec = path; // url_decode loop handles %2e double encode
+  for(int iter=0; iter<5; ++iter){
     std::string nd;
     nd.reserve(dec.size());
     for(size_t i=0;i<dec.size();++i){
@@ -175,15 +200,17 @@ static bool try_serve_static(int cfd, const std::string& path){
         auto hex=[](char c)->int{ if(c>='0'&&c<='9') return c-'0'; if(c>='a'&&c<='f') return c-'a'+10; if(c>='A'&&c<='F') return c-'A'+10; return -1; };
         int h=hex(dec[i+1]), l=hex(dec[i+2]);
         if(h>=0&&l>=0){ nd.push_back(char((h<<4)|l)); i+=2; } else nd.push_back(dec[i]);
-      } else if(dec[i]=='+') nd.push_back(' ');
-      else nd.push_back(dec[i]);
+      } else nd.push_back(dec[i]);
     }
     if(nd==dec) break;
     dec=nd;
+    if(dec.find('\0')!=std::string::npos) return false;
   }
   if(dec.find("..")!=std::string::npos) return false;
   if(dec.find('\0')!=std::string::npos) return false;
-  if(dec.find("%2e")!=std::string::npos || dec.find("%2E")!=std::string::npos) return false;
+  std::string low=dec; for(char &ch: low) ch=tolower((unsigned char)ch);
+  if(low.find("%2e")!=std::string::npos) return false;
+  if(low.find("%252e")!=std::string::npos) return false;
   std::string fp;
   if(dec.rfind("/static/",0)==0) fp="."+dec;
   else if(dec=="/favicon.ico") fp="./static/favicon.png";
@@ -204,6 +231,7 @@ static bool try_serve_static(int cfd, const std::string& path){
 }
 
 static void handle_client(int cfd, examvan::Router* router, const examvan::Config* cfg, examvan::Hub* hub) {
+  struct timeval tv{10,0}; setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
   std::string req;
   char buf[8192];
   ssize_t n=0;
@@ -259,14 +287,32 @@ static void handle_client(int cfd, examvan::Router* router, const examvan::Confi
     send(cfd, too.c_str(), too.size(), 0);
     close(cfd); return;
   }
-  std::string cookie_hdr = extract_header(req, "Cookie");
-  std::string xver = extract_header(req, "X-App-Version");
-  std::string origin = extract_header(req, "Origin");
   examvan::Request r;
   r.method=method; r.path=path; r.body=body;
-  if(!cookie_hdr.empty()) r.headers["Cookie"]=cookie_hdr;
-  if(!xver.empty()) r.headers["X-App-Version"]=xver;
-  if(!origin.empty()) r.headers["Origin"]=origin;
+  {
+    size_t hdr_start=req.find("\r\n");
+    if(hdr_start!=std::string::npos){
+      size_t pos=hdr_start+2;
+      size_t end=req.find("\r\n\r\n");
+      if(end==std::string::npos) end=req.size();
+      while(pos<end){
+        size_t e=req.find("\r\n",pos);
+        if(e==std::string::npos || e>end) e=end;
+        std::string line=req.substr(pos,e-pos);
+        pos=e+2;
+        if(line.empty()) break;
+        auto colon=line.find(':');
+        if(colon==std::string::npos) continue;
+        std::string name=line.substr(0,colon);
+        std::string val=line.substr(colon+1);
+        size_t s=name.find_first_not_of(" \t"); size_t ee=name.find_last_not_of(" \t\r\n");
+        if(s==std::string::npos) continue;
+        name=name.substr(s,ee-s+1);
+        s=val.find_first_not_of(" \t"); if(s==std::string::npos) val=""; else { ee=val.find_last_not_of(" \t\r\n"); val=val.substr(s,ee-s+1); }
+        r.headers[name]=val;
+      }
+    }
+  }
   auto resp = router ? router->dispatch(r) : examvan::Response{};
   if(resp.status==0) resp.status=404;
   std::string out=http_response(resp);
@@ -326,23 +372,32 @@ bool Server::listen(const ServerOpts& opts) {
       std::string method(req->getMethod());
       for (auto &c : method) c = toupper(static_cast<unsigned char>(c));
       /* Body POST dibaca via res->onData (uWS streaming). Handler GET juga
-       * dipanggil dengan body kosong (chunk="" + last=true) — aman.
-       * WAJIB: semua path harus respond, dan onAborted wajib terpasang. */
+        * dipanggil dengan body kosong (chunk="" + last=true) — aman.
+        * WAJIB: semua path harus respond, dan abort handler wajib terpasang. */
       std::string cookie(std::string_view(req->getHeader("cookie")));
       std::string xver(std::string_view(req->getHeader("x-app-version")));
       std::string origin(std::string_view(req->getHeader("origin")));
+      std::string xcsrf(std::string_view(req->getHeader("x-csrf-token")));
+      if(xcsrf.empty()) xcsrf=std::string(req->getHeader("x-xsrf-token"));
+      std::string accept(std::string_view(req->getHeader("accept")));
+      std::string xreq(std::string_view(req->getHeader("x-requested-with")));
+      std::string ctype(std::string_view(req->getHeader("content-type")));
       res->onAborted([res](){
         g_uWS_body.clear();
         res->writeStatus("500");
         res->end();
       });
-      res->onData([router_ptr, res, method, path, cookie, xver, origin](std::string_view chunk, bool last){
+      res->onData([router_ptr, res, method, path, cookie, xver, origin, xcsrf, accept, xreq, ctype](std::string_view chunk, bool last){
         g_uWS_body.append(chunk);
         if(!last) return;
         examvan::Request r; r.method=method; r.path=path; r.body=g_uWS_body;
         if(!cookie.empty()) r.headers["Cookie"]=cookie;
         if(!xver.empty()) r.headers["X-App-Version"]=xver;
         if(!origin.empty()) r.headers["Origin"]=origin;
+        if(!xcsrf.empty()) r.headers["X-CSRF-Token"]=xcsrf;
+        if(!accept.empty()) r.headers["Accept"]=accept;
+        if(!xreq.empty()) r.headers["X-Requested-With"]=xreq;
+        if(!ctype.empty()) r.headers["Content-Type"]=ctype;
         g_uWS_body.clear();
         auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
         if(resp.status==0) resp.status=404;
@@ -406,24 +461,25 @@ bool Server::listen(const ServerOpts& opts) {
   if(::listen(g_fd, SOMAXCONN)<0){ close(g_fd); g_fd=-1; return false; }
   g_running=true;
   running_=true;
-  static std::queue<int> q;
-  static std::mutex qmu;
-  static std::condition_variable qcv;
-  for(int i=0;i<8;i++){
-    std::thread([this]{
+  auto q = std::make_shared<std::queue<int>>();
+  auto qmu = std::make_shared<std::mutex>();
+  auto qcv = std::make_shared<std::condition_variable>();
+  int workers = std::thread::hardware_concurrency(); if(workers<4) workers=4; if(workers>16) workers=16;
+  for(int i=0;i<workers;i++){
+    std::thread([this,q,qmu,qcv]{
       while(g_running){
         int cfd=-1;
-        { std::unique_lock<std::mutex> lk(qmu); qcv.wait(lk, []{ return !q.empty() || !g_running.load(); }); if(!g_running && q.empty()) break; if(q.empty()) continue; cfd=q.front(); q.pop(); }
+        { std::unique_lock<std::mutex> lk(*qmu); qcv->wait(lk, [&]{ return !q->empty() || !g_running.load(); }); if(!g_running && q->empty()) break; if(q->empty()) continue; cfd=q->front(); q->pop(); }
         handle_client(cfd, router_, &cfg_, hub_);
       }
     }).detach();
   }
-  std::thread([this]{
+  std::thread([this,q,qmu,qcv]{
     while(g_running){
       int cfd=accept(g_fd,nullptr,nullptr);
       if(cfd<0){ if(!g_running) break; continue; }
-      { std::lock_guard<std::mutex> lk(qmu); q.push(cfd); }
-      qcv.notify_one();
+      { std::lock_guard<std::mutex> lk(*qmu); q->push(cfd); }
+      qcv->notify_one();
     }
   }).detach();
   return true;

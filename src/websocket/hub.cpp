@@ -84,20 +84,34 @@ static std::string now_rfc3339(){
 
 std::string Hub::extract_json_string(const std::string& json, const std::string& key){
   std::string needle = "\"" + key + "\"";
-  auto pos = json.find(needle);
-  if(pos==std::string::npos) return "";
-  pos = json.find(':',pos);
-  if(pos==std::string::npos) return "";
-  pos = json.find('"',pos);
-  if(pos==std::string::npos) return "";
-  size_t end = pos+1;
-  while(end < json.size()){
-    if(json[end]=='\\'){ end+=2; continue; }
-    if(json[end]=='"') break;
-    end++;
+  size_t n = json.size();
+  bool in_str=false; bool esc=false;
+  for(size_t i=0;i<n;){
+    if(!in_str && !esc && i+needle.size()<=n && json.compare(i, needle.size(), needle)==0){
+      size_t colon=i+needle.size();
+      while(colon<n && (json[colon]==' '||json[colon]=='\t'||json[colon]=='\n'||json[colon]=='\r')) colon++;
+      if(colon<n && json[colon]==':'){
+        size_t v=colon+1;
+        while(v<n && (json[v]==' '||json[v]=='\t'||json[v]=='\n'||json[v]=='\r')) v++;
+        if(v<n && json[v]=='"'){
+          size_t q=v;
+          size_t end=q+1;
+          while(end<n){
+            if(json[end]=='\\'){ end+=2; continue; }
+            if(json[end]=='"') break;
+            end++;
+          }
+          if(end<n) return json.substr(q+1,end-q-1);
+        }
+      }
+    }
+    char c=json[i];
+    if(esc){ esc=false; }
+    else if(c=='\\' && in_str){ esc=true; }
+    else if(c=='"'){ in_str=!in_str; }
+    i++;
   }
-  if(end>=json.size()) return "";
-  return json.substr(pos+1,end-pos-1);
+  return "";
 }
 
 void Hub::handle_message(std::shared_ptr<Client> c, const std::string& raw){
@@ -175,7 +189,8 @@ static std::string strip_port(const std::string& s){
   return s;
 }
 bool check_origin(const std::string& origin, const std::string& host){
-  if(origin.empty()) return true;
+  if(origin.empty()) return false;
+  if(origin=="null") return false;
   std::string h = origin;
   auto p = h.find("://");
   if(p!=std::string::npos) h=h.substr(p+3);

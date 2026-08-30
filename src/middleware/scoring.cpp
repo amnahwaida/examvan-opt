@@ -6,21 +6,54 @@ namespace examvan::scoring {
 
 static std::string extract_str(const std::string& obj, const std::string& key){
   std::string needle="\""+key+"\"";
-  auto p=obj.find(needle); if(p==std::string::npos) return "";
-  auto c=obj.find(':',p+needle.size()); if(c==std::string::npos) return "";
-  size_t q1=obj.find('"',c); if(q1==std::string::npos) return "";
-  size_t q2=q1+1; while(q2<obj.size()){ if(obj[q2]=='\\'){ q2+=2; continue; } if(obj[q2]=='"') break; q2++; }
-  if(q2>=obj.size()) return "";
-  return obj.substr(q1+1,q2-q1-1);
+  size_t n=obj.size();
+  bool in_str=false; bool esc=false;
+  for(size_t i=0;i<n;){
+    if(!in_str && !esc && i+needle.size()<=n && obj.compare(i, needle.size(), needle)==0){
+      size_t colon=i+needle.size();
+      while(colon<n && (obj[colon]==' '||obj[colon]=='\t'||obj[colon]=='\n'||obj[colon]=='\r')) colon++;
+      if(colon<n && obj[colon]==':'){
+        size_t v=colon+1;
+        while(v<n && (obj[v]==' '||obj[v]=='\t'||obj[v]=='\n'||obj[v]=='\r')) v++;
+        if(v<n && obj[v]=='"'){
+          size_t q1=v;
+          size_t q2=q1+1; while(q2<n){ if(obj[q2]=='\\'){ q2+=2; continue; } if(obj[q2]=='"') break; q2++; }
+          if(q2<n) return obj.substr(q1+1,q2-q1-1);
+        }
+      }
+    }
+    char c=obj[i];
+    if(esc){ esc=false; }
+    else if(c=='\\' && in_str){ esc=true; }
+    else if(c=='"'){ in_str=!in_str; }
+    i++;
+  }
+  return "";
 }
 static double extract_double(const std::string& obj, const std::string& key, double def){
   std::string needle="\""+key+"\"";
-  auto p=obj.find(needle); if(p==std::string::npos) return def;
-  auto c=obj.find(':',p+needle.size()); if(c==std::string::npos) return def;
-  size_t s=obj.find_first_not_of(" \t",c+1); if(s==std::string::npos) return def;
-  if(obj[s]=='"'){ auto v=extract_str(obj,key); try{return std::stod(v);}catch(...){return def;}}
-  size_t e=obj.find_first_of(",}",s); if(e==std::string::npos) e=obj.size();
-  try{return std::stod(obj.substr(s,e-s));}catch(...){return def;}
+  size_t n=obj.size();
+  bool in_str=false; bool esc=false;
+  for(size_t i=0;i<n;){
+    if(!in_str && !esc && i+needle.size()<=n && obj.compare(i, needle.size(), needle)==0){
+      size_t colon=i+needle.size();
+      while(colon<n && (obj[colon]==' '||obj[colon]=='\t'||obj[colon]=='\n'||obj[colon]=='\r')) colon++;
+      if(colon<n && obj[colon]==':'){
+        size_t s=colon+1;
+        while(s<n && (obj[s]==' '||obj[s]=='\t'||obj[s]=='\n'||obj[s]=='\r')) s++;
+        if(s<n){
+          if(obj[s]=='"'){ auto v=extract_str(obj,key); try{return std::stod(v);}catch(...){return def;}}
+          else { size_t e=s; while(e<n && obj[e]!=',' && obj[e]!='}' ) e++; try{return std::stod(obj.substr(s,e-s));}catch(...){return def;}}
+        }
+      }
+    }
+    char c=obj[i];
+    if(esc){ esc=false; }
+    else if(c=='\\' && in_str){ esc=true; }
+    else if(c=='"'){ in_str=!in_str; }
+    i++;
+  }
+  return def;
 }
 static int extract_int(const std::string& obj, const std::string& key, int def){
   return (int)extract_double(obj,key,def);

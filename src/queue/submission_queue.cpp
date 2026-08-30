@@ -4,12 +4,20 @@
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
 #include <chrono>
+#include <iomanip>
 #include <random>
 #include <sstream>
+#include <openssl/rand.h>
 
 namespace examvan::queue {
 
 std::string generate_job_id(){
+  unsigned char buf[8];
+  if(RAND_bytes(buf,sizeof(buf))==1){
+    std::ostringstream ss; ss<< std::hex << std::setfill('0');
+    for(int i=0;i<8;i++) ss<< std::setw(2) << (int)buf[i];
+    return ss.str();
+  }
   std::random_device rd; std::mt19937 g(rd());
   std::uniform_int_distribution<int> d(0,255);
   std::ostringstream ss; for(int i=0;i<8;i++) ss<< std::hex << std::setw(2) << std::setfill('0') << d(g);
@@ -46,7 +54,16 @@ static std::string json_unescape(const std::string& s){
       else if(n=='t') o+='\t';
       else if(n=='b') o+='\b';
       else if(n=='f') o+='\f';
-      else if(n=='u' && i+5<s.size()){ int v=0; for(int k=2;k<6;k++){ char h=s[i+k]; v*=16; if(h>='0'&&h<='9') v+=h-'0'; else if(h>='a'&&h<='f') v+=h-'a'+10; else if(h>='A'&&h<='F') v+=h-'A'+10; } o+=char(v); i+=6; continue; }
+      else if(n=='u' && i+5<s.size()){
+        int v=0; bool ok=true;
+        for(int k=2;k<6;k++){ char h=s[i+k]; v*=16; if(h>='0'&&h<='9') v+=h-'0'; else if(h>='a'&&h<='f') v+=h-'a'+10; else if(h>='A'&&h<='F') v+=h-'A'+10; else ok=false; }
+        if(ok){
+          if(v<=0x7F) o+=char(v);
+          else if(v<=0x7FF){ o+=char(0xC0|(v>>6)); o+=char(0x80|(v&0x3F)); }
+          else { o+=char(0xE0|(v>>12)); o+=char(0x80|((v>>6)&0x3F)); o+=char(0x80|(v&0x3F)); }
+          i+=6; continue;
+        } else o+=n;
+      }
       else o+=n;
       i+=2;
     } else { o+=s[i]; i++; }

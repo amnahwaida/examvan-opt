@@ -77,7 +77,7 @@ TEST(TDD2_C6_Origin, PortStripped) {
     EXPECT_FALSE(check_origin("https://evil.com","examvan.id:8081"));
     EXPECT_FALSE(check_origin("https://evil.com:8081","examvan.id"));
     EXPECT_TRUE(check_origin("http://localhost:3000","examvan.id"));
-    EXPECT_TRUE(check_origin("","examvan.id"));
+    EXPECT_FALSE(check_origin("","examvan.id"));
 }
 
 TEST(TDD2_M2_OpenRedirect, EncodedTraversalBlocked) {

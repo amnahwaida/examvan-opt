@@ -126,10 +126,6 @@ std::optional<SessionData> verify_session_cookie(const std::string& secret, cons
   std::string cookie_val = extract_cookie(cookie_header_value, "examvan_session");
   if (cookie_val.empty()) cookie_val = cookie_header_value;
   auto decoded = decode_cookie_value(secret, cookie_val);
-  if (!decoded){
-    std::string url_dec = b64url_decode(cookie_val);
-    if(!url_dec.empty()) decoded = decode_cookie_value(secret, url_dec);
-  }
   if (!decoded) return std::nullopt;
   SessionData d;
   d.fields = parse_kv(*decoded);

@@ -16,8 +16,7 @@ RUN cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON && cmake 
 CMD ["./build-san/examvan-tests"]
 
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y libpq5 libhiredis0.14 libcurl4 libcrypt1 curl ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /usr/local/lib64/libstdc++.so.6* /usr/lib/x86_64-linux-gnu/
+RUN apt-get update && apt-get install -y libpq5 libhiredis-dev libcurl4 libcrypt1 libstdc++6 curl ca-certificates && rm -rf /var/lib/apt/lists/*
 # Docker hardening: no-new-privileges
 COPY --from=builder /app/build/examvan-server /usr/local/bin/examvan-server
 COPY --from=builder /app/templates /app/templates
