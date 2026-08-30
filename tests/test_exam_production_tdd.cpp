@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "handlers/admin/exams.hpp"
 #include "handlers/admin/dashboard.hpp"
+#include "handlers/api/exams.hpp"
 #include "http/router_full.hpp"
 #include "helpers/utils.hpp"
 #include "handlers/r2/r2.hpp"
@@ -1164,4 +1165,308 @@ TEST(ExamProduction, ListExams_IncludesAllModelFields){
     << "list harus expose auto_approve: " << res.body;
   EXPECT_NE(res.body.find("\"tombstoned_at\""), std::string::npos)
     << "list harus expose tombstoned_at: " << res.body;
+}
+
+// ======================================================================
+// GROUP K: Token static/dynamic — parity with Go reference (TDD RED)
+//
+// Go source of truth:
+//   - create: active_token = token; default mode dynamic
+//   - static: accepts active_token OR permanent token
+//   - dynamic: accepts active_token ONLY
+//   - edit-token: sets both token + active_token (8 A-Z0-9, unique)
+//   - token-mode: static (clear interval) / dynamic (interval >=1)
+//   - regenerate: sets both token + active_token
+//   - student lookup: real store match, inactive = 404
+//   - rotation: lazy on student join, interval-based
+// ======================================================================
+
+// K1: create_exam harus inisialisasi active_token = token (Go parity)
+TEST(ExamProduction, CreateExam_SetsActiveTokenEqualsToken){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("ActiveInit","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value()) << "exam harus ada di store";
+  EXPECT_FALSE(exam->active_token.empty()) << "active_token tidak boleh kosong setelah create";
+  EXPECT_EQ(exam->active_token, exam->token)
+    << "active_token harus sama dengan token saat create (Go parity)";
+}
+
+// K2: create_exam harus set token_mode default = dynamic
+TEST(ExamProduction, CreateExam_DefaultTokenModeIsDynamic){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("DefMode","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->get_token_mode(), "dynamic")
+    << "token_mode default harus dynamic (Go parity)";
+}
+
+// K3: route POST /admin/api/exams/:exam_id/edit-token harus terdaftar
+TEST(ExamProduction, EditToken_RouteRegistered){
+  Config cfg; Router r; register_full_routes(r,cfg);
+  auto routes=r.routes();
+  bool found=false;
+  for(auto& rt: routes){
+    if(rt.find("POST /admin/api/exams/:exam_id/edit-token")!=std::string::npos
+       || rt.find("POST /admin/api/exams/:id/edit-token")!=std::string::npos)
+      { found=true; break; }
+  }
+  EXPECT_TRUE(found) << "route POST /admin/api/exams/:exam_id/edit-token harus terdaftar";
+}
+
+// K4: route POST /admin/api/exams/:exam_id/token-mode harus terdaftar
+TEST(ExamProduction, TokenMode_RouteRegistered){
+  Config cfg; Router r; register_full_routes(r,cfg);
+  auto routes=r.routes();
+  bool found=false;
+  for(auto& rt: routes){
+    if(rt.find("POST /admin/api/exams/:exam_id/token-mode")!=std::string::npos
+       || rt.find("POST /admin/api/exams/:id/token-mode")!=std::string::npos)
+      { found=true; break; }
+  }
+  EXPECT_TRUE(found) << "route POST /admin/api/exams/:exam_id/token-mode harus terdaftar";
+}
+
+// K5: edit-token harus mengubah token DAN active_token
+TEST(ExamProduction, EditToken_SetsCustomTokenAndActiveToken){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("EditTok","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  // kirim JSON body untuk edit-token
+  Request ru; ru.params["exam_id"]=id; ru.params["id"]=id;
+  ru.path="/"+id+"/edit-token";
+  ru.body="{\"token\":\"EDITTST1\"}";
+  ru.headers["Content-Type"]="application/json";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  EXPECT_NE(res.body.find("\"message\""), std::string::npos) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->token, "EDITTST1") << "token harus berubah";
+  EXPECT_EQ(exam->active_token, "EDITTST1")
+    << "active_token harus ikut berubah (Go parity)";
+}
+
+// K6: edit-token menolak token invalid (kurang dari 8 karakter)
+TEST(ExamProduction, EditToken_RejectsInvalidToken){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("EditInv","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["exam_id"]=id; ru.params["id"]=id;
+  ru.path="/"+id+"/edit-token";
+  ru.body="{\"token\":\"SHORT\"}";
+  ru.headers["Content-Type"]="application/json";
+  auto res=update_exam(ru);
+  EXPECT_EQ(res.status,400) << "token <8 harus ditolak: " << res.body;
+}
+
+// K7: edit-token menolak token yang sudah dipakai ujian lain
+TEST(ExamProduction, EditToken_RejectsDuplicate){
+  with_clean_store(); set_r2_env(true);
+  Request cr1; cr1.body=form_body("EditDup1","/tmp/a.pdf","100");
+  auto c1=create_exam(cr1); ASSERT_EQ(c1.status,201);
+  Request cr2; cr2.body=form_body("EditDup2","/tmp/b.pdf","100");
+  auto c2=create_exam(cr2); ASSERT_EQ(c2.status,201);
+  std::string tok2=json_field(c2.body,"token");
+  // coba edit token exam1 ke token exam2
+  Request ru; ru.params["exam_id"]=json_field(c1.body,"id");
+  ru.params["id"]=json_field(c1.body,"id");
+  ru.path="/"+json_field(c1.body,"id")+"/edit-token";
+  ru.body="{\"token\":\""+tok2+"\"}";
+  ru.headers["Content-Type"]="application/json";
+  auto res=update_exam(ru);
+  EXPECT_NE(res.status,200) << "edit-token ke token yang sudah ada harus ditolak: " << res.body;
+}
+
+// K8: token-mode static diterima, mode berubah dan interval dihapus
+TEST(ExamProduction, TokenMode_SetStatic){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("ModeStat","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  // set interval dulu agar ada nilai untuk dihapus
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.token_reset_interval=5;
+  });
+  Request ru; ru.params["exam_id"]=id; ru.params["id"]=id;
+  ru.path="/"+id+"/token-mode";
+  ru.body="{\"token_mode\":\"static\"}";
+  ru.headers["Content-Type"]="application/json";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->get_token_mode(), "static") << "mode harus berubah ke static";
+  EXPECT_FALSE(exam->token_reset_interval.has_value())
+    << "static harus clear interval (Go parity)";
+}
+
+// K9: token-mode dynamic diterima dengan interval >= 1
+TEST(ExamProduction, TokenMode_SetDynamic){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("ModeDyn","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["exam_id"]=id; ru.params["id"]=id;
+  ru.path="/"+id+"/token-mode";
+  ru.body="{\"token_mode\":\"dynamic\",\"reset_interval\":5}";
+  ru.headers["Content-Type"]="application/json";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->get_token_mode(), "dynamic");
+  EXPECT_TRUE(exam->token_reset_interval.has_value());
+  EXPECT_EQ(*exam->token_reset_interval, 5);
+}
+
+// K10: token-mode dynamic tanpa interval harus ditolak
+TEST(ExamProduction, TokenMode_DynamicRequiresInterval){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("ModeDynNo","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["exam_id"]=id; ru.params["id"]=id;
+  ru.path="/"+id+"/token-mode";
+  ru.body="{\"token_mode\":\"dynamic\"}";
+  ru.headers["Content-Type"]="application/json";
+  auto res=update_exam(ru);
+  EXPECT_EQ(res.status,400) << "dynamic tanpa interval harus ditolak: " << res.body;
+}
+
+// K11: regenerate-token harus update active_token juga
+TEST(ExamProduction, RegenerateToken_UpdatesActiveToken){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("RegenAct","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  std::string old_token=json_field(c.body,"token");
+  // set active_token berbeda dulu
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.active_token="OLDACTIVE";
+  });
+  Request ru; ru.params["id"]=id; ru.params["action"]="regenerate-token";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  std::string new_tok=json_field(res.body,"token");
+  EXPECT_FALSE(new_tok.empty()) << "harus ada token baru";
+  EXPECT_NE(new_tok, old_token) << "token harus berubah";
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->token, new_tok) << "token harus updated";
+  EXPECT_EQ(exam->active_token, new_tok)
+    << "active_token harus ikut updated (Go parity)";
+}
+
+// K12: student lookup — token valid format tapi tidak ada di store = 404
+TEST(ExamProduction, StudentToken_ValidFormatNotInStore_Returns404){
+  with_clean_store(); set_r2_env(true);
+  Request req;
+  req.params["token"]="NOTEXIST";
+  auto res=handlers::api::exam_by_token(req);
+  EXPECT_EQ(res.status,404) << "token valid tapi tidak ada di store harus 404: " << res.body;
+}
+
+// K13: student lookup — active+started exam dengan token yang benar = 200
+TEST(ExamProduction, StudentToken_ActiveExam_ReturnsData){
+  with_clean_store(); set_r2_env(true);
+  // buat dan start exam
+  Request cr; cr.body=form_body("StuAct","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  std::string token=json_field(c.body,"token");
+  // toggle ke active + set exam_started_at
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.status="active";
+    e.exam_started_at="2026-08-31T00:00:00Z";
+  });
+  Request req; req.params["token"]=token;
+  auto res=handlers::api::exam_by_token(req);
+  EXPECT_EQ(res.status,200) << "token yang valid harus return 200: " << res.body;
+  EXPECT_NE(res.body.find("\"status\":\"active\""), std::string::npos) << res.body;
+}
+
+// K14: student lookup — dynamic mode menolak permanent token
+TEST(ExamProduction, StudentToken_DynamicMode_RejectsPermanentToken){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("DynReject","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  std::string permanent_token=json_field(c.body,"token");
+  // set mode dynamic + started + ganti active_token ke token berbeda
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.status="active";
+    e.exam_started_at="2026-08-31T00:00:00Z";
+    e.token_mode="dynamic";
+    e.active_token="ROTATED0";
+  });
+  // permanent token tidak boleh diterima di mode dynamic
+  Request req1; req1.params["token"]=permanent_token;
+  auto res1=handlers::api::exam_by_token(req1);
+  EXPECT_EQ(res1.status,404)
+    << "dynamic mode harus menolak permanent token: " << res1.body;
+  // active_token yang benar harus diterima
+  Request req2; req2.params["token"]="ROTATED0";
+  auto res2=handlers::api::exam_by_token(req2);
+  EXPECT_EQ(res2.status,200)
+    << "dynamic mode harus terima active_token: " << res2.body;
+}
+
+// K15: student lookup — static mode menerima permanent token sebagai fallback
+TEST(ExamProduction, StudentToken_StaticMode_AcceptsPermanentToken){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("StatFB","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  std::string permanent_token=json_field(c.body,"token");
+  // set mode static + started + active_token kosong (fallback)
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.status="active";
+    e.exam_started_at="2026-08-31T00:00:00Z";
+    e.token_mode="static";
+    e.active_token="";  // kosongkan agar fallback ke token permanen
+  });
+  Request req; req.params["token"]=permanent_token;
+  auto res=handlers::api::exam_by_token(req);
+  EXPECT_EQ(res.status,200)
+    << "static mode harus terima permanent token sebagai fallback: " << res.body;
+}
+
+// K16: edit-token harus trim dan uppercase input
+TEST(ExamProduction, EditToken_TrimAndUppercase){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("TrimUp","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["exam_id"]=id; ru.params["id"]=id;
+  ru.path="/"+id+"/edit-token";
+  ru.body="{\"token\":\"  EdItToK1  \"}";
+  ru.headers["Content-Type"]="application/json";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->token, "EDITTOK1") << "harus trim + uppercase";
+  EXPECT_EQ(exam->active_token, "EDITTOK1") << "active_token harus trim+uppercase juga";
+}
+
+// K17: token-mode dengan mode tidak valid harus ditolak
+TEST(ExamProduction, TokenMode_RejectsInvalid){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("InvMode","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["exam_id"]=id; ru.params["id"]=id;
+  ru.path="/"+id+"/token-mode";
+  ru.body="{\"token_mode\":\"invalid\"}";
+  ru.headers["Content-Type"]="application/json";
+  auto res=update_exam(ru);
+  EXPECT_EQ(res.status,400) << "mode tidak valid harus ditolak: " << res.body;
 }

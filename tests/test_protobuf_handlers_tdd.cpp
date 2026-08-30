@@ -12,8 +12,32 @@
 #include "middleware/protobuf.hpp"
 #include "config/config.hpp"
 #include "examvan.pb.h"
+#include "store/exam_store.hpp"
+#include "store/exam_store_memory.hpp"
 #include <cstdlib>
 using namespace examvan;
+
+static std::string prepare_started_exam_for_api(){
+  handlers::admin::clear_exams_for_testing();
+  setenv("R2_ACCESS_KEY_ID","test",1);
+  setenv("R2_SECRET_ACCESS_KEY","test",1);
+  setenv("R2_ENDPOINT","https://test.r2.cloudflarestorage.com",1);
+  setenv("R2_BUCKET","test",1);
+  Request cr; cr.body="name=ProtoActive&file_path=/tmp/a.pdf&size_bytes=100";
+  auto created=handlers::admin::create_exam(cr);
+  EXPECT_EQ(created.status,201) << created.body;
+  if(created.status!=201) return "";
+  size_t p=created.body.find("\"token\":\"");
+  if(p==std::string::npos) return "";
+  p+=9; size_t e=created.body.find('"',p);
+  std::string token=created.body.substr(p,e-p);
+  size_t ip=created.body.find("\"id\":");
+  if(ip==std::string::npos) return token;
+  ip+=5; size_t ie=created.body.find_first_of(",}",ip);
+  int id=std::stoi(created.body.substr(ip,ie-ip));
+  store::active_store()->update(id,[](models::Exam& ex){ ex.status="active"; ex.exam_started_at="2026-08-31T00:00:00Z"; });
+  return token;
+}
 
 /*
  * TDD Protobuf Handler Migration — 2c/8GB optimal
@@ -492,8 +516,10 @@ TEST(ProtobufHandlers, ListExams_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, ExamByToken_ValidProtobufResponse) {
+  std::string token=prepare_started_exam_for_api();
+  ASSERT_FALSE(token.empty());
   auto req = pb_accept();
-  req.params["token"] = "TESTTOKN";
+  req.params["token"] = token;
   auto res = handlers::api::exam_by_token(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -516,11 +542,13 @@ TEST(ProtobufHandlers, ExamByToken_InvalidTokenReturns404Protobuf) {
 }
 
 TEST(ProtobufHandlers, ExamByToken_JsonStillWorks) {
-  Request req; req.method = "GET"; req.params["token"] = "TESTTOKN";
+  std::string token=prepare_started_exam_for_api();
+  ASSERT_FALSE(token.empty());
+  Request req; req.method = "GET"; req.params["token"] = token;
   auto res = handlers::api::exam_by_token(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_NE(res.body.find("\"token\":\"TESTTOKN\""), std::string::npos);
-  EXPECT_NE(res.body.find("\"status\":\"active\""), std::string::npos);
+  EXPECT_NE(res.body.find("\"token\":\""+token+"\""), std::string::npos);
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
 }
 
 // ======================================================================

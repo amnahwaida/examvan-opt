@@ -5,6 +5,7 @@
 #include "middleware/protobuf.hpp"
 #include "utils/log.hpp"
 #include "store/exam_store.hpp"
+#include "services/examtoken/examtoken.hpp"
 #include <chrono>
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
@@ -394,6 +395,7 @@ Response create_exam(const Request& req){
   exam.file_path=fpath;
   exam.size_bytes=size;
   exam.token=token;
+  exam.active_token=token; // Go parity: active_token = token saat create
   exam.status="inactive";
   exam.security_level="medium";
   exam.created_at=helpers::format_iso_utc(std::chrono::system_clock::now());
@@ -427,6 +429,36 @@ static std::string get_exam_id(const Request& req){
   return "";
 }
 
+static std::string json_string_field(const std::string& body, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t p=body.find(needle);
+  if(p==std::string::npos) return "";
+  size_t colon=body.find(':',p+needle.size());
+  if(colon==std::string::npos) return "";
+  size_t s=body.find_first_not_of(" \t\r\n",colon+1);
+  if(s==std::string::npos || body[s]!='"') return "";
+  ++s;
+  std::string out;
+  for(size_t i=s;i<body.size();++i){
+    if(body[i]=='\\' && i+1<body.size()){ out.push_back(body[++i]); continue; }
+    if(body[i]=='"') return out;
+    out.push_back(body[i]);
+  }
+  return "";
+}
+
+static std::optional<int> json_int_field(const std::string& body, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t p=body.find(needle);
+  if(p==std::string::npos) return std::nullopt;
+  size_t colon=body.find(':',p+needle.size());
+  if(colon==std::string::npos) return std::nullopt;
+  size_t s=body.find_first_not_of(" \t\r\n",colon+1);
+  if(s==std::string::npos) return std::nullopt;
+  try { size_t n=0; int value=std::stoi(body.substr(s),&n); (void)n; return value; }
+  catch(...) { return std::nullopt; }
+}
+
 Response update_exam(const Request& req){
   auto id_str=get_exam_id(req);
   if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
@@ -439,7 +471,71 @@ Response update_exam(const Request& req){
     else { p=req.path.find("/start"); if(p!=std::string::npos) action="start"; }
     if(action.empty()){ p=req.path.find("/stop"); if(p!=std::string::npos) action="stop"; }
     if(action.empty()){ p=req.path.find("/regenerate-token"); if(p!=std::string::npos) action="regenerate-token"; }
+    if(action.empty()){ p=req.path.find("/edit-token"); if(p!=std::string::npos) action="edit-token"; }
+    if(action.empty()){ p=req.path.find("/token-mode"); if(p!=std::string::npos) action="token-mode"; }
     if(action.empty()){ p=req.path.find("/edit"); if(p!=std::string::npos) action="edit"; }
+  }
+  // handle actions yang memerlukan body JSON: edit-token, token-mode
+  if(action=="edit-token" || action=="token-mode"){
+    std::string raw_token;
+    std::optional<int> raw_interval;
+    std::string raw_mode;
+    if(req.headers.count("Content-Type") &&
+       req.headers.at("Content-Type").find("application/json")!=std::string::npos){
+      raw_token=json_string_field(req.body,"token");
+      raw_interval=json_int_field(req.body,"reset_interval");
+      raw_mode=json_string_field(req.body,"token_mode");
+    } else {
+      auto form=helpers::parse_form(req.body);
+      if(form.count("token")) raw_token=form["token"];
+      if(form.count("reset_interval")) { try{ raw_interval=std::stoi(form["reset_interval"]); }catch(...){} }
+      if(form.count("token_mode")) raw_mode=form["token_mode"];
+    }
+    if(action=="edit-token"){
+      std::string new_tok=raw_token;
+      // trim + uppercase (Go parity: tokenRegex ^[A-Z0-9]{8}$)
+      std::string t;
+      size_t b=new_tok.find_first_not_of(" \t\r\n");
+      size_t e=new_tok.find_last_not_of(" \t\r\n");
+      if(b==std::string::npos) t="";
+      else t=new_tok.substr(b,e-b+1);
+      for(char &ch: t) ch=toupper((unsigned char)ch);
+      if(t.empty()){
+        Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"token not allowed to be empty\"}"); return r;
+      }
+      if(!helpers::is_valid_exam_token(t) || t.size()!=8){
+        Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"token must be 8 A-Z0-9\"}"); return r;
+      }
+      // cek collision terhadap exam lain
+      if(exams().token_exists(t, id)){
+        Response r; r.status=409; r.json(409,"{\"success\":false,\"error\":\"token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return r;
+      }
+      std::string old_token;
+      bool updated=exams().update(id,[&](models::Exam& e){ old_token=e.token; e.token=t; e.active_token=t; e.token_last_reset_at=helpers::format_iso_utc(std::chrono::system_clock::now()); });
+      if(!updated){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+      if(!old_token.empty()) exams().unclaim_token(old_token);
+      if(!exams().claim_token(t)){ /* sudah ada — jangan gagalkan (sudah disimpan) */ }
+      Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"token\":\""+json_escape(t)+"\",\"message\":\"Token ujian berhasil diubah\"}"); return r;
+    }
+    if(action=="token-mode"){
+      std::string mode=raw_mode;
+      for(char &ch: mode) ch=tolower((unsigned char)ch);
+      if(mode!="static" && mode!="dynamic"){
+        Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"invalid token mode\"}"); return r;
+      }
+      if(mode=="dynamic"){
+        if(!raw_interval.has_value() || *raw_interval < 1){
+          Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"reset_interval required (minimal 1 menit)\"}"); return r;
+        }
+      }
+      bool updated=exams().update(id,[&](models::Exam& e){
+        e.token_mode=mode;
+        if(mode=="static"){ e.token_reset_interval.reset(); e.token_last_reset_at.reset(); }
+        else { e.token_reset_interval=*raw_interval; }
+      });
+      if(!updated){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+      Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"token_mode\":\""+json_escape(mode)+"\",\"message\":\"Mode token berhasil diperbarui\"}"); return r;
+    }
   }
   // regenerate-token: claim token baru (atomic thd store) lalu terapkan via update()
   if(action=="regenerate-token"){
@@ -451,7 +547,7 @@ Response update_exam(const Request& req){
     }
     if(ok){
       std::string old_token;
-      bool found = exams().update(id, [&](models::Exam& e){ old_token=e.token; e.token=new_token; });
+      bool found = exams().update(id, [&](models::Exam& e){ old_token=e.token; e.token=new_token; e.active_token=new_token; });
       if(!found){
         exams().unclaim_token(new_token); // cleanup — exam tidak ditemukan
         Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
@@ -467,7 +563,7 @@ Response update_exam(const Request& req){
   }
   // semua action lain: mutasi via store.update() (mutator jalan dalam lock store)
   // Bug E: reject action tidak dikenal SEBELUM acquire lock store
-  if(action!="toggle" && action!="start" && action!="stop" && action!="edit"){
+  if(action!="toggle" && action!="start" && action!="stop" && action!="edit" && action!="edit-token" && action!="token-mode"){
     Response r; r.status=400; r.json(400,"{\"error\":\"unknown action: "+json_escape(action)+"\"}"); return r;
   }
   // pre-validasi nama hanya untuk action edit

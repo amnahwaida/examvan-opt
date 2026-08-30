@@ -197,6 +197,8 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/admin/api/exams/:exam_id/start", admin_api(handlers::admin::update_exam));
   r.add("POST","/admin/api/exams/:exam_id/stop", admin_api(handlers::admin::update_exam));
   r.add("POST","/admin/api/exams/:exam_id/regenerate-token", admin_api(handlers::admin::update_exam));
+  r.add("POST","/admin/api/exams/:exam_id/edit-token", admin_api(handlers::admin::update_exam));
+  r.add("POST","/admin/api/exams/:exam_id/token-mode", admin_api(handlers::admin::update_exam));
   r.add("GET","/admin/api/exams/:id/export", admin_api(handlers::admin::export_xlsx));
   r.add("GET","/admin/api/submissions", admin_api(handlers::admin::list_submissions));
   // Static export route must precede /:id/detail (router uses first-match).

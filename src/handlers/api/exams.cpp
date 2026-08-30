@@ -2,12 +2,34 @@
 #include "middleware/version.hpp"
 #include "middleware/protobuf.hpp"
 #include "helpers/utils.hpp"
+#include "models/exam.hpp"
+#include "store/exam_store.hpp"
+#include "services/examtoken/examtoken.hpp"
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
 #include <string>
 
 namespace examvan::handlers::api {
+
+static std::string json_escape(const std::string& s){
+  std::string o; o.reserve(s.size()+16);
+  for(unsigned char c: s){
+    switch(c){
+      case '"': o+="\\\""; break;
+      case '\\': o+="\\\\"; break;
+      case '\b': o+="\\b"; break;
+      case '\f': o+="\\f"; break;
+      case '\n': o+="\\n"; break;
+      case '\r': o+="\\r"; break;
+      case '\t': o+="\\t"; break;
+      default:
+        if(c<0x20){ char buf[7]; snprintf(buf,sizeof(buf),"\\u%04x",c); o+=buf; }
+        else o+=char(c);
+    }
+  }
+  return o;
+}
 
 Response health(const Request& req){
 #ifdef HAS_PROTOBUF
@@ -102,17 +124,53 @@ Response exam_by_token(const Request& req){
 #endif
     Response r; r.status=404; r.json(404,"{\"error\":\"token not found\"}"); return r;
   }
+  std::string token=it->second;
+  // Lookup berdasarkan token atau active_token dari store.
+  // Go parity: static menerima permanent token sebagai fallback; dynamic hanya active_token.
+  store::ExamStore& st=*store::active_store();
+  auto snapshot=st.list_all();
+  const models::Exam* matched=nullptr;
+  for(auto& e: snapshot){
+    if(!examtoken::matches(e, token)) continue;
+    matched=&e; break;
+  }
+  if(!matched){
+#ifdef HAS_PROTOBUF
+    if(middleware::is_protobuf_accept(req)){
+      examvan::v1::ExamByTokenResponse pb;
+      pb.set_success(false);
+      pb.set_error("token not found");
+      std::string out; pb.SerializeToString(&out);
+      Response r; r.status=404; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+    }
+#endif
+    Response r; r.status=404; r.json(404,"{\"error\":\"token not found\"}"); return r;
+  }
+  const models::Exam& exam=*matched;
+  if(!exam.is_active() || !exam.exam_started_at.has_value() || exam.exam_started_at->empty()){
+#ifdef HAS_PROTOBUF
+    if(middleware::is_protobuf_accept(req)){
+      examvan::v1::ExamByTokenResponse pb;
+      pb.set_success(false);
+      pb.set_error("exam not started");
+      std::string out; pb.SerializeToString(&out);
+      Response r; r.status=403; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+    }
+#endif
+    Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"exam not started\",\"message\":\"Ujian belum dimulai\"}"); return r;
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::ExamByTokenResponse pb;
     pb.set_success(true);
-    pb.set_token(it->second);
-    pb.set_status("active");
+    pb.set_token(token);
+    pb.set_status(exam.status);
     std::string out; pb.SerializeToString(&out);
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.json(200,"{\"token\":\""+it->second+"\",\"status\":\"active\"}"); return r;
+  std::string esc=json_escape(token);
+  Response r; r.status=200; r.json(200,"{\"token\":\""+esc+"\",\"status\":\""+exam.status+"\",\"id\":"+std::to_string(exam.id)+",\"name\":\""+json_escape(exam.name)+"\",\"success\":true}"); return r;
 }
 
 Response exam_pdf(const Request& req){
