@@ -86,6 +86,18 @@ if(PKG_CONFIG_FOUND)
   endif()
 endif()
 
+option(WITH_PROTOBUF "Enable Protobuf mandatory wire" ON)
+find_package(Protobuf QUIET)
+if(Protobuf_FOUND AND WITH_PROTOBUF)
+  add_compile_definitions(HAS_PROTOBUF=1)
+  include_directories(${Protobuf_INCLUDE_DIRS})
+  protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS proto/examvan.proto)
+endif()
+
+set(EXAMVAN_PROTO_SRCS "")
+if(Protobuf_FOUND AND WITH_PROTOBUF)
+  list(APPEND EXAMVAN_PROTO_SRCS ${PROTO_SRCS})
+endif()
 add_library(examvan_core STATIC
   src/config/config.cpp
   src/utils/sanitize.cpp
@@ -108,6 +120,7 @@ add_library(examvan_core STATIC
   src/middleware/body_limit.cpp
   src/middleware/turnstile.cpp
   src/middleware/scoring.cpp
+  src/middleware/protobuf.cpp
   src/handlers/public/hasil.cpp
   src/handlers/public/download.cpp
   src/handlers/public/template_helper.cpp
@@ -129,6 +142,7 @@ add_library(examvan_core STATIC
   src/server/server.cpp
   src/db/pool_real.cpp
   src/redis/redis_real.cpp
+  ${EXAMVAN_PROTO_SRCS}
 )
 
 target_include_directories(examvan_core PUBLIC
@@ -166,6 +180,10 @@ endif()
 if(LIBCURL_FOUND)
   target_link_libraries(examvan_core PUBLIC ${LIBCURL_LIBRARIES})
   target_include_directories(examvan_core PUBLIC ${LIBCURL_INCLUDE_DIRS})
+endif()
+if(Protobuf_FOUND AND WITH_PROTOBUF)
+  target_link_libraries(examvan_core PUBLIC protobuf::libprotobuf)
+  target_include_directories(examvan_core PUBLIC ${Protobuf_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 add_executable(examvan-server src/main.cpp)
@@ -224,6 +242,7 @@ add_executable(examvan-tests
   tests/test_csrf_fix_tdd.cpp
   tests/test_exam_creation_prod_tdd.cpp
   tests/test_exam_full_prod_tdd.cpp
+  tests/test_protobuf_mandatory_tdd.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)

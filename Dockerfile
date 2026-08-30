@@ -1,5 +1,5 @@
 FROM gcc:13-bookworm AS builder
-RUN apt-get update && apt-get install -y cmake libssl-dev git pkg-config libpq-dev libhiredis-dev libcurl4-openssl-dev libcrypt-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y cmake libssl-dev git pkg-config libpq-dev libhiredis-dev libcurl4-openssl-dev libcrypt-dev protobuf-compiler libprotobuf-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY CMakeLists.txt vcpkg.json .clang-format ./
 COPY src src
@@ -17,7 +17,7 @@ RUN cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON && cmake 
 CMD ["./build-san/examvan-tests"]
 
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y libpq5 libhiredis-dev libcurl4 libcrypt1 curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libpq5 libhiredis-dev libcurl4 libcrypt1 libprotobuf32 curl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /usr/local/lib64/libstdc++.so.6.0.32 /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.32
 RUN ln -sf libstdc++.so.6.0.32 /usr/lib/x86_64-linux-gnu/libstdc++.so.6 && ldconfig
 # Docker hardening: no-new-privileges

@@ -39,6 +39,8 @@ Config Config::load() {
   c.r2_bucket = env_str("R2_BUCKET", "examvan-pdfs");
   if (const char* v = std::getenv("R2_ENDPOINT")) c.r2_endpoint = v;
   if (const char* v = std::getenv("EXAMVAN_CORS_ORIGINS")) c.cors_origins = v;
+  if (const char* v = std::getenv("PROTOBUF_MANDATORY")) c.protobuf_mandatory = std::string(v)=="1" || std::string(v)=="true";
+  else c.protobuf_mandatory = false;
   return c;
 }
 

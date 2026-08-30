@@ -55,6 +55,8 @@ services:
       R2_BUCKET: ${R2_BUCKET:-examvan-pdfs}
       R2_ENDPOINT: ${R2_ENDPOINT:?ERR:R2_ENDPOINT not set}
       DATABASE_MAX_CONNS: ${DATABASE_MAX_CONNS:-60}
+      PROTOBUF_MANDATORY: ${PROTOBUF_MANDATORY:-0}
+      APP_ENV: ${APP_ENV:-production}
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_healthy}

@@ -1,0 +1,72 @@
+syntax = "proto3";
+package examvan.v1;
+option cc_enable_arenas = true;
+
+message Heartbeat {
+  int32 exam_id = 1;
+  string mac_address = 2;
+  string student_name = 3;
+  string exam_number = 4;
+  string student_class = 5;
+  string device_info = 6;
+  string last_seen = 7;
+  string event = 8;
+}
+
+message ExamCompleted {
+  int32 exam_id = 1;
+  string mac_address = 2;
+  string event = 3;
+}
+
+message WsEnvelope {
+  string event = 1;
+  bytes payload = 2;
+}
+
+message Exam {
+  int32 id = 1;
+  string name = 2;
+  string token = 3;
+  string file_path = 4;
+  int64 size_bytes = 5;
+  string status = 6;
+  string created_at = 7;
+}
+
+message CreateExamRequest {
+  string name = 1;
+  string file_path = 2;
+  int64 size_bytes = 3;
+  string custom_token = 4;
+  bytes pdf_data = 5;
+}
+
+message CreateExamResponse {
+  bool success = 1;
+  int32 id = 2;
+  string token = 3;
+  string name = 4;
+  string file_path = 5;
+  string error = 6;
+  string error_code = 7;
+}
+
+message SubmissionJob {
+  string job_id = 1;
+  int32 exam_id = 2;
+  string student_name = 3;
+  string mac_address = 4;
+  int32 retries = 5;
+  string enqueued_at = 6;
+}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+  bool uwebsockets = 3;
+  string db = 4;
+  string redis = 5;
+  int32 queue = 6;
+  int64 uptime = 7;
+}

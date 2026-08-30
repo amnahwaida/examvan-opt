@@ -21,6 +21,7 @@ struct Config {
   std::string r2_bucket{"examvan-pdfs"};
   std::string r2_endpoint;
   std::string cors_origins;
+  bool protobuf_mandatory{false};
   bool is_development() const;
 
   static Config load();

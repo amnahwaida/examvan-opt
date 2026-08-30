@@ -2,6 +2,10 @@
 #include "helpers/utils.hpp"
 #include "config/config.hpp"
 #include "handlers/r2/r2.hpp"
+#include "middleware/protobuf.hpp"
+#ifdef HAS_PROTOBUF
+#include "examvan.pb.h"
+#endif
 #include <atomic>
 #include <cctype>
 #include <unordered_set>
@@ -119,16 +123,36 @@ Response create_exam(const Request& req){
   else {
     for(auto &kv: req.headers){ std::string low=kv.first; for(char &c: low) c=tolower((unsigned char)c); if(low=="content-type"){ ct=kv.second; break; } }
   }
-  bool is_multipart = ct.find("multipart/form-data")!=std::string::npos;
+  auto cfg_pb = Config::load();
+  bool is_pb = middleware::is_protobuf_content(req);
+  bool is_multipart_pb = ct.find("multipart/form-data")!=std::string::npos;
+  if(cfg_pb.protobuf_mandatory && !is_pb && !is_multipart_pb && !req.body.empty()){
+    if(auto err = middleware::require_protobuf(req, cfg_pb); err) return *err;
+  }
+  std::string name, fpath, sz, custom;
+  if(is_pb){
+#ifdef HAS_PROTOBUF
+    examvan::v1::CreateExamRequest pb;
+    if(!pb.ParseFromArray(req.body.data(), req.body.size())){
+      Response r; r.status=400; r.json(400,"{\"error\":\"invalid protobuf\"}"); return r;
+    }
+    name = pb.name();
+    fpath = pb.file_path();
+    if(pb.size_bytes()!=0) sz = std::to_string(pb.size_bytes());
+    custom = pb.custom_token();
+    file_data = pb.pdf_data();
+    if(!file_data.empty() && fpath.empty()) fpath = "upload.pdf";
+    if(!file_data.empty()) file_name = fpath;
+#else
+    Response r; r.status=415; r.json(415,"{\"error\":\"protobuf not enabled\",\"error_code\":\"PROTOBUF_REQUIRED\"}"); return r;
+#endif
+  } else {
+  bool is_multipart = is_multipart_pb;
   if(is_multipart){
     parse_multipart(req.body, ct, form, file_name, file_data, file_ct);
-    // also merge urlencoded fallback? try parse_form for leftover fields that may be urlencoded inside multipart already handled
-    // Do not fallback to parse_form on multipart body
   } else {
     form=helpers::parse_form(req.body);
-    // also handle JSON body fallback for tests that send JSON
     if(form.empty() && !req.body.empty() && req.body.find('{')!=std::string::npos){
-      // try simple JSON extraction for name/file_path/custom_token/size_bytes
       auto jf=[&](const std::string& k)->std::string{
         std::string needle="\""+k+"\"";
         size_t p=req.body.find(needle);
@@ -155,14 +179,14 @@ Response create_exam(const Request& req){
       std::string js=jf("size_bytes"); if(!js.empty()) form["size_bytes"]=js;
     }
   }
-  std::string name=get_param(form,"name");
-  std::string fpath=get_param(form,"file_path");
-  std::string sz=get_param(form,"size_bytes");
-  std::string custom=get_param(form,"custom_token");
-  // multipart file overrides fpath and provides file data
+  name = get_param(form,"name");
+  fpath = get_param(form,"file_path");
+  sz = get_param(form,"size_bytes");
+  custom = get_param(form,"custom_token");
   if(!file_name.empty()){
     fpath=file_name;
     if(sz.empty()) sz=std::to_string(file_data.size());
+  }
   }
   // name sanitasi & validasi
   {
@@ -198,7 +222,7 @@ Response create_exam(const Request& req){
   // also respect SaaS default 1M if available? For now enforce 5M global as contract 102M is large, but keep 5M for prod
   if(size>MAX_PDF){ Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return r; }
   // MIME check for multipart pdf - require %PDF magic (content-type can be spoofed)
-  if(is_multipart && !file_data.empty()){
+  if(is_multipart_pb && !file_data.empty()){
     bool is_pdf_magic = file_data.rfind("%PDF",0)==0;
     if(!is_pdf_magic){ Response r; r.status=400; r.json(400,"{\"error\":\"file must be PDF\"}"); return r; }
   }

@@ -7,6 +7,8 @@
     "hiredis",
     "gtest",
     "libcurl",
-    "zlib"
+    "zlib",
+    "protobuf",
+    "abseil"
   ]
 }
