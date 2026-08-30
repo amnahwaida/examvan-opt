@@ -56,9 +56,11 @@ message SubmissionJob {
   string job_id = 1;
   int32 exam_id = 2;
   string student_name = 3;
-  string mac_address = 4;
-  int32 retries = 5;
-  string enqueued_at = 6;
+  string exam_number = 4;
+  string student_class = 5;
+  string mac_address = 6;
+  int32 retries = 7;
+  string enqueued_at = 8;
 }
 
 message HealthResponse {
@@ -69,4 +71,74 @@ message HealthResponse {
   string redis = 5;
   int32 queue = 6;
   int64 uptime = 7;
+}
+
+message DashboardStats {
+  bool success = 1;
+  int32 total = 2;
+  int32 active = 3;
+  int32 storage_mb = 4;
+  int32 exams = 5;
+  int32 submissions = 6;
+}
+
+message User {
+  int32 id = 1;
+  string username = 2;
+  string role = 3;
+}
+
+message UserList {
+  bool success = 1;
+  repeated User users = 2;
+  int32 total = 3;
+}
+
+message Voucher {
+  string code = 1;
+  string package = 2;
+}
+
+message VoucherList {
+  bool success = 1;
+  repeated Voucher vouchers = 2;
+}
+
+message Settings {
+  bool success = 1;
+  bool email_verification_enabled = 2;
+  string smtp_host = 3;
+  int32 smtp_port = 4;
+  string smtp_user = 5;
+  string smtp_password = 6;
+  string smtp_sender_name = 7;
+  int32 default_max_exams = 8;
+  int32 default_max_concurrent_exams = 9;
+  int32 default_max_pdf_size_mb = 10;
+  int32 default_max_storage_size_mb = 11;
+  int32 default_active_days = 12;
+  string android_version = 13;
+  string webapp_version = 14;
+  string seo_title = 15;
+  string seo_description = 16;
+  string seo_keywords = 17;
+  bool seo_index = 18;
+  string footer_text = 19;
+}
+
+message PengawasExam {
+  int32 id = 1;
+  string name = 2;
+  string token = 3;
+  string status = 4;
+}
+
+message PengawasExamList {
+  bool success = 1;
+  repeated PengawasExam exams = 2;
+  bool is_privileged = 3;
+  int32 page = 4;
+  int32 per_page = 5;
+  int32 total = 6;
+  int32 total_pages = 7;
 }

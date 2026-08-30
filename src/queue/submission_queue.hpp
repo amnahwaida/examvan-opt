@@ -32,6 +32,10 @@ struct SubmissionJob {
   std::string enqueued_at;
   std::string to_json() const;
   static std::optional<SubmissionJob> from_json(const std::string& s);
+#ifdef HAS_PROTOBUF
+  std::string to_protobuf() const;
+  static std::optional<SubmissionJob> from_protobuf(const std::string& s);
+#endif
 };
 
 struct JobResult {

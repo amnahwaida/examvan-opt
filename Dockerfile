@@ -6,6 +6,7 @@ COPY src src
 COPY tests tests
 COPY templates templates
 COPY static static
+COPY proto proto
 COPY scripts scripts
 COPY nginx nginx
 COPY Dockerfile ./
@@ -24,6 +25,7 @@ RUN ln -sf libstdc++.so.6.0.32 /usr/lib/x86_64-linux-gnu/libstdc++.so.6 && ldcon
 COPY --from=builder /app/build/examvan-server /usr/local/bin/examvan-server
 COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
+COPY --from=builder /app/proto /app/proto
 WORKDIR /app
 EXPOSE 5000
 ENTRYPOINT ["/usr/local/bin/examvan-server"]

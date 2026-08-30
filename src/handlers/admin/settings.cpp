@@ -1,8 +1,26 @@
 #include "handlers/admin/settings.hpp"
 #include "handlers/admin/template_helper.hpp"
+#include "middleware/protobuf.hpp"
+#ifdef HAS_PROTOBUF
+#include "examvan.pb.h"
+#endif
 namespace examvan::handlers::admin {
 Response settings_page(const Request& req){
   if(req.path.find("/api/")!=std::string::npos){
+#ifdef HAS_PROTOBUF
+    if(middleware::is_protobuf_accept(req)){
+      if(req.path.find("system-apps")!=std::string::npos){
+        examvan::v1::VoucherList pb; pb.set_success(true);
+        std::string out; pb.SerializeToString(&out);
+        Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+      }
+      examvan::v1::Settings pb; pb.set_success(true);
+      pb.set_smtp_host("smtp.gmail.com"); pb.set_smtp_port(587);
+      pb.set_default_max_exams(3); pb.set_default_max_pdf_size_mb(1);
+      std::string out; pb.SerializeToString(&out);
+      Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+    }
+#endif
     if(req.path.find("system-apps")!=std::string::npos){
       Response r; r.json(200,"{\"success\":true,\"apps\":[],\"system_apps\":[]}"); return r;
     }

@@ -3,6 +3,10 @@
 #include "helpers/utils.hpp"
 #include "session/cookie.hpp"
 #include "config/config.hpp"
+#include "middleware/protobuf.hpp"
+#ifdef HAS_PROTOBUF
+#include "examvan.pb.h"
+#endif
 #include <string>
 namespace examvan::handlers::admin {
 
@@ -10,7 +14,16 @@ static std::string get_param(const std::map<std::string,std::string>& form, cons
   auto it=form.find(key); return it!=form.end()? it->second : "";
 }
 
-Response list_users(const Request&){
+Response list_users(const Request& req){
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::UserList pb;
+    pb.set_success(true);
+    pb.set_total(0);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
   Response r; r.json(200,"{\"success\":true,\"users\":[],\"total\":0}"); return r;
 }
 

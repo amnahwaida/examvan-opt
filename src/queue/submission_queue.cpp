@@ -8,6 +8,9 @@
 #include <random>
 #include <sstream>
 #include <openssl/rand.h>
+#ifdef HAS_PROTOBUF
+#include "examvan.pb.h"
+#endif
 
 namespace examvan::queue {
 
@@ -111,6 +114,36 @@ std::optional<SubmissionJob> SubmissionJob::from_json(const std::string& s){
   return j;
 }
 
+#ifdef HAS_PROTOBUF
+std::string SubmissionJob::to_protobuf() const {
+  examvan::v1::SubmissionJob pb;
+  pb.set_job_id(job_id);
+  pb.set_exam_id(exam_id);
+  pb.set_student_name(student_name);
+  pb.set_exam_number(exam_number);
+  pb.set_student_class(student_class);
+  pb.set_mac_address(mac_address);
+  pb.set_retries(retries);
+  pb.set_enqueued_at(enqueued_at);
+  std::string out;
+  pb.SerializeToString(&out);
+  return out;
+}
+std::optional<SubmissionJob> SubmissionJob::from_protobuf(const std::string& s){
+  examvan::v1::SubmissionJob pb;
+  if(!pb.ParseFromArray(s.data(), s.size())) return std::nullopt;
+  SubmissionJob j;
+  j.job_id=pb.job_id();
+  j.exam_id=pb.exam_id();
+  j.student_name=pb.student_name();
+  j.exam_number=pb.exam_number();
+  j.student_class=pb.student_class();
+  j.mac_address=pb.mac_address();
+  j.retries=pb.retries();
+  j.enqueued_at=pb.enqueued_at();
+  return j;
+}
+#endif
 std::string JobResult::to_json() const {
   std::ostringstream ss;
   ss<<"{\"job_id\":\""<<job_id<<"\",\"success\":"<<(success?"true":"false")
@@ -132,7 +165,14 @@ std::string SubmissionQueue::enqueue(const std::map<std::string,std::string>& da
   it=data.find("student_class"); if(it!=data.end()) j.student_class=it->second;
   it=data.find("mac_address"); if(it!=data.end()) j.mac_address=it->second;
   j.enqueued_at=helpers::format_iso_utc(std::chrono::system_clock::now());
+#ifdef HAS_PROTOBUF
+  auto cfg=Config::load();
+  std::string payload = cfg.protobuf_mandatory ? j.to_protobuf() : j.to_json();
+  // Fallback to JSON if protobuf not available
+  if(payload.empty()) payload=j.to_json();
+#else
   std::string payload=j.to_json();
+#endif
   if(lpush_) lpush_(kQueueKey, payload);
   return j.job_id;
 }
@@ -141,6 +181,10 @@ std::optional<SubmissionJob> SubmissionQueue::dequeue(int timeout){
   if(!brpop_) return std::nullopt;
   auto raw=brpop_(kQueueKey, timeout);
   if(!raw) return std::nullopt;
+#ifdef HAS_PROTOBUF
+  // Try protobuf first, then JSON fallback for dual-support period
+  if(auto pb = SubmissionJob::from_protobuf(*raw)) return pb;
+#endif
   return SubmissionJob::from_json(*raw);
 }
 

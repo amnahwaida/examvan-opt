@@ -1,6 +1,9 @@
 #include "websocket/hub.hpp"
 #include "utils/sanitize.hpp"
 #include "websocket/socketio.hpp"
+#ifdef HAS_PROTOBUF
+#include "examvan.pb.h"
+#endif
 #include <chrono>
 #include <ctime>
 #include <sstream>
@@ -115,6 +118,25 @@ std::string Hub::extract_json_string(const std::string& json, const std::string&
 }
 
 void Hub::handle_message(std::shared_ptr<Client> c, const std::string& raw){
+#ifdef HAS_PROTOBUF
+  if(!raw.empty() && raw[0]!='['){
+    examvan::v1::WsEnvelope env;
+    if(env.ParseFromArray(raw.data(), raw.size())){
+      if(env.event()=="ping"){
+        examvan::v1::WsEnvelope pong;
+        pong.set_event("pong");
+        std::string payload = now_rfc3339();
+        pong.set_payload(payload);
+        std::string out; pong.SerializeToString(&out);
+        c->try_send(out);
+        return;
+      }
+      if(env.event()=="heartbeat"){ handle_heartbeat(c, env.payload()); return; }
+      if(env.event()=="exam_completed"){ handle_exam_completed(c, env.payload()); return; }
+      return;
+    }
+  }
+#endif
   auto msg = parse_socketio(raw);
   if(!msg) return;
   if(msg->event=="ping"){
@@ -131,12 +153,34 @@ void Hub::handle_heartbeat(std::shared_ptr<Client> c, const std::string& payload
   std::string exam_id_str = c->room;
   int exam_id=0; try{exam_id=std::stoi(exam_id_str);}catch(...){return;}
   if(exam_id==0) return;
-  std::string mac = sanitize_ws_mac(extract_json_string(payload_json,"mac_address"));
+  std::string mac, student_name, exam_number, student_class, device_info;
+#ifdef HAS_PROTOBUF
+  bool is_pb = !payload_json.empty() && payload_json[0]!='{' && payload_json[0]!='"';
+  if(is_pb){
+    examvan::v1::Heartbeat pb;
+    if(pb.ParseFromArray(payload_json.data(), payload_json.size())){
+      mac = sanitize_ws_mac(pb.mac_address());
+      student_name = sanitize_ws_field(pb.student_name(),200);
+      exam_number = sanitize_ws_field(pb.exam_number(),100);
+      student_class = sanitize_ws_field(pb.student_class(),100);
+      device_info = sanitize_ws_field(pb.device_info(),200);
+    }
+  }
+  if(mac.empty()){
+    mac = sanitize_ws_mac(extract_json_string(payload_json,"mac_address"));
+    student_name = sanitize_ws_field(extract_json_string(payload_json,"student_name"),200);
+    exam_number = sanitize_ws_field(extract_json_string(payload_json,"exam_number"),100);
+    student_class = sanitize_ws_field(extract_json_string(payload_json,"student_class"),100);
+    device_info = sanitize_ws_field(extract_json_string(payload_json,"device_info"),200);
+  }
+#else
+  mac = sanitize_ws_mac(extract_json_string(payload_json,"mac_address"));
+  student_name = sanitize_ws_field(extract_json_string(payload_json,"student_name"),200);
+  exam_number = sanitize_ws_field(extract_json_string(payload_json,"exam_number"),100);
+  student_class = sanitize_ws_field(extract_json_string(payload_json,"student_class"),100);
+  device_info = sanitize_ws_field(extract_json_string(payload_json,"device_info"),200);
+#endif
   if(mac.empty()) return;
-  std::string student_name = sanitize_ws_field(extract_json_string(payload_json,"student_name"),200);
-  std::string exam_number = sanitize_ws_field(extract_json_string(payload_json,"exam_number"),100);
-  std::string student_class = sanitize_ws_field(extract_json_string(payload_json,"student_class"),100);
-  std::string device_info = sanitize_ws_field(extract_json_string(payload_json,"device_info"),200);
   std::string last_seen = now_rfc3339();
 
   std::string key = "heartbeat:" + std::to_string(exam_id) + ":" + mac;
@@ -163,7 +207,17 @@ void Hub::handle_heartbeat(std::shared_ptr<Client> c, const std::string& payload
 void Hub::handle_exam_completed(std::shared_ptr<Client> c, const std::string& payload_json){
   if(!c->privileged) return;
   std::string exam_id_str=c->room; int exam_id=0; try{exam_id=std::stoi(exam_id_str);}catch(...){return;} if(exam_id==0) return;
-  std::string mac=sanitize_ws_mac(extract_json_string(payload_json,"mac_address"));
+  std::string mac;
+#ifdef HAS_PROTOBUF
+  bool is_pb = !payload_json.empty() && payload_json[0]!='{' && payload_json[0]!='"';
+  if(is_pb){
+    examvan::v1::ExamCompleted pb;
+    if(pb.ParseFromArray(payload_json.data(), payload_json.size())) mac=sanitize_ws_mac(pb.mac_address());
+  }
+  if(mac.empty()) mac=sanitize_ws_mac(extract_json_string(payload_json,"mac_address"));
+#else
+  mac=sanitize_ws_mac(extract_json_string(payload_json,"mac_address"));
+#endif
   if(mac.empty()) return;
   std::string key="heartbeat:"+std::to_string(exam_id)+":"+mac;
   if(redis_del_) redis_del_(key);

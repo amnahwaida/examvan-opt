@@ -1,7 +1,18 @@
 #include "handlers/admin/vouchers.hpp"
 #include "helpers/utils.hpp"
+#include "middleware/protobuf.hpp"
+#ifdef HAS_PROTOBUF
+#include "examvan.pb.h"
+#endif
 namespace examvan::handlers::admin {
-Response list_vouchers(const Request&){
+Response list_vouchers(const Request& req){
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::VoucherList pb; pb.set_success(true);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
   Response r; r.json(200,"{\"success\":true,\"vouchers\":[]}"); return r;
 }
 Response redeem_voucher(const Request& req){

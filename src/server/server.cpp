@@ -187,6 +187,7 @@ static std::string content_type_for(const std::string& p){
   if(p.size()>=4 && p.substr(p.size()-4)==".ico") return "image/x-icon";
   if(p.size()>=5 && p.substr(p.size()-5)==".woff") return "font/woff";
   if(p.size()>=6 && p.substr(p.size()-6)==".woff2") return "font/woff2";
+  if(p.size()>=6 && p.substr(p.size()-6)==".proto") return "text/plain";
   return "text/plain";
 }
 
@@ -213,6 +214,7 @@ static bool try_serve_static(int cfd, const std::string& path){
   if(low.find("%252e")!=std::string::npos) return false;
   std::string fp;
   if(dec.rfind("/static/",0)==0) fp="."+dec;
+  else if(dec.rfind("/proto/",0)==0) fp="."+dec;
   else if(dec=="/favicon.ico") fp="./static/favicon.png";
   else return false;
   if(fp.find("..")!=std::string::npos) return false;
@@ -345,9 +347,9 @@ bool Server::listen(const ServerOpts& opts) {
       res->writeHeader("Content-Type","application/json");
       res->end(resp.body);
     });
-    g_app->any("/*", [router_ptr](auto *res, auto *req){
+     g_app->any("/*", [router_ptr](auto *res, auto *req){
       std::string path(req->getUrl());
-      if(path.rfind("/static/",0)==0 || path=="/favicon.ico"){
+      if(path.rfind("/static/",0)==0 || path.rfind("/proto/",0)==0 || path=="/favicon.ico"){
         std::string fp = path=="/favicon.ico" ? "./static/favicon.png" : "."+path;
         std::ifstream f(fp, std::ios::binary);
         if(f){
@@ -426,7 +428,7 @@ bool Server::listen(const ServerOpts& opts) {
         d->id = std::to_string((uintptr_t)ws);
       },
       .message = [hub_ptr](auto *ws, std::string_view msg, uWS::OpCode op){
-        if(op!=uWS::OpCode::TEXT) return;
+        if(op!=uWS::OpCode::TEXT && op!=uWS::OpCode::BINARY) return;
         auto* d = ws->getUserData();
         auto c = d->client;
         if(!c) return;
