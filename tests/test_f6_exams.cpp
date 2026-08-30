@@ -21,7 +21,7 @@ TEST(F6Exams, CreateSuccess201) {
 TEST(F6Exams, ExportXlsxHeaders) {
   examvan::Request req;
   auto r=export_xlsx(req);
-  EXPECT_EQ(r.status,200);
-  EXPECT_NE(r.headers["Content-Type"].find("spreadsheetml"), std::string::npos);
-  EXPECT_NE(r.headers["Content-Disposition"].find("export.xlsx"), std::string::npos);
+  // ExportXlsx belum diimplementasi — 501 Not Implemented (bukan 200 fake xlsx)
+  EXPECT_EQ(r.status,501);
+  EXPECT_NE(r.body.find("NOT_IMPLEMENTED"), std::string::npos);
 }

@@ -191,8 +191,8 @@ TEST(ProtobufHandlers, DeleteExam_JsonStillWorks) {
 
 TEST(ProtobufHandlers, ExportXlsx_NoProtobufNeeded) {
   auto res = handlers::admin::export_xlsx(Request{});
-  EXPECT_EQ(res.status, 200);
-  EXPECT_NE(res.headers["Content-Type"].find("spreadsheet"), std::string::npos);
+  // ExportXlsx belum diimplementasi — 501 Not Implemented (bukan 200 fake xlsx)
+  EXPECT_EQ(res.status, 501);
 }
 
 // ======================================================================

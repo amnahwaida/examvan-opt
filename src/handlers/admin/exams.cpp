@@ -43,6 +43,12 @@ static bool parse_multipart(const std::string& body, const std::string& ct,
   if(bpos==std::string::npos) return false;
   std::string boundary=ct.substr(bpos+9);
   if(!boundary.empty() && boundary.front()=='"') { boundary=boundary.substr(1); auto e=boundary.find('"'); if(e!=std::string::npos) boundary=boundary.substr(0,e); }
+  // Bug B: boundary tidak ber-quote boleh diikuti param lain dipotong ';'
+  // (mis. boundary=abc; charset=utf-8) — potong setelah semicolon pertama.
+  {
+    auto semi=boundary.find(';');
+    if(semi!=std::string::npos) boundary=boundary.substr(0,semi);
+  }
   // trim
   {
     size_t s=boundary.find_first_not_of(" \t\r\n");
@@ -327,6 +333,12 @@ Response create_exam(const Request& req){
     if(!helpers::is_valid_exam_token(custom) || custom.size()!=8){
       Response r; r.status=400; r.json(400,"{\"error\":\"custom_token must be 8 A-Z0-9\"}"); return r;
     }
+    // Bug A fix: claim_token secara atomik cek seen_tokens_ + exams_[],
+    // bukan langsung set token. Menutup race TOCTOU bila regenerate-token
+    // sedang claim token yang sama di thread lain.
+    if(!exams().claim_token(custom)){
+      Response r; r.status=409; r.json(409,"{\"error\":\"custom_token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return r;
+    }
     token=custom;
   } else {
     // generate unique — error eksplisit jika seluruh attempt collide
@@ -395,7 +407,7 @@ Response create_exam(const Request& req){
   std::string esc_name=json_escape(name);
   std::string esc_fpath=json_escape(fpath);
   std::string esc_token=json_escape(token);
-  Response r; r.status=201; r.json(201,"{\"success\":true,\"id\":"+std::to_string(id)+",\"token\":\""+esc_token+"\",\"name\":\""+esc_name+"\",\"file_path\":\""+esc_fpath+"\",\"status\":\"inactive\",\"size_bytes\":"+std::to_string(size)+",\"created_at\":\""+helpers::format_iso_utc(std::chrono::system_clock::now())+"\"}"); return r;
+  Response r; r.status=201; r.json(201,"{\"success\":true,\"id\":"+std::to_string(id)+",\"token\":\""+esc_token+"\",\"name\":\""+esc_name+"\",\"file_path\":\""+esc_fpath+"\",\"status\":\"inactive\",\"size_bytes\":"+std::to_string(size)+",\"created_at\":\""+exam.created_at+"\"}"); return r;
 }
 static std::string get_exam_id(const Request& req){
   auto it=req.params.find("id");
@@ -444,6 +456,10 @@ Response update_exam(const Request& req){
     }
   }
   // semua action lain: mutasi via store.update() (mutator jalan dalam lock store)
+  // Bug E: reject action tidak dikenal SEBELUM acquire lock store
+  if(action!="toggle" && action!="start" && action!="stop" && action!="edit"){
+    Response r; r.status=400; r.json(400,"{\"error\":\"unknown action: "+json_escape(action)+"\"}"); return r;
+  }
   // pre-validasi nama hanya untuk action edit
   std::string new_name;
   if(action=="edit"){
@@ -512,8 +528,8 @@ Response delete_exam(const Request& req){
   Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+"}"); return r;
 }
 Response export_xlsx(const Request&){
-  Response r; r.status=200; r.headers["Content-Type"]="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  r.headers["Content-Disposition"]="attachment; filename=\"export.xlsx\"";
-  r.body="PK fake xlsx content"; return r;
+  // Bug D: export_xlsx belum diimplementasi — jangan balas 200 dengan
+  // konten XLSX palsu (user mendapat file corrupt). Jelas 501 + pesan.
+  Response r; r.status=501; r.json(501,"{\"error\":\"XLSX export not implemented\",\"error_code\":\"NOT_IMPLEMENTED\"}"); return r;
 }
 } // namespace examvan::handlers::admin

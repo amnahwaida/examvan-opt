@@ -831,6 +831,98 @@ TEST(ExamProduction, DeleteExam_ProtobufResponse){
 }
 #endif
 
+// ======================================================================
+// GROUP H: Review Pass 7 — TOCTOU, multipart boundary, consistency (TDD)
+// ======================================================================
+
+// Bug B: multipart boundary dengan trailing params (charset) harus tetap ter-parse
+TEST(ExamProduction, Multipart_BoundaryTrailingParams_Parsed){
+  with_clean_store();
+  set_r2_env(true);
+  std::string boundary="----BV11";
+  // Content-Type dengan trailing params: "; charset=utf-8"
+  std::string ct="multipart/form-data; boundary="+boundary+"; charset=utf-8";
+  // multipart body hanya name — tanpa file
+  std::string body="--"+boundary+"\r\n";
+  body+="Content-Disposition: form-data; name=\"name\"\r\n\r\n";
+  body+="TrailingParams\r\n";
+  body+="--"+boundary+"--\r\n";
+  Request req; req.body=body;
+  req.headers["Content-Type"]=ct;
+  auto res=create_exam(req);
+  // name harus ter-parse — bukan 400 "name required", tapi 400 "file_path required"
+  EXPECT_EQ(res.status,400) << "harus lolos parse name, bukan 400 name required: " << res.body;
+  EXPECT_NE(res.body.find("file_path"), std::string::npos)
+    << "setelah name ter-parse, error berikutnya harus soal file_path: " << res.body;
+}
+
+// Bug C: created_at di response harus match stored value (bukan recomputed now())
+TEST(ExamProduction, CreateExam_CreatedAtConsistent){
+  with_clean_store();
+  Request req; req.body=form_body("CreatedAt","/tmp/a.pdf","100");
+  auto res=create_exam(req);
+  ASSERT_EQ(res.status,201) << res.body;
+  // ekstrak id dari response
+  auto pid=res.body.find("\"id\":");
+  ASSERT_NE(pid, std::string::npos);
+  int id=std::stoi(res.body.substr(pid+5));
+  // ambil dari store
+  auto exam=store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  // stored created_at harus muncul di response
+  EXPECT_NE(res.body.find(exam->created_at), std::string::npos)
+    << "response created_at harus match stored: store=" << exam->created_at
+    << " response=" << res.body;
+}
+
+// Bug D: export_xlsx harus 501, bukan 200 dengan content palsu
+TEST(ExamProduction, ExportXlsx_Returns501NotImpl){
+  auto res=export_xlsx(Request{});
+  EXPECT_EQ(res.status,501) << "export_xlsx stub harus return 501, bukan 200 fake: " << res.body;
+}
+
+// Bug E: update_exam dengan action tidak dikenal → 400
+TEST(ExamProduction, UpdateExam_UnknownAction_ImmediateReject){
+  with_clean_store();
+  // buat exam dulu
+  Request r1; r1.body=form_body("UnknownAct","/tmp/a.pdf","100");
+  auto cr=create_exam(r1);
+  ASSERT_EQ(cr.status,201) << cr.body;
+  auto pid=cr.body.find("\"id\":");
+  ASSERT_NE(pid, std::string::npos);
+  std::string id_str=cr.body.substr(pid+5);
+  id_str=id_str.substr(0,id_str.find(','));
+  // kirim action yang tidak dikenal
+  Request ru; ru.params["id"]=id_str; ru.path="/"+id_str+"/foo";
+  auto res=update_exam(ru);
+  EXPECT_EQ(res.status,400) << "unknown action harus 400: " << res.body;
+}
+
+// Bug A (TOCTOU): custom-token path HARUS claim_token() dulu — bukan langsung add().
+// Skenario: thread A (regenerate-token) claim "RACE0001" (masuk seen_tokens_),
+// belum update(). Thread B (create custom "RACE0001") — path custom lama langsung
+// add() yang hanya cek exams_[] → "RACE0001" belum di exams_ → sukses →
+// nanti update() thread A menulis token sama ke exam lain → DUA exam token sama.
+// Fix: path custom juga melewati claim_token (atomic cek seen_tokens_ + exams_).
+TEST(ExamProduction, CustomToken_ConflictWithRegenerateClaim_Rejected){
+  with_clean_store();
+  set_r2_env(true);
+  // buat exam A dengan custom token
+  Request r1; r1.body=form_body("ExamA","/tmp/a.pdf","100","AAAA1111");
+  EXPECT_EQ(create_exam(r1).status,201);
+  // simulate regenerate-token pada exam A: claim "RACE0001" masuk seen_tokens_,
+  // belum di-update ke exams_ (window race)
+  ASSERT_TRUE(store::active_store()->claim_token("RACE0001")) << "pre-claim harus sukses";
+  // create exam B dengan custom token yang sama → harus 409 (bukan 201)
+  Request r2; r2.body=form_body("ExamB","/tmp/b.pdf","100","RACE0001");
+  auto res=create_exam(r2);
+  EXPECT_EQ(res.status,409)
+    << "custom token yang sedang di-claim regenerate harus ditolak, dapat: " << res.status
+    << " body=" << res.body;
+  // cleanup pre-claim agar tidak bocor ke test lain
+  store::active_store()->unclaim_token("RACE0001");
+}
+
 // add() menolak token duplikat
 TEST(ExamStoreMemory, Add_RejectsDuplicateToken){
   examvan::store::ExamStoreMemory store;
