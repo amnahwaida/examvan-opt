@@ -9,6 +9,8 @@
 #include "examvan.pb.h"
 #endif
 #include <string>
+#include <algorithm>
+#include <cstdlib>
 
 namespace examvan::handlers::api {
 
@@ -81,19 +83,58 @@ Response list_exams(const Request& req){
       "Silakan download versi terbaru ("+required+") dari halaman Download.\"}");
     return r;
   }
+  const auto exams=store::active_store()->list_all();
+  int page=1;
+  int per_page=50;
+  auto parse_positive=[&](const char* key, int fallback){
+    const std::string needle=std::string(key)+"=";
+    size_t pos=req.query.find(needle);
+    if(pos==std::string::npos) return fallback;
+    pos+=needle.size();
+    size_t end=req.query.find('&',pos);
+    try {
+      const int value=std::stoi(req.query.substr(pos,end==std::string::npos?end:end-pos));
+      return value>0?value:fallback;
+    } catch(...) { return fallback; }
+  };
+  page=parse_positive("page",1);
+  per_page=std::min(parse_positive("per_page",50),200);
+  const int total=static_cast<int>(exams.size());
+  const int total_pages=total==0?0:(total+per_page-1)/per_page;
+  const int begin=std::min(total,(page-1)*per_page);
+  const int end=std::min(total,begin+per_page);
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::ListExamsResponse pb;
     pb.set_success(true);
-    pb.set_page(1);
-    pb.set_per_page(50);
-    pb.set_total(0);
-    pb.set_total_pages(0);
+    pb.set_page(page);
+    pb.set_per_page(per_page);
+    pb.set_total(total);
+    pb.set_total_pages(total_pages);
+    for(int i=begin;i<end;++i){
+      pb.add_tokens(exams[i].active_token.empty()?exams[i].token:exams[i].active_token);
+    }
     std::string out; pb.SerializeToString(&out);
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.json(200,"{\"data\":[],\"pagination\":{\"page\":1,\"per_page\":50,\"total\":0,\"total_pages\":0},\"success\":true}");
+  std::string data="[";
+  for(int i=begin;i<end;++i){
+    if(i>begin) data+=",";
+    const auto& e=exams[i];
+    data+="{\"id\":"+std::to_string(e.id)+
+      ",\"name\":\""+json_escape(e.name)+"\""+
+      ",\"token\":\""+json_escape(e.token)+"\""+
+      ",\"active_token\":\""+json_escape(e.active_token.empty()?e.token:e.active_token)+"\""+
+      ",\"file_path\":\""+json_escape(e.file_path)+"\""+
+      ",\"status\":\""+json_escape(e.status)+"\""+
+      ",\"created_at\":\""+json_escape(e.created_at)+"\"}";
+  }
+  data+="]";
+  Response r; r.json(200,"{\"data\":"+data+",\"pagination\":{\"page\":"+
+    std::to_string(page)+",\"per_page\":"+std::to_string(per_page)+
+    ",\"total\":"+std::to_string(total)+",\"total_pages\":"+
+    std::to_string(total_pages)+"},\"success\":true}");
   return r;
 }
 

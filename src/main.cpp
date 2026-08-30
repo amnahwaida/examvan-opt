@@ -15,6 +15,10 @@
 #include "jobs/jobs.hpp"
 #include "server/server.hpp"
 #include "queue/submission_queue.hpp"
+#include "store/exam_store.hpp"
+#ifdef HAS_LIBPQ
+#include "store/exam_store_postgres.hpp"
+#endif
 #include "handlers/auth/login.hpp"
 #include "middleware/scoring.hpp"
 #include <iostream>
@@ -31,10 +35,20 @@ int main(){
 #ifdef HAS_LIBPQ
   std::string conninfo = examvan::pg_conninfo_from_url(cfg.database_url);
   examvan::db::RealPool db(conninfo.empty()? cfg.database_url:conninfo, cfg.database_max_conns);
+  if(!db.connect() || !db.ping()){
+    std::cerr << "database error: exam metadata store is mandatory\n";
+    return 1;
+  }
+  examvan::store::ExamStorePostgres postgres_store(db);
+  if(!postgres_store.migrate() || !postgres_store.hydrate()){
+    std::cerr << "database error: exams schema/hydration failed\n";
+    return 1;
+  }
+  examvan::store::set_active_store(&postgres_store);
 #else
   examvan::DbPool db(cfg.database_url, cfg.database_max_conns);
-#endif
   db.connect();
+#endif
 #ifdef HAS_HIREDIS
   auto redis_ctx = examvan::redis_real::connect_redis(cfg.redis_url);
   examvan::RedisClient redis(cfg.redis_url);

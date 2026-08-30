@@ -56,6 +56,24 @@ TEST(Api, VersionGateGoSemantics) {
   EXPECT_EQ(handlers::api::list_exams(req).status,200);
 }
 
+TEST(Api, ListExamsReadsActiveStore) {
+  examvan::handlers::admin::clear_exams_for_testing();
+  setenv("R2_ACCESS_KEY_ID","test",1);
+  setenv("R2_SECRET_ACCESS_KEY","test",1);
+  setenv("R2_ENDPOINT","https://test.r2.cloudflarestorage.com",1);
+  setenv("R2_BUCKET","test",1);
+  Request create; create.method="POST";
+  create.body="name=PersistedListExam&file_path=/tmp/a.pdf&size_bytes=100";
+  auto created=examvan::handlers::admin::create_exam(create);
+  ASSERT_EQ(created.status,201) << created.body;
+
+  Request list; list.method="GET"; list.path="/api/exams";
+  auto response=handlers::api::list_exams(list);
+  ASSERT_EQ(response.status,200) << response.body;
+  EXPECT_NE(response.body.find("PersistedListExam"),std::string::npos);
+  EXPECT_NE(response.body.find("\"total\":1"),std::string::npos);
+}
+
 TEST(Api, ExamByTokenValid) {
   std::string perm; int eid=0;
   prepare_started_exam(perm, eid);

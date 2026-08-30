@@ -992,6 +992,9 @@ TEST(ExamProduction, DashboardPage_RendersExamFromLiveStore){
     << "Dashboard harus render nama ujian A";
   EXPECT_NE(res.body.find("DashboardB"), std::string::npos)
     << "Dashboard harus render nama ujian B";
+  size_t table_count=0, pos=0;
+  while((pos=res.body.find("id=\"examTable\"",pos))!=std::string::npos){ ++table_count; ++pos; }
+  EXPECT_EQ(table_count,1u) << "Dashboard hanya boleh memiliki satu tabel ujian";
 }
 
 // Dashboard tanpa ujian harus tampilkan empty-state
@@ -1015,6 +1018,18 @@ TEST(ExamProduction, DashboardPage_NoEmptyStateWhenExamsExist){
   EXPECT_EQ(res.status,200);
   EXPECT_EQ(res.body.find("Belum ada ujian"), std::string::npos)
     << "Dashboard dengan ujian tidak boleh tampilkan empty-state";
+}
+
+TEST(ExamProduction, Dashboard_RendersExactlyOneExamTable){
+  with_clean_store();
+  set_r2_env(true);
+  Request create; create.body=form_body("SingleTable","/tmp/a.pdf","100");
+  ASSERT_EQ(create_exam(create).status,201);
+  auto response=dashboard_page(Request{});
+  ASSERT_EQ(response.status,200);
+  size_t count=0, pos=0;
+  while((pos=response.body.find("id=\"examTable\"",pos))!=std::string::npos){ ++count; ++pos; }
+  EXPECT_EQ(count,1u);
 }
 
 // ======================================================================

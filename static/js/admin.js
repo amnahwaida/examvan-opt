@@ -187,6 +187,12 @@ if (uploadForm) {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/admin/api/upload');
         xhr.setRequestHeader('X-CSRF-Token', getCsrfToken());
+        // Retry-safe create contract: the server can replay a request with the
+        // same key instead of creating a second exam.
+        const idempotencyKey = (window.crypto && typeof window.crypto.randomUUID === 'function')
+            ? window.crypto.randomUUID()
+            : ('exam-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+        xhr.setRequestHeader('Idempotency-Key', idempotencyKey);
 
         xhr.upload.addEventListener('progress', function(e) {
             if (e.lengthComputable) {

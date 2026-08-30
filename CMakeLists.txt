@@ -112,6 +112,7 @@ add_library(examvan_core STATIC
   src/http/router_full.cpp
   src/helpers/utils.cpp
   src/store/exam_store_memory.cpp
+  src/store/exam_store_postgres.cpp
   src/services/examtoken/examtoken.cpp
   src/handlers/r2/r2.cpp
   src/middleware/cors.cpp

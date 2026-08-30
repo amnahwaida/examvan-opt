@@ -38,8 +38,24 @@ void RealPool::release(PGconn* c){
 PgResultPtr RealPool::exec_params(PGconn* c, const std::string& sql, const std::vector<std::string>& params){
   std::vector<const char*> vals;
   for(auto& p: params) vals.push_back(p.c_str());
-  PGresult* r=PQexecParams(c, sql.c_str(), vals.size(), nullptr, vals.data(), nullptr, nullptr, 0);
+  PGresult* r=PQexecParams(c, sql.c_str(), static_cast<int>(vals.size()), nullptr, vals.data(), nullptr, nullptr, 0);
   return PgResultPtr(r);
+}
+
+PgResultPtr RealPool::exec_params_nullable(PGconn* c, const std::string& sql, const std::vector<std::optional<std::string>>& params){
+  std::vector<const char*> vals;
+  vals.reserve(params.size());
+  for(const auto& p: params) vals.push_back(p ? p->c_str() : nullptr);
+  PGresult* r=PQexecParams(c, sql.c_str(), static_cast<int>(vals.size()), nullptr, vals.data(), nullptr, nullptr, 0);
+  return PgResultPtr(r);
+}
+
+PgResultPtr RealPool::exec_params_pooled(const std::string& sql, const std::vector<std::string>& params){
+  auto c=acquire();
+  if(!c || PQstatus(c.get())!=CONNECTION_OK) return {};
+  auto result=exec_params(c.get(),sql,params);
+  release(c.release());
+  return result;
 }
 
 } // namespace examvan::db

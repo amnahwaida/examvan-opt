@@ -1,5 +1,6 @@
 #pragma once
 #include "db/pool.hpp"
+#include <optional>
 #ifdef HAS_LIBPQ
 #include <libpq-fe.h>
 #include <memory>
@@ -22,6 +23,9 @@ public:
   void release(PGconn* c);
   bool ping();
   PgResultPtr exec_params(PGconn* c, const std::string& sql, const std::vector<std::string>& params);
+  PgResultPtr exec_params_nullable(PGconn* c, const std::string& sql, const std::vector<std::optional<std::string>>& params);
+  // Execute parameterized SQL while returning the connection to the pool.
+  PgResultPtr exec_params_pooled(const std::string& sql, const std::vector<std::string>& params);
 private:
   std::string conninfo_;
   int max_conns_;
