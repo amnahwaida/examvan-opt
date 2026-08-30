@@ -5,10 +5,8 @@
 #include <cctype>
 #include <unordered_set>
 #include <mutex>
+#include <vector>
 namespace examvan::handlers::admin {
-Response list_admin_exams(const Request&){
-  Response r; r.json(200,"{\"success\":true,\"exams\":[],\"total\":0}"); return r;
-}
 static std::string get_param(const std::map<std::string,std::string>& form, const std::string& k){
   auto it=form.find(k); return it!=form.end()? it->second : "";
 }
@@ -93,6 +91,24 @@ static bool parse_multipart(const std::string& body, const std::string& ct,
 static std::atomic<int> g_next_id{1};
 static std::mutex g_token_mu;
 static std::unordered_set<std::string> g_seen_tokens;
+struct StoredExam{int id; std::string name; std::string token; std::string file_path;};
+static std::vector<StoredExam> g_exams;
+static std::mutex g_exams_mu;
+static void store_exam(int id, const std::string& name, const std::string& token, const std::string& fpath){
+  std::lock_guard<std::mutex> g(g_exams_mu);
+  g_exams.push_back({id,name,token,fpath});
+}
+Response list_admin_exams(const Request&){
+  std::lock_guard<std::mutex> g(g_exams_mu);
+  std::string json="[";
+  for(size_t i=0;i<g_exams.size();++i){
+    if(i) json+=",";
+    auto &e=g_exams[i];
+    json+="{\"id\":"+std::to_string(e.id)+",\"name\":\""+json_escape(e.name)+"\",\"token\":\""+json_escape(e.token)+"\",\"file_path\":\""+json_escape(e.file_path)+"\"}";
+  }
+  json+="]";
+  Response r; r.json(200,"{\"success\":true,\"exams\":"+json+",\"total\":"+std::to_string(g_exams.size())+"}"); return r;
+}
 Response create_exam(const Request& req){
   std::map<std::string,std::string> form;
   std::string file_name, file_data, file_ct;
@@ -194,6 +210,7 @@ Response create_exam(const Request& req){
   // (komentar: R2 upload stub)
   // DB insert stub: generate id unik
   int id = g_next_id.fetch_add(1);
+  store_exam(id,name,token,fpath);
   // Escape JSON untuk name dan fpath
   std::string esc_name=json_escape(name);
   std::string esc_fpath=json_escape(fpath);
