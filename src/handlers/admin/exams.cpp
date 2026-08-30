@@ -3,15 +3,18 @@
 #include "config/config.hpp"
 #include "handlers/r2/r2.hpp"
 #include "middleware/protobuf.hpp"
+#include "utils/log.hpp"
+#include "store/exam_store.hpp"
+#include <chrono>
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
-#include <atomic>
 #include <cctype>
-#include <unordered_set>
-#include <mutex>
 #include <vector>
+#include <functional>
+#include <algorithm>
 namespace examvan::handlers::admin {
+using namespace examvan::utils;
 static std::string get_param(const std::map<std::string,std::string>& form, const std::string& k){
   auto it=form.find(k); return it!=form.end()? it->second : "";
 }
@@ -93,42 +96,67 @@ static bool parse_multipart(const std::string& body, const std::string& ct,
   }
   return true;
 }
-static std::atomic<int> g_next_id{1};
-static std::mutex g_token_mu;
-static std::unordered_set<std::string> g_seen_tokens;
-struct StoredExam{int id; std::string name; std::string token; std::string file_path;};
-static std::vector<StoredExam> g_exams;
-static std::mutex g_exams_mu;
-static void store_exam(int id, const std::string& name, const std::string& token, const std::string& fpath){
-  std::lock_guard<std::mutex> g(g_exams_mu);
-  g_exams.push_back({id,name,token,fpath});
+/* Storage: lewat ExamStore abstraction, bukan g_exams langsung.
+ * Default = in-memory; test bisa swap via set_active_store(). */
+static store::ExamStore& exams(){
+  return *store::active_store();
+}
+
+/* Test hooks: callback untuk mock upload & token generation */
+static std::function<void(const std::string&,const std::string&)> g_upload_mock;
+static std::function<std::string(int)> g_token_gen_override;
+
+void set_upload_mock_for_test(std::function<void(const std::string&,const std::string&)> mock){
+  g_upload_mock = std::move(mock);
+}
+void set_token_generator_for_test(std::function<std::string(int)> gen){
+  g_token_gen_override = std::move(gen);
+}
+
+void clear_exams_for_testing(){
+  exams().clear_all();
+  g_upload_mock = nullptr;
+  g_token_gen_override = nullptr;
+}
+
+static std::string gen_token(int len){
+  if(g_token_gen_override) return g_token_gen_override(len);
+  return helpers::generate_token(len);
+}
+
+static bool has_null_bytes(const std::string& s){
+  for(char c: s) if(c=='\0') return true;
+  return false;
 }
 Response list_admin_exams(const Request& req){
-  std::lock_guard<std::mutex> g(g_exams_mu);
+  auto snapshot = exams().list_all(); // ambil snapshot (thread-safe)
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::AdminExamList pb;
     pb.set_success(true);
-    pb.set_total(static_cast<int32_t>(g_exams.size()));
-    for(auto &e: g_exams){
+    pb.set_total(static_cast<int32_t>(snapshot.size()));
+    for(auto &e: snapshot){
       auto *ex=pb.add_exams();
       ex->set_id(e.id);
       ex->set_name(e.name);
       ex->set_token(e.token);
       ex->set_file_path(e.file_path);
+      ex->set_size_bytes(e.size_bytes);
+      ex->set_status(e.status);
+      ex->set_created_at(e.created_at);
     }
     std::string out; pb.SerializeToString(&out);
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
   std::string json="[";
-  for(size_t i=0;i<g_exams.size();++i){
+  for(size_t i=0;i<snapshot.size();++i){
     if(i) json+=",";
-    auto &e=g_exams[i];
-    json+="{\"id\":"+std::to_string(e.id)+",\"name\":\""+json_escape(e.name)+"\",\"token\":\""+json_escape(e.token)+"\",\"file_path\":\""+json_escape(e.file_path)+"\"}";
+    auto &e=snapshot[i];
+    json+="{\"id\":"+std::to_string(e.id)+",\"name\":\""+json_escape(e.name)+"\",\"token\":\""+json_escape(e.token)+"\",\"file_path\":\""+json_escape(e.file_path)+"\",\"size_bytes\":"+std::to_string(e.size_bytes)+",\"status\":\""+json_escape(e.status)+"\",\"created_at\":\""+json_escape(e.created_at)+"\"}";
   }
   json+="]";
-  Response r; r.json(200,"{\"success\":true,\"exams\":"+json+",\"total\":"+std::to_string(g_exams.size())+"}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"exams\":"+json+",\"total\":"+std::to_string(snapshot.size())+"}"); return r;
 }
 Response create_exam(const Request& req){
   std::map<std::string,std::string> form;
@@ -210,20 +238,50 @@ Response create_exam(const Request& req){
     // keep original for length check after sanitize? use trimmed for storage
     name=trimmed;
   }
-  if(name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
+  if(name.empty()){ utils::log_error("exam_create_failed","reason=name_required"); Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
   if(name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return r; }
   if(fpath.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"file_path required\"}"); return r; }
-  if(fpath.find("..")!=std::string::npos || fpath.find("\\")!=std::string::npos){
+  // file_path hardening: null-byte, traversal bertingkat, backslash
+  if(has_null_bytes(fpath) || fpath.find("..")!=std::string::npos || fpath.find("\\")!=std::string::npos){
     Response r; r.status=400; r.json(400,"{\"error\":\"file_path must not contain traversal\"}"); return r;
   }
   // MIME check for multipart pdf - require %PDF magic (content-type can be spoofed)
-  // Validate file content before R2 config check — invalid files should be
-  // rejected regardless of R2 availability.
   if(is_multipart_pb && !file_data.empty()){
     bool is_pdf_magic = file_data.rfind("%PDF",0)==0;
     if(!is_pdf_magic){ Response r; r.status=400; r.json(400,"{\"error\":\"file must be PDF\"}"); return r; }
   }
-  // R2 mandatory fail-closed: hanya untuk upload file biner (multipart)
+  // size validation — sebelum R2 upload (hemat bandwidth)
+  long size=0;
+  try{ if(!sz.empty()) size=std::stol(sz); else if(!file_data.empty()) size=file_data.size(); }catch(...){}
+  const long MAX_PDF = 5*1024*1024;
+  if(size>MAX_PDF){ Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return r; }
+  // custom_token validasi & collision check
+  std::string token;
+  if(!custom.empty()){
+    for(char &c: custom) c=toupper((unsigned char)c);
+    if(!helpers::is_valid_exam_token(custom) || custom.size()!=8){
+      Response r; r.status=400; r.json(400,"{\"error\":\"custom_token must be 8 A-Z0-9\"}"); return r;
+    }
+    // custom token harus unik terhadap semua exam existing
+    token=custom; // assign SEBELUM collision check supaya perbandingan benar
+    if(exams().token_exists(token)){
+      Response r; r.status=409; r.json(409,"{\"error\":\"custom_token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return r;
+    }
+  } else {
+    // generate unique — error eksplisit jika seluruh attempt collide
+    bool found=false;
+    for(int tries=0;tries<5;tries++){
+      token=gen_token(8);
+      if(exams().claim_token(token)){ found=true; break; }
+    }
+    if(!found){
+      utils::log_error("exam_create_failed","reason=token_collision_exhausted");
+      Response r; r.status=409; r.json(409,"{\"error\":\"token generation failed after retries\",\"error_code\":\"TOKEN_COLLISION\"}"); return r;
+    }
+  }
+  // Generate ID dulu (sebelum R2 upload, supaya key pakai id nyata)
+  int id = exams().next_id();
+  // R2 mandatory fail-closed
   {
     auto cfg_r2 = Config::load();
     r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
@@ -231,47 +289,31 @@ Response create_exam(const Request& req){
       Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
     }
     if(!file_data.empty() && rc.enabled()){
-      r2::R2Client client{rc};
-      std::string key = r2::object_key_for_exam(0, fpath);
-      if(!client.upload(key, file_data)){
-        Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return r;
+      std::string key = r2::object_key_for_exam(id, fpath);
+      if(g_upload_mock){
+        g_upload_mock(key, file_data);
+      } else {
+        r2::R2Client client{rc};
+        if(!client.upload(key, file_data)){
+          Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return r;
+        }
       }
     }
   }
-  // size
-  long size=0;
-  try{ if(!sz.empty()) size=std::stol(sz); else if(!file_data.empty()) size=file_data.size(); }catch(...){}
-  const long MAX_PDF = 5*1024*1024;
-  // also respect SaaS default 1M if available? For now enforce 5M global as contract 102M is large, but keep 5M for prod
-  if(size>MAX_PDF){ Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return r; }
-  // custom_token validasi
-  std::string token;
-  if(!custom.empty()){
-    for(char &c: custom) c=toupper((unsigned char)c);
-    if(!helpers::is_valid_exam_token(custom) || custom.size()!=8){
-      Response r; r.status=400; r.json(400,"{\"error\":\"custom_token must be 8 A-Z0-9\"}"); return r;
-    }
-    token=custom;
-  } else {
-    // generate unique
-    int tries=0;
-    do{
-      token=helpers::generate_token(8);
-      std::lock_guard<std::mutex> g(g_token_mu);
-      if(g_seen_tokens.find(token)==g_seen_tokens.end()){
-        g_seen_tokens.insert(token);
-        break;
-      }
-      tries++;
-    }while(tries<5);
+  // Store via models::Exam (lengkap, bukan triplet)
+  {
+    models::Exam exam;
+    exam.id=id;
+    exam.name=name;
+    exam.file_path=fpath;
+    exam.size_bytes=size;
+    exam.token=token;
+    exam.status="inactive";
+    exam.security_level="medium";
+    exam.created_at=helpers::format_iso_utc(std::chrono::system_clock::now());
+    exams().add(exam);
   }
-  // R2 check (fail-closed jika R2 mandatory? Untuk TDD toleran: tetap success jika enabled false)
-  // Di produksi, jika R2 tidak enabled dan ada file, kembalikan 503
-  // Untuk menjaga backward compat test R2NotConfiguredFails yang toleran, kita tidak fail di sini
-  // (komentar: R2 upload stub)
-  // DB insert stub: generate id unik
-  int id = g_next_id.fetch_add(1);
-  store_exam(id,name,token,fpath);
+  utils::log_info("exam_created","id="+std::to_string(id)+" token="+token+" name="+name);
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::CreateExamResponse pb;
@@ -284,25 +326,108 @@ Response create_exam(const Request& req){
     Response r; r.status=201; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  // Escape JSON untuk name dan fpath
   std::string esc_name=json_escape(name);
   std::string esc_fpath=json_escape(fpath);
   std::string esc_token=json_escape(token);
-  Response r; r.status=201; r.json(201,"{\"success\":true,\"id\":"+std::to_string(id)+",\"token\":\""+esc_token+"\",\"name\":\""+esc_name+"\",\"file_path\":\""+esc_fpath+"\"}"); return r;
+  Response r; r.status=201; r.json(201,"{\"success\":true,\"id\":"+std::to_string(id)+",\"token\":\""+esc_token+"\",\"name\":\""+esc_name+"\",\"file_path\":\""+esc_fpath+"\",\"status\":\"inactive\",\"size_bytes\":"+std::to_string(size)+",\"created_at\":\""+helpers::format_iso_utc(std::chrono::system_clock::now())+"\"}"); return r;
 }
+static std::string get_exam_id(const Request& req){
+  auto it=req.params.find("id");
+  if(it!=req.params.end()) return it->second;
+  it=req.params.find("exam_id");
+  if(it!=req.params.end()) return it->second;
+  return "";
+}
+
 Response update_exam(const Request& req){
+  auto id_str=get_exam_id(req);
+  if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
+  int id=0;
+  try{ id=std::stoi(id_str); }catch(...){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid exam id\"}"); return r; }
+  std::string action=req.params.count("action")? req.params.at("action") : "";
+  // tentukan action dari path jika tidak ada param action
+  if(action.empty()){
+    auto p=req.path.find("/toggle"); if(p!=std::string::npos){ action="toggle"; }
+    else { p=req.path.find("/start"); if(p!=std::string::npos) action="start"; }
+    if(action.empty()){ p=req.path.find("/stop"); if(p!=std::string::npos) action="stop"; }
+    if(action.empty()){ p=req.path.find("/regenerate-token"); if(p!=std::string::npos) action="regenerate-token"; }
+    if(action.empty()){ p=req.path.find("/edit"); if(p!=std::string::npos) action="edit"; }
+  }
+  // regenerate-token: claim token baru (atomic thd store) lalu terapkan via update()
+  if(action=="regenerate-token"){
+    std::string new_token;
+    bool ok=false;
+    for(int tries=0;tries<5;tries++){
+      new_token=gen_token(8);
+      if(exams().claim_token(new_token)){ ok=true; break; }
+    }
+    bool found=false;
+    if(ok){
+      found = exams().update(id, [&](models::Exam& e){ e.token=new_token; });
+    } else {
+      // claim selalu gagal -> tolak (bukan silent reuse)
+      found = exams().get_by_id(id).has_value();
+    }
+    if(!found){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+    utils::log_info("exam_token_regenerated","id="+id_str);
+    auto cur = exams().get_by_id(id);
+    std::string shown = cur? cur->token : "";
+    Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"token\":\""+json_escape(shown)+"\"}"); return r;
+  }
+  // semua action lain: mutasi via store.update() (mutator jalan dalam lock store)
+  // pre-validasi nama hanya untuk action edit
+  std::string new_name;
+  if(action=="edit"){
+    new_name=req.params.count("name")? req.params.at("name") : "";
+    if(new_name.empty()){
+      auto form=helpers::parse_form(req.body);
+      new_name = form.count("name")? form["name"] : "";
+    }
+    if(!new_name.empty()){
+      new_name=helpers::sanitize_student_input(new_name);
+      if(new_name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
+      if(new_name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return r; }
+    }
+  }
+  std::string result_status;
+  std::string result_name;
+  bool found=false;
+  found = exams().update(id, [&](models::Exam& e){
+    if(action=="toggle"){ e.status = e.is_active()? "inactive" : "active"; result_status=e.status; }
+    else if(action=="start"){ e.status="active"; result_status="active"; }
+    else if(action=="stop"){ e.status="inactive"; result_status="inactive"; }
+    else if(action=="edit" && !new_name.empty()){ e.name=new_name; result_name=new_name; }
+  });
+  if(!found){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::UpdateExamResponse pb;
     pb.set_success(true);
     pb.set_ok(true);
+    pb.set_id(id);
     std::string out; pb.SerializeToString(&out);
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.json(200,"{\"success\":true,\"ok\":true}"); return r;
+  if(!result_status.empty()){
+    utils::log_info("exam_updated","id="+id_str+" action="+action+" status="+result_status);
+    Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"status\":\""+result_status+"\"}"); return r;
+  }
+  if(!result_name.empty()){
+    utils::log_info("exam_updated","id="+id_str+" action=edit name="+result_name);
+    Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"name\":\""+json_escape(result_name)+"\"}"); return r;
+  }
+  // tidak ada action dikenal / tidak ada perubahan -> 400
+  Response r; r.status=400; r.json(400,"{\"error\":\"no valid update field\"}"); return r;
 }
+
 Response delete_exam(const Request& req){
+  auto id_str=get_exam_id(req);
+  if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
+  int id=0;
+  try{ id=std::stoi(id_str); }catch(...){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid exam id\"}"); return r; }
+  if(!exams().remove(id)){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  utils::log_info("exam_deleted","id="+id_str);
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::DeleteExamResponse pb;
@@ -312,7 +437,7 @@ Response delete_exam(const Request& req){
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.json(200,"{\"success\":true,\"ok\":true}"); return r;
+  Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+"}"); return r;
 }
 Response export_xlsx(const Request&){
   Response r; r.status=200; r.headers["Content-Type"]="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

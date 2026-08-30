@@ -176,13 +176,16 @@ TEST(ProtobufHandlers, CreateExam_MultipartStillWorks) {
 }
 
 TEST(ProtobufHandlers, UpdateExam_JsonStillWorks) {
+  // Tanpa id, handler real memberi 400 (bukan no-op 200). Ini mengunci bahwa
+  // update_exam sekarang memvalidasi input, bukan sukses palsu.
   auto res = handlers::admin::update_exam(Request{});
-  EXPECT_EQ(res.status, 200);
+  EXPECT_EQ(res.status, 400);
 }
 
 TEST(ProtobufHandlers, DeleteExam_JsonStillWorks) {
+  // Tanpa id, handler real memberi 400 (bukan no-op 200).
   auto res = handlers::admin::delete_exam(Request{});
-  EXPECT_EQ(res.status, 200);
+  EXPECT_EQ(res.status, 400);
 }
 
 TEST(ProtobufHandlers, ExportXlsx_NoProtobufNeeded) {

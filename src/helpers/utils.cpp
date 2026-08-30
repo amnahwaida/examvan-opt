@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cctype>
+#include <openssl/rand.h>
 
 namespace examvan::helpers {
 
@@ -40,6 +41,13 @@ std::string sanitize_student_input(const std::string& s){
 
 std::string generate_token(int len){
   static const char* chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  unsigned char buf[64];
+  if(RAND_bytes(buf, sizeof(buf))==1){
+    std::string s; s.reserve(len);
+    for(int i=0;i<len;i++) s.push_back(chars[buf[i] % 32]);
+    return s;
+  }
+  // fallback (jika RAND_bytes gagal, sangat jarang)
   std::random_device rd; std::mt19937 g(rd());
   std::uniform_int_distribution<> d(0,31);
   std::string s; s.reserve(len); for(int i=0;i<len;i++) s.push_back(chars[d(g)]); return s;

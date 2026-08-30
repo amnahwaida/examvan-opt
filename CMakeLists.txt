@@ -111,6 +111,7 @@ add_library(examvan_core STATIC
   src/http/handlers.cpp
   src/http/router_full.cpp
   src/helpers/utils.cpp
+  src/store/exam_store_memory.cpp
   src/services/examtoken/examtoken.cpp
   src/handlers/r2/r2.cpp
   src/middleware/cors.cpp
@@ -121,6 +122,7 @@ add_library(examvan_core STATIC
   src/middleware/turnstile.cpp
   src/middleware/scoring.cpp
   src/middleware/protobuf.cpp
+  src/utils/log.cpp
   src/handlers/public/hasil.cpp
   src/handlers/public/download.cpp
   src/handlers/public/template_helper.cpp
@@ -244,7 +246,9 @@ add_executable(examvan-tests
   tests/test_exam_full_prod_tdd.cpp
   tests/test_protobuf_mandatory_tdd.cpp
   tests/test_protobuf_handlers_tdd.cpp
+  tests/test_exam_production_tdd.cpp
 )
+target_compile_definitions(examvan-tests PRIVATE EXAMVAN_TESTING=1)
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)
 # Banyak test TDD membaca file sumber via relative path (mis. "src/...",
