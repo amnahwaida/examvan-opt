@@ -1,4 +1,5 @@
 #include "http/router.hpp"
+#include "helpers/utils.hpp"
 #include <sstream>
 
 namespace examvan {
@@ -28,15 +29,16 @@ void Router::add(const std::string& method, const std::string& path, Handler h){
 }
 
 bool Router::match(const std::string& pat, const std::string& path, std::map<std::string,std::string>& out){
-  if(pat==path) return true;
+  std::string dec_path = helpers::url_decode(path);
+  if(pat==dec_path) return true;
   std::vector<std::string> pp, ap;
   auto split=[&](const std::string& s, std::vector<std::string>& v){
     std::istringstream ss(s); std::string t; while(std::getline(ss,t,'/')) if(!t.empty()) v.push_back(t);
   };
-  split(pat,pp); split(path,ap);
+  split(pat,pp); split(dec_path,ap);
   if(pp.size()!=ap.size()) return false;
   for(size_t i=0;i<pp.size();++i){
-    if(!pp[i].empty() && pp[i][0]==':') out[pp[i].substr(1)]=ap[i];
+    if(!pp[i].empty() && pp[i][0]==':') out[pp[i].substr(1)]=helpers::url_decode(ap[i]);
     else if(pp[i]!=ap[i]) return false;
   }
   return true;

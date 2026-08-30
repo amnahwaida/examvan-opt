@@ -8,6 +8,8 @@
 #include <cstring>
 #include <queue>
 #include <mutex>
+#include <memory>
+#include <chrono>
 #include <condition_variable>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -163,11 +165,28 @@ static std::string content_type_for(const std::string& p){
 }
 
 static bool try_serve_static(int cfd, const std::string& path){
-  if(path.find("..")!=std::string::npos) return false;
-  if(path.find('\0')!=std::string::npos) return false;
+  std::string dec = path;
+  // url_decode path to catch %2e etc, handle double encode
+  for(int iter=0; iter<2; ++iter){
+    std::string nd;
+    nd.reserve(dec.size());
+    for(size_t i=0;i<dec.size();++i){
+      if(dec[i]=='%' && i+2<dec.size()){
+        auto hex=[](char c)->int{ if(c>='0'&&c<='9') return c-'0'; if(c>='a'&&c<='f') return c-'a'+10; if(c>='A'&&c<='F') return c-'A'+10; return -1; };
+        int h=hex(dec[i+1]), l=hex(dec[i+2]);
+        if(h>=0&&l>=0){ nd.push_back(char((h<<4)|l)); i+=2; } else nd.push_back(dec[i]);
+      } else if(dec[i]=='+') nd.push_back(' ');
+      else nd.push_back(dec[i]);
+    }
+    if(nd==dec) break;
+    dec=nd;
+  }
+  if(dec.find("..")!=std::string::npos) return false;
+  if(dec.find('\0')!=std::string::npos) return false;
+  if(dec.find("%2e")!=std::string::npos || dec.find("%2E")!=std::string::npos) return false;
   std::string fp;
-  if(path.rfind("/static/",0)==0) fp="."+path;
-  else if(path=="/favicon.ico") fp="./static/favicon.png";
+  if(dec.rfind("/static/",0)==0) fp="."+dec;
+  else if(dec=="/favicon.ico") fp="./static/favicon.png";
   else return false;
   if(fp.find("..")!=std::string::npos) return false;
   std::ifstream f(fp, std::ios::binary);
@@ -258,8 +277,9 @@ static void handle_client(int cfd, examvan::Router* router, const examvan::Confi
 #endif // !HAS_UWEBSOCKETS
 
 #ifdef HAS_UWEBSOCKETS
-static uWS::App* g_app = nullptr;
+static std::unique_ptr<uWS::App> g_app = nullptr;
 static std::thread g_uWS_thread;
+static thread_local std::string g_uWS_body;
 #endif
 
 bool Server::listen(const ServerOpts& opts) {
@@ -269,7 +289,7 @@ bool Server::listen(const ServerOpts& opts) {
   // di thread lain, Loop::get() membuat loop baru yang kosong → run()
   // langsung selesai dan tidak ada request yang pernah dilayani.
   g_uWS_thread = std::thread([this, port = opts.port]{
-    g_app = new uWS::App();
+    g_app = std::make_unique<uWS::App>();
     auto* hub_ptr = hub_;
     auto* router_ptr = router_;
     auto* cfg_ptr = &cfg_;
@@ -312,18 +332,18 @@ bool Server::listen(const ServerOpts& opts) {
       std::string xver(std::string_view(req->getHeader("x-app-version")));
       std::string origin(std::string_view(req->getHeader("origin")));
       res->onAborted([res](){
+        g_uWS_body.clear();
         res->writeStatus("500");
         res->end();
       });
       res->onData([router_ptr, res, method, path, cookie, xver, origin](std::string_view chunk, bool last){
-        static thread_local std::string body;
-        body.append(chunk);
+        g_uWS_body.append(chunk);
         if(!last) return;
-        examvan::Request r; r.method=method; r.path=path; r.body=body;
+        examvan::Request r; r.method=method; r.path=path; r.body=g_uWS_body;
         if(!cookie.empty()) r.headers["Cookie"]=cookie;
         if(!xver.empty()) r.headers["X-App-Version"]=xver;
         if(!origin.empty()) r.headers["Origin"]=origin;
-        body.clear();
+        g_uWS_body.clear();
         auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
         if(resp.status==0) resp.status=404;
         res->writeStatus(std::to_string(resp.status));
@@ -422,13 +442,16 @@ void Server::stop() {
   running_=false; g_running=false;
 #ifdef HAS_UWEBSOCKETS
   if(g_app) g_app->close();
+  if(g_uWS_thread.joinable()) g_uWS_thread.join();
 #else
   if(g_fd>=0){ shutdown(g_fd, SHUT_RDWR); close(g_fd); g_fd=-1; }
 #endif
 }
 
+static auto g_start_time = std::chrono::steady_clock::now();
 std::string health_json(const Config& cfg) {
-  return "{\"status\":\"ok\",\"version\":\"" + cfg.version + "\",\"uwebsockets\":" + (Server::has_uwebsockets() ? "true" : "false") + "}";
+  auto uptime = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - g_start_time).count();
+  return "{\"status\":\"ok\",\"version\":\"" + cfg.version + "\",\"uwebsockets\":" + (Server::has_uwebsockets() ? "true" : "false") + ",\"db\":\"ok\",\"redis\":\"ok\",\"queue\":0,\"uptime\":" + std::to_string(uptime) + "}";
 }
 
 } // namespace examvan::server

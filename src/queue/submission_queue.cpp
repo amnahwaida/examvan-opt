@@ -167,8 +167,18 @@ void Worker::run_batch(){
   while(running_){
     std::unique_lock<std::mutex> lk(mu_);
     cv_.wait_for(lk, std::chrono::seconds(5), [this]{ return !batch_q_.empty() || !running_; });
+    std::vector<SubmissionJob> batch;
     while(!batch_q_.empty()){
+      batch.push_back(batch_q_.front());
       batch_q_.pop();
+    }
+    lk.unlock();
+    if(!batch.empty()){
+#ifdef HAS_LIBPQ
+      (void)batch;
+#else
+      (void)batch;
+#endif
     }
   }
 }

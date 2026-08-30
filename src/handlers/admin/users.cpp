@@ -1,6 +1,8 @@
 #include "handlers/admin/users.hpp"
 #include "models/user.hpp"
 #include "helpers/utils.hpp"
+#include "session/cookie.hpp"
+#include <cstdlib>
 #include <string>
 namespace examvan::handlers::admin {
 
@@ -21,9 +23,17 @@ Response create_user(const Request& req){
   if(!models::is_valid_username(username)){ Response r; r.status=400; r.json(400,"{\"error\":\"username 3-32 lowercase, dot, underscore, hyphen\"}"); return r; }
   if(password.size()<8){ Response r; r.status=400; r.json(400,"{\"error\":\"password minimal 8 karakter\"}"); return r; }
   if(role=="operator"){
-    auto it=req.headers.find("X-Role");
-    std::string caller=it!=req.headers.end()?it->second:"guru";
-    if(caller!="superadmin"){ Response r; r.status=403; r.json(403,"{\"error\":\"hanya superadmin bisa buat operator\"}"); return r; }
+    std::string cookie;
+    auto itc=req.headers.find("Cookie");
+    if(itc!=req.headers.end()) cookie=itc->second;
+    std::string cur=getenv("EXAMVAN_SECRET")?getenv("EXAMVAN_SECRET"):"";
+    std::string prev=getenv("EXAMVAN_SECRET_PREV")?getenv("EXAMVAN_SECRET_PREV"):"";
+    auto sess=prev.empty()?verify_session_cookie(cur, cookie):verify_session_cookie_dual(cur, prev, cookie);
+    bool is_super=false;
+    if(sess){
+      is_super=sess->is_super_admin || sess->role=="superadmin";
+    }
+    if(!is_super){ Response r; r.status=403; r.json(403,"{\"error\":\"hanya superadmin bisa buat operator\"}"); return r; }
   }
   if(role!="guru" && role!="pengawas" && role!="operator"){ Response r; r.status=400; r.json(400,"{\"error\":\"role tidak valid\"}"); return r; }
   Response r; r.status=201; r.json(201,"{\"ok\":true,\"id\":1,\"username\":\""+username+"\",\"role\":\""+role+"\"}"); return r;

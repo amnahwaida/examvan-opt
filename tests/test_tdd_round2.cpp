@@ -66,7 +66,7 @@ TEST(TDD2_C5_CSRF, CookieHasHardening) {
     auto it = res.headers.find("Set-Cookie");
     ASSERT_NE(it, res.headers.end());
     std::string c = it->second;
-    EXPECT_NE(c.find("HttpOnly"), std::string::npos);
+    EXPECT_EQ(c.find("HttpOnly"), std::string::npos) << "csrf_token must NOT be HttpOnly for double-submit JS readable";
     EXPECT_NE(c.find("SameSite"), std::string::npos);
 }
 

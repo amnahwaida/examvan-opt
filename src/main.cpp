@@ -10,11 +10,13 @@
 #include "redis/client.hpp"
 #ifdef HAS_HIREDIS
 #include "redis/redis_real.hpp"
+#include <hiredis/hiredis.h>
 #endif
 #include "jobs/jobs.hpp"
 #include "server/server.hpp"
 #include "queue/submission_queue.hpp"
 #include "handlers/auth/login.hpp"
+#include "middleware/scoring.hpp"
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -44,11 +46,19 @@ int main(){
 #endif
   std::string db_display = examvan::DbPool(cfg.database_url, cfg.database_max_conns).sanitized_url();
   std::cout << "DB: " << (db.ping()?"connected":"not connected") << " ("<<db_display<<") Redis: " << (redis.ping()?"connected":"not connected") << "\n";
+#ifdef HAS_HIREDIS
   examvan::Hub hub(
-    [&](const std::string& k, const std::string& v){ (void)k;(void)v; },
+    [&](const std::string& k, const std::string& v){ if(redis_ctx) examvan::redis_real::redis_set(redis_ctx.get(), k, v, 300); },
+    [&](const std::string& k){ if(redis_ctx){ auto* r=(redisReply*)redisCommand(redis_ctx.get(),"DEL %s",k.c_str()); if(r) freeReplyObject(r); } },
+    [&](const std::string& v){ if(redis_ctx){ auto* r=(redisReply*)redisCommand(redis_ctx.get(),"LPUSH %s %b", examvan::queue::kHeartbeatQueueKey, v.data(), v.size()); if(r) freeReplyObject(r); } }
+  );
+#else
+  examvan::Hub hub(
+    [&](const std::string& k, const std::string& v){ (void)k; (void)v; (void)cfg; },
     [&](const std::string& k){ (void)k; },
     [&](const std::string& v){ (void)v; }
   );
+#endif
   examvan::handlers::auth::set_user_for_test(cfg.admin_user, cfg.admin_pass, "superadmin");
   examvan::Router router;
   examvan::register_full_routes(router, cfg);
@@ -58,11 +68,22 @@ int main(){
   examvan::server::Server srv(cfg, &hub, &router);
   std::cout << srv.describe() << "\n";
   srv.listen({cfg.port});
+  auto scorer_fn = [](const examvan::queue::SubmissionJob& job)->std::optional<double>{
+    auto qs = examvan::scoring::parse_questions("[]");
+    return examvan::scoring::score_submission(qs, job.answers);
+  };
+#ifdef HAS_HIREDIS
   examvan::queue::SubmissionQueue sq(
-    [&](const std::string& k,const std::string& v){ (void)k;(void)v; },
+    [&](const std::string& k,const std::string& v){ if(redis_ctx){ auto* r=(redisReply*)redisCommand(redis_ctx.get(),"LPUSH %s %b",k.c_str(),v.data(),v.size()); if(r) freeReplyObject(r); } },
+    [&](const std::string& k,int t)->std::optional<std::string>{ if(!redis_ctx) return std::nullopt; auto* r=(redisReply*)redisCommand(redis_ctx.get(),"BRPOP %s %d",k.c_str(),t); if(!r||r->type!=REDIS_REPLY_ARRAY||r->elements<2){ if(r) freeReplyObject(r); return std::nullopt; } std::string s(r->element[1]->str, r->element[1]->len); freeReplyObject(r); return s; },
+    [&](const std::string& k,const std::string& v){ if(redis_ctx) examvan::redis_real::redis_set(redis_ctx.get(), k, v, 3600); });
+#else
+  examvan::queue::SubmissionQueue sq(
+    [&](const std::string& k,const std::string& v){ (void)k; (void)v; },
     [&](const std::string&,int)->std::optional<std::string>{ return std::nullopt; },
     [&](const std::string&,const std::string&){});
-  examvan::queue::Worker w(&sq, nullptr);
+#endif
+  examvan::queue::Worker w(&sq, scorer_fn);
   if(redis.ping()) w.start();
   examvan::jobs::JobRunner expiry(examvan::jobs::run_expiry_job, std::chrono::seconds(3600));
   examvan::jobs::JobRunner cleanup(examvan::jobs::run_approval_cleanup, std::chrono::seconds(1800));

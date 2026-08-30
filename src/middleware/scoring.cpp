@@ -30,7 +30,20 @@ std::vector<Question> parse_questions(const std::string& json){
   size_t pos=0;
   while(true){
     auto a=json.find('{',pos); if(a==std::string::npos) break;
-    auto b=json.find('}',a); if(b==std::string::npos) break;
+    size_t b=a;
+    int depth=0;
+    bool in_str=false;
+    bool esc=false;
+    for(; b<json.size(); ++b){
+      char c=json[b];
+      if(esc){ esc=false; continue; }
+      if(c=='\\' && in_str){ esc=true; continue; }
+      if(c=='"'){ in_str=!in_str; continue; }
+      if(in_str) continue;
+      if(c=='{') depth++;
+      else if(c=='}'){ depth--; if(depth==0) break; }
+    }
+    if(b>=json.size() || depth!=0) break;
     std::string obj=json.substr(a,b-a+1);
     if(obj.find("\"number\"")!=std::string::npos){
       Question q;

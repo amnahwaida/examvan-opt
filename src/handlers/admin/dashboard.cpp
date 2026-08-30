@@ -1,9 +1,12 @@
 #include "handlers/admin/dashboard.hpp"
 #include "handlers/admin/template_helper.hpp"
+#include "utils/sanitize.hpp"
 namespace examvan::handlers::admin {
-Response dashboard_page(const Request&){
+Response dashboard_page(const Request& req){
   std::string html=render_admin_template("dashboard","2.7.2");
   if(!html.empty()){
+    auto it=req.headers.find("X-User");
+    if(it!=req.headers.end()) html+=html_escape(it->second);
     Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.body=html; return r;
   }
   Response r; r.status=200; r.headers["Content-Type"]="text/html";

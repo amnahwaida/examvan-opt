@@ -36,7 +36,7 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
       - name: Build sanitizer
         run: cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON && cmake --build build-san -j$(nproc)
-      - name: Unit tests (75)
+      - name: Unit tests (248)
         env:
           DATABASE_URL: postgresql://examvan:testpass@localhost:5432/examvan
           REDIS_URL: redis://localhost:6379/0

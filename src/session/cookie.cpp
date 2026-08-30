@@ -1,4 +1,5 @@
 #include "session/cookie.hpp"
+#include "helpers/utils.hpp"
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
 #include <sstream>
@@ -84,21 +85,26 @@ bool is_securecookie_format(const std::string& val){
 }
 
 std::string extract_cookie(const std::string& header, const std::string& name) {
-  std::string needle = name + "=";
   size_t pos = 0;
   while (true) {
-    size_t found = header.find(needle, pos);
+    size_t found = header.find(name, pos);
     if (found == std::string::npos) return "";
-    if (found==0 || header[found-1]==';' || header[found-1]==' ' || header[found-1]==',') {
-      size_t start = found + needle.size();
-      size_t end = header.find(';', start);
-      std::string val = header.substr(start, end==std::string::npos? std::string::npos : end-start);
-      size_t s = val.find_first_not_of(" \t");
-      size_t e = val.find_last_not_of(" \t");
-      if (s==std::string::npos) return "";
-      return val.substr(s, e-s+1);
-    }
-    pos = found+1;
+    bool boundary = found==0 || header[found-1]==';' || header[found-1]==' ' || header[found-1]==',' || header[found-1]=='\t';
+    if (!boundary) { pos = found+1; continue; }
+    size_t after = found + name.size();
+    while (after < header.size() && (header[after]==' ' || header[after]=='\t')) after++;
+    if (after>=header.size() || header[after]!='=') { pos = found+1; continue; }
+    after++;
+    while (after < header.size() && (header[after]==' ' || header[after]=='\t')) after++;
+    size_t start = after;
+    size_t end = header.find(';', start);
+    std::string val = header.substr(start, end==std::string::npos? std::string::npos : end-start);
+    size_t s = val.find_first_not_of(" \t");
+    size_t e = val.find_last_not_of(" \t\r\n");
+    if (s==std::string::npos) return "";
+    val = val.substr(s, e-s+1);
+    if (!val.empty() && val.front()=='"' && val.back()=='"') val = val.substr(1, val.size()-2);
+    return val;
   }
 }
 
@@ -109,7 +115,9 @@ static std::map<std::string,std::string> parse_kv(const std::string& s) {
   while (std::getline(ss, pair, '&')) {
     auto eq = pair.find('=');
     if (eq==std::string::npos) continue;
-    m[pair.substr(0,eq)] = pair.substr(eq+1);
+    std::string k = helpers::url_decode(pair.substr(0,eq));
+    std::string v = helpers::url_decode(pair.substr(eq+1));
+    m[k] = v;
   }
   return m;
 }

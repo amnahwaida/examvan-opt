@@ -1,4 +1,5 @@
 #include "jobs/jobs.hpp"
+#include "config/config.hpp"
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
 #include "redis/client.hpp"
@@ -17,9 +18,10 @@ void JobRunner::start(){
 }
 void JobRunner::stop(){ running_=false; if(th_.joinable()) th_.join(); }
 void run_expiry_job(){
-  RedisClient redis("redis://localhost:6379");
+  auto cfg = examvan::Config::load();
+  RedisClient redis(cfg.redis_url);
   if(!redis.try_acquire_job("expiry",3600)) return;
-  DbPool pool("postgresql://examvan:pass@db:5432/examvan",60);
+  DbPool pool(cfg.database_url,60);
 #ifdef HAS_LIBPQ
   db::RealPool real(pool.sanitized_url(),60);
   if(auto c=real.acquire()){
@@ -38,18 +40,39 @@ void run_expiry_job(){
   redis.release_job("expiry");
 }
 void run_approval_cleanup(){
-  RedisClient redis("redis://localhost:6379");
+  auto cfg = examvan::Config::load();
+  RedisClient redis(cfg.redis_url);
   if(!redis.try_acquire_job("approval_cleanup",1800)) return;
-  DbPool pool("postgresql://examvan:pass@db:5432/examvan",60);
+  DbPool pool(cfg.database_url,60);
+#ifdef HAS_LIBPQ
+  db::RealPool real(pool.sanitized_url(),60);
+  if(auto c=real.acquire()){
+    std::string sql="DELETE FROM approvals WHERE expires_at < now()";
+    real.exec_params(c.get(),sql,{});
+    (void)sql;
+  }
+#else
   std::string sql="DELETE FROM approvals WHERE expires_at < now()";
   (void)sql;
+#endif
   redis.release_job("approval_cleanup");
 }
 void run_access_log_retention(){
-  RedisClient redis("redis://localhost:6379");
+  auto cfg = examvan::Config::load();
+  RedisClient redis(cfg.redis_url);
   if(!redis.try_acquire_job("access_log_retention",86400)) return;
+  DbPool pool(cfg.database_url,60);
+#ifdef HAS_LIBPQ
+  db::RealPool real(pool.sanitized_url(),60);
+  if(auto c=real.acquire()){
+    std::string sql="DELETE FROM access_log WHERE created_at < now() - interval '90 days'";
+    real.exec_params(c.get(),sql,{});
+    (void)sql;
+  }
+#else
   std::string sql="DELETE FROM access_log WHERE created_at < now() - interval '90 days'";
   (void)sql;
+#endif
   redis.release_job("access_log_retention");
 }
 } // namespace examvan::jobs

@@ -16,7 +16,7 @@ static std::unordered_map<std::string, std::string> g_users;
 static std::mutex g_mu;
 static std::string gensalt(){ // bcrypt gensalt
   unsigned char buf[16];
-  if(RAND_bytes(buf,sizeof(buf))!=1){ for(int i=0;i<16;i++) buf[i]=rand() & 0xFF; }
+  if(RAND_bytes(buf,sizeof(buf))!=1){ throw std::runtime_error("RAND_bytes failed"); }
   const char* b64="./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   std::string s;
   s.reserve(22);
@@ -72,12 +72,12 @@ Response login_page(const Request&){
       html.replace(p, 16, csrf);
       p=html.find("CSRF_PLACEHOLDER", p+csrf.size());
     }
-    std::string ck="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax";
+    std::string ck="csrf_token="+csrf+"; Path=/; SameSite=Lax";
     if(!Config::load().is_development()) ck+="; Secure";
     Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=ck;
     r.body=html; return r;
   }
-  std::string ck2="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax";
+  std::string ck2="csrf_token="+csrf+"; Path=/; SameSite=Lax";
   if(!Config::load().is_development()) ck2+="; Secure";
   Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=ck2;
   r.body="<html><body><form method=\"POST\" action=\"/login\"><input name=\"username\"><input name=\"password\" type=\"password\"><input type=\"hidden\" name=\"_csrf\" value=\""+csrf+"\"><button>Login</button></form></body></html>";

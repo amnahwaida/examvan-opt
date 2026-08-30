@@ -47,15 +47,25 @@ size_t Hub::room_size(const std::string& room_id) const {
 
 void Hub::broadcast_to_room(const std::string& room_id, const std::string& event, const std::string& payload_json) {
   std::string msg = marshal_socketio(event, payload_json);
-  std::lock_guard<std::mutex> g(mu_);
-  auto it = rooms_.find(room_id);
-  if (it==rooms_.end()) return;
+  std::vector<std::shared_ptr<Client>> snapshot;
+  {
+    std::lock_guard<std::mutex> g(mu_);
+    auto it = rooms_.find(room_id);
+    if (it==rooms_.end()) return;
+    snapshot.assign(it->second.begin(), it->second.end());
+  }
   std::vector<std::shared_ptr<Client>> to_remove;
-  for (auto& c: it->second) {
+  for (auto& c: snapshot) {
     if (!c->try_send(msg)) to_remove.push_back(c);
   }
-  for(auto& c: to_remove){ it->second.erase(c); c->close(); }
-  if(it->second.empty()) rooms_.erase(it);
+  if (!to_remove.empty()) {
+    std::lock_guard<std::mutex> g(mu_);
+    auto it = rooms_.find(room_id);
+    if (it!=rooms_.end()) {
+      for(auto& c: to_remove){ it->second.erase(c); c->close(); }
+      if(it->second.empty()) rooms_.erase(it);
+    }
+  }
 }
 
 static std::string now_rfc3339(){
@@ -148,8 +158,20 @@ void Hub::handle_exam_completed(std::shared_ptr<Client> c, const std::string& pa
 }
 
 static std::string strip_port(const std::string& s){
-  auto c=s.find(':');
-  if(c!=std::string::npos) return s.substr(0,c);
+  if(s.empty()) return s;
+  if(s.front()=='['){
+    auto br=s.find(']');
+    if(br!=std::string::npos) return s.substr(0,br+1);
+    return s;
+  }
+  auto c=s.rfind(':');
+  if(c!=std::string::npos){
+    bool has_bracket=s.find('[')!=std::string::npos;
+    if(has_bracket) return s;
+    std::string after=s.substr(c+1);
+    bool is_port=!after.empty() && after.find_first_not_of("0123456789")==std::string::npos;
+    if(is_port) return s.substr(0,c);
+  }
   return s;
 }
 bool check_origin(const std::string& origin, const std::string& host){

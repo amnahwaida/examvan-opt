@@ -16,6 +16,14 @@ static std::string uri_encode(const std::string& s){
   }
   return o.str();
 }
+static std::string region_for_endpoint(const std::string& endpoint){
+  std::string h=endpoint;
+  auto p=h.find("://");
+  if(p!=std::string::npos) h=h.substr(p+3);
+  h=h.substr(0,h.find('/'));
+  if(h.find("r2.cloudflarestorage.com")!=std::string::npos) return "us-east-1";
+  return "us-east-1";
+}
 static std::string sha256_hex(const std::string& s){
   unsigned char h[SHA256_DIGEST_LENGTH];
   SHA256(reinterpret_cast<const unsigned char*>(s.data()), s.size(), h);
@@ -37,30 +45,46 @@ std::string presign_url(const R2Config& cfg, const std::string& key, int expires
     std::strftime(date_full,sizeof(date_full),"%Y%m%dT%H%M%SZ", &tm);
   }
   std::string date8(date_full,8);
-  std::string credential_raw = cfg.access_key + "/" + date8 + "/auto/s3/aws4_request";
+  std::string region = region_for_endpoint(cfg.endpoint);
+  std::string credential_raw = cfg.access_key + "/" + date8 + "/" + region + "/s3/aws4_request";
   std::string credential = uri_encode(credential_raw);
   std::string host = cfg.endpoint;
   auto p = host.find("://");
   if(p!=std::string::npos) host = host.substr(p+3);
   host = host.substr(0, host.find('/'));
-  std::string canonical_uri = "/" + cfg.bucket + "/" + key;
+  std::string encoded_key;
+  {
+    std::ostringstream ko;
+    ko<<std::hex<<std::uppercase;
+    for(size_t i=0;i<key.size();){
+      if(key[i]=='/'){ ko<<'/'; i++; continue; }
+      unsigned char c=key[i];
+      if((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-'||c=='_'||c=='.'||c=='~') ko<<c;
+      else ko<<'%'<<std::setw(2)<<std::setfill('0')<<(int)c;
+      i++;
+    }
+    encoded_key=ko.str();
+  }
+  std::string canonical_uri = "/" + cfg.bucket + "/" + encoded_key;
   std::string canonical_qs = "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=" + credential + "&X-Amz-Date=" + std::string(date_full) + "&X-Amz-Expires=" + std::to_string(expires_seconds) + "&X-Amz-SignedHeaders=host";
   std::string canonical_headers = "host:" + host + "\n";
   std::string signed_headers = "host";
   std::string payload_hash = "UNSIGNED-PAYLOAD";
   std::string canonical_request = "GET\n" + canonical_uri + "\n" + canonical_qs + "\n" + canonical_headers + "\n" + signed_headers + "\n" + payload_hash;
   std::string hashed_canonical = sha256_hex(canonical_request);
-  std::string string_to_sign = "AWS4-HMAC-SHA256\n" + std::string(date_full) + "\n" + date8 + "/auto/s3/aws4_request\n" + hashed_canonical;
+  std::string string_to_sign = "AWS4-HMAC-SHA256\n" + std::string(date_full) + "\n" + date8 + "/" + region + "/s3/aws4_request\n" + hashed_canonical;
   auto hmac = [](const std::string& k, const std::string& d){ unsigned char md[EVP_MAX_MD_SIZE]; unsigned int l=0; HMAC(EVP_sha256(), k.data(), k.size(), reinterpret_cast<const unsigned char*>(d.data()), d.size(), md, &l); return std::string(reinterpret_cast<char*>(md), l); };
   std::string kDate = hmac("AWS4"+cfg.secret_key, date8);
-  std::string kRegion = hmac(kDate, "auto");
+  std::string kRegion = hmac(kDate, region);
   std::string kService = hmac(kRegion, "s3");
   std::string kSigning = hmac(kService, "aws4_request");
   unsigned char sig_md[EVP_MAX_MD_SIZE]; unsigned int sig_len=0;
   HMAC(EVP_sha256(), kSigning.data(), kSigning.size(), reinterpret_cast<const unsigned char*>(string_to_sign.data()), string_to_sign.size(), sig_md, &sig_len);
   std::ostringstream sig; for(unsigned i=0;i<sig_len;i++) sig<<std::hex<<std::setw(2)<<std::setfill('0')<<(int)sig_md[i];
   std::ostringstream ss;
-  ss<< cfg.endpoint << "/" << cfg.bucket << "/" << key
+  std::string endpoint_no_slash=cfg.endpoint;
+  if(!endpoint_no_slash.empty() && endpoint_no_slash.back()=='/') endpoint_no_slash.pop_back();
+  ss<< endpoint_no_slash << "/" << cfg.bucket << "/" << encoded_key
     << "?" << canonical_qs
     << "&X-Amz-Signature=" << sig.str();
   return ss.str();
