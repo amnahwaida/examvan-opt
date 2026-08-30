@@ -16,6 +16,8 @@ TEST(DockerBuild, FilterExcludesInfraGuards){
   EXPECT_NE(seg.find("R3_"), std::string::npos) << "builder should exclude R3_* : " << seg;
   EXPECT_NE(seg.find("R4_"), std::string::npos) << "builder should exclude R4_* (needs .github) : " << seg;
   EXPECT_NE(seg.find("R5_"), std::string::npos) << "builder should exclude R5_* : " << seg;
+  EXPECT_NE(seg.find("DockerRuntime"), std::string::npos) << "builder should exclude DockerRuntime : " << seg;
+  EXPECT_NE(seg.find("DockerBuild"), std::string::npos) << "builder should exclude DockerBuild : " << seg;
 }
 TEST(DockerBuild, BuilderCopiesRequiredFiles){
   auto c=rf("Dockerfile");
