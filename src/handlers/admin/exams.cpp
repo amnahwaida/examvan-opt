@@ -103,8 +103,24 @@ static void store_exam(int id, const std::string& name, const std::string& token
   std::lock_guard<std::mutex> g(g_exams_mu);
   g_exams.push_back({id,name,token,fpath});
 }
-Response list_admin_exams(const Request&){
+Response list_admin_exams(const Request& req){
   std::lock_guard<std::mutex> g(g_exams_mu);
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::AdminExamList pb;
+    pb.set_success(true);
+    pb.set_total(static_cast<int32_t>(g_exams.size()));
+    for(auto &e: g_exams){
+      auto *ex=pb.add_exams();
+      ex->set_id(e.id);
+      ex->set_name(e.name);
+      ex->set_token(e.token);
+      ex->set_file_path(e.file_path);
+    }
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
   std::string json="[";
   for(size_t i=0;i<g_exams.size();++i){
     if(i) json+=",";
@@ -254,16 +270,46 @@ Response create_exam(const Request& req){
   // DB insert stub: generate id unik
   int id = g_next_id.fetch_add(1);
   store_exam(id,name,token,fpath);
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::CreateExamResponse pb;
+    pb.set_success(true);
+    pb.set_id(id);
+    pb.set_token(token);
+    pb.set_name(name);
+    pb.set_file_path(fpath);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=201; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
   // Escape JSON untuk name dan fpath
   std::string esc_name=json_escape(name);
   std::string esc_fpath=json_escape(fpath);
   std::string esc_token=json_escape(token);
   Response r; r.status=201; r.json(201,"{\"success\":true,\"id\":"+std::to_string(id)+",\"token\":\""+esc_token+"\",\"name\":\""+esc_name+"\",\"file_path\":\""+esc_fpath+"\"}"); return r;
 }
-Response update_exam(const Request&){
+Response update_exam(const Request& req){
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::UpdateExamResponse pb;
+    pb.set_success(true);
+    pb.set_ok(true);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
   Response r; r.json(200,"{\"success\":true,\"ok\":true}"); return r;
 }
-Response delete_exam(const Request&){
+Response delete_exam(const Request& req){
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::DeleteExamResponse pb;
+    pb.set_success(true);
+    pb.set_ok(true);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
   Response r; r.json(200,"{\"success\":true,\"ok\":true}"); return r;
 }
 Response export_xlsx(const Request&){

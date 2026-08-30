@@ -34,7 +34,14 @@ Response pengawas_exams(const Request& req){
 Response pengawas_submissions(const Request& req){
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=""; return r;
+    examvan::v1::PengawasSubmissionList pb;
+    pb.set_success(true);
+    pb.set_page(1);
+    pb.set_per_page(20);
+    pb.set_total(0);
+    pb.set_total_pages(0);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
   Response r; r.json(200,"{\"success\":true,\"exam_name\":\"\",\"exam_active_token\":\"\",\"submissions\":[],\"page\":1,\"per_page\":20,\"total\":0,\"total_pages\":0,\"stats\":{}}"); return r;
@@ -42,12 +49,51 @@ Response pengawas_submissions(const Request& req){
 Response pending_approvals(const Request& req){
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=""; return r;
+    examvan::v1::ApprovalList pb;
+    pb.set_success(true);
+    pb.set_total(0);
+    pb.set_page(1);
+    pb.set_limit(100);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
   Response r; r.json(200,"{\"success\":true,\"data\":[],\"total\":0,\"page\":1,\"limit\":100}"); return r;
 }
-Response set_approval(const Request&){ Response r; r.json(200,"{\"success\":true}"); return r; }
-Response get_auto_approve(const Request&){ Response r; r.json(200,"{\"success\":true,\"enabled\":false}"); return r; }
-Response set_auto_approve(const Request&){ Response r; r.json(200,"{\"success\":true,\"enabled\":false}"); return r; }
+Response set_approval(const Request& req){
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::SetApprovalResponse pb;
+    pb.set_success(true);
+    pb.set_ok(true);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
+  Response r; r.json(200,"{\"success\":true}"); return r;
+}
+Response get_auto_approve(const Request& req){
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::AutoApproveResponse pb;
+    pb.set_success(true);
+    pb.set_enabled(false);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
+  Response r; r.json(200,"{\"success\":true,\"enabled\":false}"); return r;
+}
+Response set_auto_approve(const Request& req){
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::SetAutoApproveResponse pb;
+    pb.set_success(true);
+    pb.set_enabled(false);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
+  Response r; r.json(200,"{\"success\":true,\"enabled\":false}"); return r;
+}
 } // namespace examvan::handlers::admin

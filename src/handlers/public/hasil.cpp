@@ -1,6 +1,10 @@
 #include "handlers/public/hasil.hpp"
 #include "handlers/public/template_helper.hpp"
 #include "utils/sanitize.hpp"
+#include "middleware/protobuf.hpp"
+#ifdef HAS_PROTOBUF
+#include "examvan.pb.h"
+#endif
 #include <unordered_map>
 #include <mutex>
 
@@ -58,7 +62,15 @@ Response hasil_page(const Request& req){
 }
 
 Response cek_hasil_api(const Request& req){
-  (void)req;
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::CekHasilApiResponse pb;
+    pb.set_success(true);
+    pb.set_ok(true);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
   Response r; r.json(200,"{\"ok\":true}"); return r;
 }
 

@@ -243,6 +243,7 @@ add_executable(examvan-tests
   tests/test_exam_creation_prod_tdd.cpp
   tests/test_exam_full_prod_tdd.cpp
   tests/test_protobuf_mandatory_tdd.cpp
+  tests/test_protobuf_handlers_tdd.cpp
 )
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)
 include(GoogleTest)

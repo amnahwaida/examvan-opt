@@ -142,3 +142,268 @@ message PengawasExamList {
   int32 total = 6;
   int32 total_pages = 7;
 }
+
+// ---- Admin exams ----
+message AdminExamList {
+  bool success = 1;
+  repeated Exam exams = 2;
+  int32 total = 3;
+}
+
+message UpdateExamResponse {
+  bool success = 1;
+  bool ok = 2;
+  int32 id = 3;
+  string error = 4;
+}
+
+message DeleteExamResponse {
+  bool success = 1;
+  bool ok = 2;
+}
+
+message GenericSuccess {
+  bool success = 1;
+  bool ok = 2;
+}
+
+// ---- Admin submissions ----
+message Submission {
+  int32 id = 1;
+  int32 exam_id = 2;
+  string student_name = 3;
+  string exam_number = 4;
+  string student_class = 5;
+  string status = 6;
+  int32 score = 7;
+  string submitted_at = 8;
+}
+
+message SubmissionList {
+  bool success = 1;
+  repeated Submission submissions = 2;
+  int32 total = 3;
+}
+
+message SubmissionDetail {
+  bool success = 1;
+  string exam_name = 2;
+  string exam_active_token = 3;
+  string student_name = 4;
+  string student_class = 5;
+  string status = 6;
+  int32 score = 7;
+  string submitted_at = 8;
+}
+
+message QueueStatusResponse {
+  bool success = 1;
+  int32 pending = 2;
+  int32 failed = 3;
+}
+
+message DeleteSubmissionResponse {
+  bool success = 1;
+  bool ok = 2;
+}
+
+// ---- Admin pengawas ----
+message PengawasSubmission {
+  int32 id = 1;
+  string student_name = 2;
+  string exam_number = 3;
+  string status = 4;
+  string submitted_at = 5;
+}
+
+message PengawasSubmissionList {
+  bool success = 1;
+  string exam_name = 2;
+  string exam_active_token = 3;
+  repeated PengawasSubmission submissions = 4;
+  int32 page = 5;
+  int32 per_page = 6;
+  int32 total = 7;
+  int32 total_pages = 8;
+}
+
+message Approval {
+  string mac_address = 1;
+  string student_name = 2;
+  string status = 3;
+}
+
+message ApprovalList {
+  bool success = 1;
+  repeated Approval approvals = 2;
+  int32 total = 3;
+  int32 page = 4;
+  int32 limit = 5;
+}
+
+message SetApprovalResponse {
+  bool success = 1;
+  bool ok = 2;
+}
+
+message AutoApproveResponse {
+  bool success = 1;
+  bool enabled = 2;
+}
+
+message SetAutoApproveResponse {
+  bool success = 1;
+  bool enabled = 2;
+}
+
+// ---- Admin users ----
+message CreateUserRequest {
+  string username = 1;
+  string password = 2;
+  string role = 3;
+}
+
+message CreateUserResponse {
+  bool success = 1;
+  bool ok = 2;
+  int32 id = 3;
+  string username = 4;
+  string role = 5;
+  string error = 6;
+}
+
+message EditUserResponse {
+  bool success = 1;
+  bool ok = 2;
+}
+
+message DeleteUserResponse {
+  bool success = 1;
+  bool ok = 2;
+}
+
+message InstansiUpdateResponse {
+  bool success = 1;
+  bool ok = 2;
+  string instansi = 3;
+}
+
+message InstansiUpdateRequest {
+  string instansi = 1;
+}
+
+// ---- Admin vouchers ----
+message RedeemVoucherRequest {
+  string code = 1;
+}
+
+message RedeemVoucherResponse {
+  bool success = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+message ActivateVoucherResponse {
+  bool success = 1;
+  bool ok = 2;
+}
+
+// ---- Settings ----
+message UpdateSettingsResponse {
+  bool success = 1;
+  bool ok = 2;
+}
+
+// ---- API (student-facing) ----
+message TimeResponse {
+  bool success = 1;
+  string server_time = 2;
+  string timezone = 3;
+}
+
+message ListExamsResponse {
+  bool success = 1;
+  repeated string tokens = 2;
+  int32 page = 3;
+  int32 per_page = 4;
+  int32 total = 5;
+  int32 total_pages = 6;
+}
+
+message RequestApprovalResponse {
+  bool success = 1;
+  string status = 2;
+}
+
+message ExamByTokenResponse {
+  bool success = 1;
+  string token = 2;
+  string status = 3;
+  string error = 4;
+}
+
+message SubmitExamResponse {
+  bool success = 1;
+  string status = 2;
+  string error = 3;
+  string error_code = 4;
+}
+
+message ExamResultResponse {
+  bool success = 1;
+  int32 exam_id = 2;
+  int32 score = 3;
+  bool has_score = 4;
+  string error = 5;
+}
+
+message AccessLogResponse {
+  bool success = 1;
+  bool logged = 2;
+}
+
+message CompleteExamResponse {
+  bool success = 1;
+  bool completed = 2;
+}
+
+// ---- Auth ----
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  bool success = 1;
+  string token = 2;
+  string session_cookie = 3;
+  string username = 4;
+  string role = 5;
+  string error = 6;
+  string error_code = 7;
+}
+
+message LogoutResponse {
+  bool success = 1;
+  bool ok = 2;
+}
+
+// ---- Webhook ----
+message WebhookRequest {
+  string event = 1;
+  string payload = 2;
+}
+
+message WebhookResponse {
+  bool success = 1;
+  string status = 2;
+}
+
+// ---- Hasil ----
+message CekHasilApiResponse {
+  bool success = 1;
+  bool ok = 2;
+  int32 score = 3;
+  string status = 4;
+  string error = 5;
+}

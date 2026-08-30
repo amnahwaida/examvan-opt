@@ -2,6 +2,10 @@
 #include "session/csrf.hpp"
 #include "session/cookie.hpp"
 #include "helpers/utils.hpp"
+#include "middleware/protobuf.hpp"
+#ifdef HAS_PROTOBUF
+#include "examvan.pb.h"
+#endif
 #include <cctype>
 namespace examvan::handlers::auth {
 static std::string get_hdr_ci_lo(const Request& req, const std::string& name){
@@ -28,6 +32,14 @@ Response logout_handler(const Request& req){
   if(!verify_csrf(sess_csrf, csrf_h)){
     Response r; r.status=403; r.json(403,"{\"error\":\"CSRF token mismatch\"}"); return r;
   }
+#ifdef HAS_PROTOBUF
+  if(middleware::is_protobuf_accept(req)){
+    examvan::v1::LogoutResponse pb; pb.set_success(true); pb.set_ok(true);
+    std::string out; pb.SerializeToString(&out);
+    Response r; r.status=200; r.headers["Set-Cookie"]="examvan_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax";
+    r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  }
+#endif
   Response r; r.status=200; r.headers["Set-Cookie"]="examvan_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax";
   r.json(200,"{\"ok\":true}"); return r;
 }
