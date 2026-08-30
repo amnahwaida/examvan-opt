@@ -6,6 +6,7 @@
 #include "helpers/utils.hpp"
 #include "handlers/r2/r2.hpp"
 #include "models/exam.hpp"
+#include "services/examtoken/examtoken.hpp"
 #include "utils/log.hpp"
 #include <cstdlib>
 #include <string>
@@ -1469,4 +1470,400 @@ TEST(ExamProduction, TokenMode_RejectsInvalid){
   ru.headers["Content-Type"]="application/json";
   auto res=update_exam(ru);
   EXPECT_EQ(res.status,400) << "mode tidak valid harus ditolak: " << res.body;
+}
+
+// ======================================================================
+// GROUP L: Start/Stop/Toggle parity dengan Go (Pass 11)
+// Go (models/exam.go): StartExam sets status=active, exam_started_at,
+// token_last_reset_at, tombstoned_at=NULL + active_token=permanent token;
+// StopExam sets status=inactive + exam_started_at=NULL; ToggleExamStatus
+// clears tombstone on activation, preserves exam_started_at.
+// ======================================================================
+
+// L1: start harus mengisi exam_started_at
+TEST(ExamProduction, StartExam_SetsExamStartedAt){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("L1Start","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/start";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->status,"active");
+  ASSERT_TRUE(exam->exam_started_at.has_value())
+    << "start HARUS mengisi exam_started_at (Go parity): student lookup bergantung padanya";
+  EXPECT_FALSE(exam->exam_started_at->empty());
+}
+
+// L2: start harus mengisi token_last_reset_at (clock lazy rotation)
+TEST(ExamProduction, StartExam_SetsTokenLastResetAt){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("L2Start","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/start";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  ASSERT_TRUE(exam->token_last_reset_at.has_value())
+    << "start HARUS mengisi token_last_reset_at (Go parity)";
+  EXPECT_FALSE(exam->token_last_reset_at->empty());
+}
+
+// L3: start harus me-reset active_token kembali ke token permanen
+TEST(ExamProduction, StartExam_ResetsActiveTokenToPermanentToken){
+  with_clean_store(); set_r2_env(true);
+  // buat exam dengan custom token agar tetap
+  Request cr; cr.body=form_body("L3Start","/tmp/a.pdf","100","AAAABBBB");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  // ubah active_token ke nilai lain (simulasi rotation sebelumnya)
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.active_token="ROTATED0";
+  });
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/start";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->active_token, exam->token)
+    << "start HARUS reset active_token ke token permanen (Go parity: UpdateExamActiveToken)";
+}
+
+// L4: start harus membersihkan tombstoned_at
+TEST(ExamProduction, StartExam_ClearsTombstonedAt){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("L4Start","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  // set tombstone manual (auto-inactivated policy)
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.tombstoned_at="2026-08-31T00:00:00Z";
+  });
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/start";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_FALSE(exam->tombstoned_at.has_value())
+    << "start HARUS clear tombstoned_at (Go parity: tombstoned_at=NULL)";
+}
+
+// L5: start dua kali harus ditolak (Go: "Ujian sudah dimulai")
+TEST(ExamProduction, StartExam_RejectsIfAlreadyStarted){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("L5Dbl","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/start";
+  auto first=update_exam(ru);
+  ASSERT_EQ(first.status,200) << first.body;
+  auto second=update_exam(ru);
+  EXPECT_EQ(second.status,400)
+    << "start kedua harus ditolak (Go parity: Ujian sudah dimulai): " << second.body;
+}
+
+// L6: stop harus membersihkan exam_started_at
+TEST(ExamProduction, StopExam_ClearsExamStartedAt){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("L6Stop","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request rs; rs.params["id"]=id; rs.path="/"+id+"/start";
+  ASSERT_EQ(update_exam(rs).status,200);
+  Request rp; rp.params["id"]=id; rp.path="/"+id+"/stop";
+  auto res=update_exam(rp);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->status,"inactive");
+  EXPECT_FALSE(exam->exam_started_at.has_value())
+    << "stop HARUS clear exam_started_at (Go parity: exam_started_at=NULL)";
+}
+
+// L7: stop tidak boleh menghapus active_token
+TEST(ExamProduction, StopExam_DoesNotClearActiveToken){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("L7Stop","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request rs; rs.params["id"]=id; rs.path="/"+id+"/start";
+  ASSERT_EQ(update_exam(rs).status,200);
+  // ubah active_token sebelum stop
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.active_token="KEEPTOK1";
+  });
+  Request rp; rp.params["id"]=id; rp.path="/"+id+"/stop";
+  auto res=update_exam(rp);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->active_token,"KEEPTOK1")
+    << "stop TIDAK boleh menghapus active_token (Go parity)";
+}
+
+// L8: toggle ke active harus membersihkan tombstone
+TEST(ExamProduction, ToggleActivation_ClearsTombstonedAt){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("L8Tog","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.tombstoned_at="2026-08-31T00:00:00Z"; // inactive + tombstone
+  });
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/toggle";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  EXPECT_NE(res.body.find("\"new_status\":\"active\""), std::string::npos) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_FALSE(exam->tombstoned_at.has_value())
+    << "toggle ke active HARUS clear tombstone (Go parity)";
+}
+
+// L9: toggle ke inactive tidak boleh error / menetapkan tombstone
+TEST(ExamProduction, ToggleDeactivation_PreservesNoTombstone){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("L9Tog","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.status="active";
+  });
+  Request ru; ru.params["id"]=id; ru.path="/"+id+"/toggle";
+  auto res=update_exam(ru);
+  ASSERT_EQ(res.status,200) << res.body;
+  EXPECT_NE(res.body.find("\"new_status\":\"inactive\""), std::string::npos) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->status,"inactive");
+  // toggle ke inactive hanya flip status — tombstone tidak berubah
+  EXPECT_FALSE(exam->tombstoned_at.has_value());
+}
+
+// L10: toggle ke active HARUS mempertahankan exam_started_at awal
+TEST(ExamProduction, ToggleReactivation_PreservesExamStartedAt){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("L10Tog","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  Request rs; rs.params["id"]=id; rs.path="/"+id+"/start";
+  ASSERT_EQ(update_exam(rs).status,200);
+  auto started=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(started.has_value());
+  ASSERT_TRUE(started->exam_started_at.has_value());
+  std::string first_started_at=*started->exam_started_at;
+  // toggle off lalu on
+  Request r1; r1.params["id"]=id; r1.path="/"+id+"/toggle";
+  ASSERT_EQ(update_exam(r1).status,200);
+  Request r2; r2.params["id"]=id; r2.path="/"+id+"/toggle";
+  auto res=update_exam(r2);
+  ASSERT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->status,"active");
+  ASSERT_TRUE(exam->exam_started_at.has_value());
+  EXPECT_EQ(*exam->exam_started_at, first_started_at)
+    << "toggle re-activation HARUS mempertahankan exam_started_at (Go: toggle tdk reset clock)";
+}
+
+// ======================================================================
+// GROUP M: Lazy dynamic rotation in exam_by_token (Pass 11)
+// Go (examtoken.go:15-74): MaybeResetActiveToken rotates active_token
+// lazily on student join when interval elapsed. Uses CSPRNG token.
+// C++ in-memory: store.update() acquires mutex = atomic.
+// ======================================================================
+
+// helper: buat exam + start via handler action
+static std::string create_and_start(){
+  Request cr; cr.body=form_body("MExam","/tmp/a.pdf","100");
+  auto c=create_exam(cr); if(c.status!=201) return "";
+  std::string id=json_field(c.body,"id");
+  Request rs; rs.params["id"]=id; rs.path="/"+id+"/start";
+  if(update_exam(rs).status!=200) return "";
+  return id;
+}
+
+// M1: dynamic mode — rotasi terjadi setelah interval terlewati
+TEST(ExamProduction, LazyRotation_DynamicMode_RotatesAfterInterval){
+  with_clean_store(); set_r2_env(true);
+  std::string id=create_and_start(); ASSERT_FALSE(id.empty());
+  // override: active_token=ACTUAL token; set mode dynamic, interval 1 menit
+  std::string orig_active;
+  store::active_store()->update(std::stoi(id), [&](models::Exam& e){
+    e.token_mode="dynamic";
+    e.token_reset_interval=1;
+    // simulasi: token_last_reset_at = 2 menit lalu
+    e.token_last_reset_at="2000-01-01T00:00:00Z";
+    orig_active=e.active_token; // simpan active_token awal
+  });
+  // panggil exam_by_token — seharusnya trigger rotasi + return 200
+  Request req; req.params["token"]=orig_active;
+  auto res=handlers::api::exam_by_token(req);
+  EXPECT_EQ(res.status,200) << "after rotation expired, old active_token masih valid (rotasi sudah ganti): " << res.body;
+  // active_token di store harus berubah (rotasi terjadi)
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_NE(exam->active_token, orig_active)
+    << "active_token harus berubah setelah rotasi (Go parity: MaybeResetActiveToken)";
+  // token_last_reset_at harus diperbarui
+  ASSERT_TRUE(exam->token_last_reset_at.has_value());
+  EXPECT_NE(*exam->token_last_reset_at, "2000-01-01T00:00:00Z")
+    << "token_last_reset_at harus diperbarui setelah rotasi";
+}
+
+// M2: dynamic mode — belum waktunya rotasi, active_token tidak berubah
+TEST(ExamProduction, LazyRotation_DynamicMode_NoRotationBeforeInterval){
+  with_clean_store(); set_r2_env(true);
+  std::string id=create_and_start(); ASSERT_FALSE(id.empty());
+  std::string orig_active;
+  store::active_store()->update(std::stoi(id), [&](models::Exam& e){
+    e.token_mode="dynamic";
+    e.token_reset_interval=60; // 60 menit
+    e.active_token="NOCHANGE1";
+    // token_last_reset_at = baru saja (30 detik lalu simulasi)
+    e.token_last_reset_at=helpers::format_iso_utc(std::chrono::system_clock::now());
+    orig_active=e.active_token;
+  });
+  Request req; req.params["token"]=orig_active;
+  auto res=handlers::api::exam_by_token(req);
+  EXPECT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->active_token, orig_active)
+    << "sebelum interval, active_token tidak boleh berubah";
+}
+
+// M3: static mode — tidak ada rotasi
+TEST(ExamProduction, LazyRotation_StaticMode_NoRotation){
+  with_clean_store(); set_r2_env(true);
+  std::string id=create_and_start(); ASSERT_FALSE(id.empty());
+  std::string orig_active;
+  store::active_store()->update(std::stoi(id), [&](models::Exam& e){
+    e.token_mode="static";
+    e.active_token="STATIC01";
+    e.token_reset_interval=1;
+    e.token_last_reset_at="2000-01-01T00:00:00Z"; // interval lama sekali
+    orig_active=e.active_token;
+  });
+  Request req; req.params["token"]=orig_active;
+  auto res=handlers::api::exam_by_token(req);
+  EXPECT_EQ(res.status,200) << res.body;
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->active_token, orig_active)
+    << "static mode TIDAK boleh rotasi active_token";
+}
+
+// M4: setelah rotasi, token lama harus ditolak 404
+TEST(ExamProduction, LazyRotation_OldTokenRejectedAfterRotation){
+  with_clean_store(); set_r2_env(true);
+  std::string id=create_and_start(); ASSERT_FALSE(id.empty());
+  std::string old_active="OLDTOKN1";
+  store::active_store()->update(std::stoi(id), [&](models::Exam& e){
+    e.token_mode="dynamic";
+    e.token_reset_interval=1;
+    e.active_token=old_active;
+    e.token_last_reset_at="2000-01-01T00:00:00Z"; // expired
+  });
+  // trigger rotasi via first request (menggunakan old token — seharusnya 200 + rotasi)
+  Request req1; req1.params["token"]=old_active;
+  auto res1=handlers::api::exam_by_token(req1);
+  ASSERT_EQ(res1.status,200) << res1.body;
+  // ambil token baru
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  std::string new_active=exam->active_token;
+  ASSERT_NE(new_active, old_active) << "rotasi harus menghasilkan token berbeda";
+  // request dengan token LAMA — harus 404
+  Request req2; req2.params["token"]=old_active;
+  auto res2=handlers::api::exam_by_token(req2);
+  EXPECT_EQ(res2.status,404)
+    << "setelah rotasi, token LAMA harus ditolak: " << res2.body;
+  // request dengan token BARU — harus 200
+  Request req3; req3.params["token"]=new_active;
+  auto res3=handlers::api::exam_by_token(req3);
+  EXPECT_EQ(res3.status,200)
+    << "setelah rotasi, token BARU harus diterima: " << res3.body;
+}
+
+// M5: token yang dihasilkan rotasi harus 8-char A-Z0-9 (CSPRNG)
+TEST(ExamProduction, GenerateActiveToken_DynamicUsesCSPRNG){
+  const auto dynamic=examtoken::generate_active_token("BASETOK1","dynamic");
+  EXPECT_EQ(dynamic.size(),8u);
+  EXPECT_TRUE(helpers::is_valid_exam_token(dynamic));
+  EXPECT_EQ(examtoken::generate_active_token("BASETOK1","static"),"BASETOK1");
+}
+
+TEST(ExamProduction, LazyRotation_CSPRNG_TokenLength){
+  with_clean_store(); set_r2_env(true);
+  std::string id=create_and_start(); ASSERT_FALSE(id.empty());
+  store::active_store()->update(std::stoi(id), [](models::Exam& e){
+    e.token_mode="dynamic";
+    e.token_reset_interval=1;
+    e.token_last_reset_at="2000-01-01T00:00:00Z";
+    e.active_token="TOBEKEEP";
+  });
+  // trigger rotasi
+  Request req; req.params["token"]="TOBEKEEP";
+  handlers::api::exam_by_token(req);
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  std::string rotated=exam->active_token;
+  EXPECT_EQ(rotated.size(), 8u)
+    << "rotated token harus 8 karakter (Go parity: GenerateExamToken 8 A-Z0-9)";
+  EXPECT_TRUE(helpers::is_valid_exam_token(rotated))
+    << "rotated token harus valid A-Z0-9: " << rotated;
+}
+
+// ======================================================================
+// GROUP N: Start/Stop → student lookup integration (Pass 11)
+// Validates the complete flow: admin starts exam → student can join;
+// admin stops → student gets 403.
+// ======================================================================
+
+// N1: start → stop → student lookup harus 403 (exam_started_at cleared)
+TEST(ExamProduction, StartExamThenStop_StudentLookupReturns403){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("N1Flow","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  std::string token=json_field(c.body,"token");
+  // start
+  Request rs; rs.params["id"]=id; rs.path="/"+id+"/start";
+  ASSERT_EQ(update_exam(rs).status,200) << "start failed";
+  // stop
+  Request rp; rp.params["id"]=id; rp.path="/"+id+"/stop";
+  ASSERT_EQ(update_exam(rp).status,200) << "stop failed";
+  // student lookup harus 403 karena exam_started_at cleared
+  Request req; req.params["token"]=token;
+  auto res=handlers::api::exam_by_token(req);
+  EXPECT_EQ(res.status,403)
+    << "stop harus clear exam_started_at sehingga student 403: " << res.body;
+  EXPECT_NE(res.body.find("exam not started"), std::string::npos) << res.body;
+}
+
+// N2: start → student lookup harus 200 (exam_started_at terisi)
+TEST(ExamProduction, StartExam_StudentLookupReturns200){
+  with_clean_store(); set_r2_env(true);
+  Request cr; cr.body=form_body("N2Flow","/tmp/a.pdf","100");
+  auto c=create_exam(cr); ASSERT_EQ(c.status,201);
+  std::string id=json_field(c.body,"id");
+  std::string token=json_field(c.body,"token");
+  // start via handler — bukan manual store update
+  Request rs; rs.params["id"]=id; rs.path="/"+id+"/start";
+  auto sr=update_exam(rs);
+  ASSERT_EQ(sr.status,200) << sr.body;
+  // verify internal state
+  auto exam=store::active_store()->get_by_id(std::stoi(id));
+  ASSERT_TRUE(exam.has_value());
+  ASSERT_TRUE(exam->exam_started_at.has_value()) << "handler start HARUS set exam_started_at";
+  // student lookup harus 200
+  Request req; req.params["token"]=token;
+  auto res=handlers::api::exam_by_token(req);
+  EXPECT_EQ(res.status,200)
+    << "start via handler harus membuat student lookup berhasil: " << res.body;
 }

@@ -1,4 +1,5 @@
 #include "services/examtoken/examtoken.hpp"
+#include "helpers/utils.hpp"
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <sstream>
@@ -21,7 +22,9 @@ bool verify_token(const std::string& token, const std::string& hash){
 
 std::string generate_active_token(const std::string& base, const std::string& mode){
   if(mode=="static") return base;
-  return base + "_" + std::to_string(time(nullptr)%10000);
+  // Dynamic active tokens must use the same CSPRNG as create/regenerate.
+  (void)base;
+  return helpers::generate_token(8);
 }
 
 // Go parity: examtoken.Matches() — case-insensitive; whitespace-trimmed.

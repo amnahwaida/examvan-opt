@@ -146,7 +146,38 @@ Response exam_by_token(const Request& req){
 #endif
     Response r; r.status=404; r.json(404,"{\"error\":\"token not found\"}"); return r;
   }
-  const models::Exam& exam=*matched;
+  // Copy the matched snapshot before any mutation. Go's
+  // MaybeResetActiveToken rotates lazily on the join path; the in-memory
+  // store update holds its mutex for the complete mutation.
+  models::Exam exam=*matched;
+  if(exam.get_token_mode()=="dynamic" &&
+     exam.exam_started_at.has_value() && !exam.exam_started_at->empty() &&
+     exam.token_reset_interval.has_value() && *exam.token_reset_interval>0){
+    const std::string reset_ref=exam.token_last_reset_at.value_or(*exam.exam_started_at);
+    const auto reset_at=helpers::parse_iso_utc(reset_ref);
+    const auto now=std::chrono::system_clock::now();
+    if(reset_at && now >= *reset_at + std::chrono::minutes(*exam.token_reset_interval)){
+      const std::string new_token=helpers::generate_token(8);
+      const std::string now_text=helpers::format_iso_utc(now);
+      const bool rotated=st.update(exam.id, [&](models::Exam& current){
+        // Recheck under the store lock so concurrent joins produce at most
+        // one rotation for the same interval.
+        const std::string current_ref=current.token_last_reset_at.value_or(
+          current.exam_started_at.value_or(std::string{}));
+        const auto current_reset=helpers::parse_iso_utc(current_ref);
+        if(current.get_token_mode()=="dynamic" &&
+           current.exam_started_at.has_value() && current.token_reset_interval.has_value() &&
+           *current.token_reset_interval>0 && current_reset &&
+           now >= *current_reset + std::chrono::minutes(*current.token_reset_interval)){
+          current.active_token=new_token;
+          current.token_last_reset_at=now_text;
+          exam.active_token=new_token;
+          exam.token_last_reset_at=now_text;
+        }
+      });
+      (void)rotated;
+    }
+  }
   if(!exam.is_active() || !exam.exam_started_at.has_value() || exam.exam_started_at->empty()){
 #ifdef HAS_PROTOBUF
     if(middleware::is_protobuf_accept(req)){

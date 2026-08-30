@@ -586,13 +586,42 @@ Response update_exam(const Request& req){
   std::string result_status;
   std::string result_name;
   bool found=false;
+  bool already_started=false;
   found = exams().update(id, [&](models::Exam& e){
-    if(action=="toggle"){ e.status = e.is_active()? "inactive" : "active"; result_status=e.status; }
-    else if(action=="start"){ e.status="active"; result_status="active"; }
-    else if(action=="stop"){ e.status="inactive"; result_status="inactive"; }
+    if(action=="toggle"){
+      const bool activate = !e.is_active();
+      e.status = activate ? "active" : "inactive";
+      // Go parity: re-activation removes an automatic tombstone. Toggle
+      // deliberately preserves exam_started_at, active_token and reset clock.
+      if(activate) e.tombstoned_at.reset();
+      result_status=e.status;
+    }
+    else if(action=="start"){
+      // Check and mutation happen under the same store lock. This mirrors
+      // Go's already-started guard without a check-then-update race.
+      if(e.exam_started_at.has_value() && !e.exam_started_at->empty()){
+        already_started=true;
+        return;
+      }
+      const auto now=helpers::format_iso_utc(std::chrono::system_clock::now());
+      e.status="active";
+      e.exam_started_at=now;
+      e.token_last_reset_at=now;
+      e.tombstoned_at.reset();
+      e.active_token=e.token; // Go parity: permanent token is initial active token
+      result_status="active";
+    }
+    else if(action=="stop"){
+      e.status="inactive";
+      e.exam_started_at.reset(); // Go parity: stopping clears the started marker
+      result_status="inactive";
+    }
     else if(action=="edit" && !new_name.empty()){ e.name=new_name; result_name=new_name; }
   });
   if(!found){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  if(already_started){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Ujian sudah dimulai\"}"); return r;
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::UpdateExamResponse pb;
