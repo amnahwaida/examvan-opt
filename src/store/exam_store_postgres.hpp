@@ -27,11 +27,21 @@ public:
   size_t count() override;
   void clear_all() override;
 
+  IdempotencyResult reserve_idempotency(const std::string& key, const std::string& fingerprint) override;
+  void finalize_idempotency(const std::string& key, const std::string& fingerprint,
+                            int http_status, const std::string& response_body,
+                            const std::string& content_type) override;
+  void release_idempotency(const std::string& key) override;
+
 private:
   bool exec_command(const std::string& sql, const std::vector<std::string>& params = {});
   bool exec_command_nullable(const std::string& sql, const std::vector<std::optional<std::string>>& params);
   std::vector<models::Exam> query_exams(const std::string& sql, const std::vector<std::string>& params = {});
   bool execute_transaction(const std::vector<std::pair<std::string,std::vector<std::string>>>& statements);
+  // Like execute_transaction but returns the first column of the first row from the
+  // last statement (for INSERT ... RETURNING id).  Returns nullopt on error.
+  std::optional<std::string> execute_transaction_result(
+      const std::vector<std::pair<std::string,std::vector<std::string>>>& statements);
   static std::optional<std::string> nullable(PGresult* result, int row, int col);
   static models::Exam map_exam(PGresult* result, int row);
   db::RealPool& pool_;

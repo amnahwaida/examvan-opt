@@ -11,6 +11,8 @@
 #include <string>
 #include <algorithm>
 #include <cstdlib>
+#include <cctype>
+#include <limits>
 
 namespace examvan::handlers::api {
 
@@ -87,21 +89,44 @@ Response list_exams(const Request& req){
   int page=1;
   int per_page=50;
   auto parse_positive=[&](const char* key, int fallback){
-    const std::string needle=std::string(key)+"=";
-    size_t pos=req.query.find(needle);
-    if(pos==std::string::npos) return fallback;
-    pos+=needle.size();
-    size_t end=req.query.find('&',pos);
-    try {
-      const int value=std::stoi(req.query.substr(pos,end==std::string::npos?end:end-pos));
-      return value>0?value:fallback;
-    } catch(...) { return fallback; }
+    // Parse query components exactly (avoid matching `xpage=`), and accept
+    // percent-encoded names/values consistently with form parsing.
+    auto decode=[](const std::string& raw){
+      std::string out;
+      for(size_t i=0;i<raw.size();++i){
+        if(raw[i]=='+'){ out.push_back(' '); continue; }
+        if(raw[i]=='%' && i+2<raw.size() && std::isxdigit((unsigned char)raw[i+1]) && std::isxdigit((unsigned char)raw[i+2])){
+          auto hex=[](char c)->int { if(c>='0'&&c<='9') return c-'0'; c=std::tolower((unsigned char)c); return c-'a'+10; };
+          out.push_back(static_cast<char>((hex(raw[i+1])<<4)|hex(raw[i+2]))); i+=2;
+        } else out.push_back(raw[i]);
+      }
+      return out;
+    };
+    size_t start=0;
+    while(start<=req.query.size()){
+      size_t end=req.query.find('&',start);
+      std::string part=req.query.substr(start,end==std::string::npos?end-start:end-start);
+      size_t eq=part.find('=');
+      if(eq!=std::string::npos && decode(part.substr(0,eq))==key){
+        try {
+          size_t used=0;
+          const std::string value_text=decode(part.substr(eq+1));
+          const int value=std::stoi(value_text,&used);
+          if(used!=value_text.size() || value<=0) return fallback;
+          return value;
+        } catch(...) { return fallback; }
+      }
+      if(end==std::string::npos) break;
+      start=end+1;
+    }
+    return fallback;
   };
   page=parse_positive("page",1);
   per_page=std::min(parse_positive("per_page",50),200);
   const int total=static_cast<int>(exams.size());
   const int total_pages=total==0?0:(total+per_page-1)/per_page;
-  const int begin=std::min(total,(page-1)*per_page);
+  const int64_t offset=static_cast<int64_t>(page-1)*static_cast<int64_t>(per_page);
+  const int begin=static_cast<int>(std::min<int64_t>(total,offset));
   const int end=std::min(total,begin+per_page);
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){

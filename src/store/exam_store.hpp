@@ -7,6 +7,17 @@
 
 namespace examvan::store {
 
+// Status hasil reserve_idempotency().
+enum class IdempotencyStatus { New, Replay, Conflict };
+
+// Hasil reserve — caller membaca .status untuk memutuskan alur.
+struct IdempotencyResult {
+  IdempotencyStatus status;
+  std::string response_body;       // diisi hanya saat status == Replay
+  int response_status{0};          // HTTP status saat Replay
+  std::string response_content_type;
+};
+
 /*
  * Abstraction layer untuk penyimpanan exam.
  *
@@ -59,6 +70,27 @@ public:
 
   // Reset state untuk keperluan test (kosongkan semua data + counter).
   virtual void clear_all() = 0;
+
+  // --- Durable idempotency ---
+  // Reserve idempotency key secara atomik.
+  // Return New jika key belum ada (berhasil di-reserve).
+  // Return Replay jika fingerprint sama (replay response yang sudah finalisasi).
+  // Return Conflict jika fingerprint berbeda (reject dengan 409).
+  virtual IdempotencyResult reserve_idempotency(
+      const std::string& key, const std::string& fingerprint) = 0;
+
+  // Finalisasi idempotency: simpan response + tandai key completed.
+  // Harus dipanggil SAAT create_exam BERHASIL (setelah add() sukses).
+  // Untuk PostgreSQL: transaksi atomik INSERT exam + UPDATE idempotency.
+  // Untuk memory: update map di bawah mutex.
+  virtual void finalize_idempotency(
+      const std::string& key, const std::string& fingerprint,
+      int http_status, const std::string& response_body,
+      const std::string& content_type) = 0;
+
+  // Lepaskan reservation (hapus key) jika create gagal setelah reserve.
+  // Harus dipanggil pada semua error path SETELAH reserve_idempotency() sukses.
+  virtual void release_idempotency(const std::string& key) = 0;
 };
 
 // Singleton implementasi in-memory (default). Handler memanggil ini.

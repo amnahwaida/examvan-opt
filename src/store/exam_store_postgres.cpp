@@ -111,9 +111,51 @@ bool ExamStorePostgres::execute_transaction(const std::vector<std::pair<std::str
   return ok;
 }
 
+std::optional<std::string> ExamStorePostgres::execute_transaction_result(
+    const std::vector<std::pair<std::string,std::vector<std::string>>>& statements){
+  auto c=pool_.acquire();
+  if(!c || PQstatus(c.get())!=CONNECTION_OK) return std::nullopt;
+  auto begin=pool_.exec_params(c.get(),"BEGIN",{});
+  if(!begin || PQresultStatus(begin.get())!=PGRES_COMMAND_OK){ pool_.release(c.release()); return std::nullopt; }
+  PGresult* last_result=nullptr;
+  for(const auto& stmt: statements){
+    auto r=pool_.exec_params(c.get(),stmt.first,stmt.second);
+    if(!r || (PQresultStatus(r.get())!=PGRES_COMMAND_OK && PQresultStatus(r.get())!=PGRES_TUPLES_OK)){
+      (void)pool_.exec_params(c.get(),"ROLLBACK",{});
+      pool_.release(c.release());
+      return std::nullopt;
+    }
+    last_result=r.get();
+  }
+  // Extract first column of first row from last result (INSERT ... RETURNING id)
+  std::optional<std::string> out;
+  if(last_result && PQntuples(last_result)>0 && !PQgetisnull(last_result,0,0))
+    out=std::string(PQgetvalue(last_result,0,0));
+  auto commit=pool_.exec_params(c.get(),"COMMIT",{});
+  if(!commit || PQresultStatus(commit.get())!=PGRES_COMMAND_OK){
+    pool_.release(c.release());
+    return std::nullopt;
+  }
+  pool_.release(c.release());
+  return out;
+}
+
 bool ExamStorePostgres::migrate(){
   std::lock_guard<std::mutex> lock(mu_);
   ready_=exec_command(kSchema);
+  // Backward-compatible migration: extend exam_idempotency for durable
+  // idempotency (state machine, response replay, lease tracking).
+  if(ready_){
+    exec_command("ALTER TABLE exam_idempotency ALTER COLUMN exam_id DROP NOT NULL");
+    exec_command("ALTER TABLE exam_idempotency DROP CONSTRAINT IF EXISTS exam_idempotency_exam_id_fkey");
+    exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'completed'");
+    exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS response_status INTEGER");
+    exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS response_body TEXT");
+    exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS response_content_type TEXT");
+    exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS owner_id TEXT");
+    exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS updated_at TEXT");
+    exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS finalized_at TEXT");
+  }
   return ready_;
 }
 
@@ -174,6 +216,91 @@ bool ExamStorePostgres::update(int id,const std::function<void(models::Exam&)>& 
 }
 bool ExamStorePostgres::remove(int id){ std::lock_guard<std::mutex> lock(mu_); return exec_command("DELETE FROM exams WHERE id=$1",{std::to_string(id)}); }
 size_t ExamStorePostgres::count(){ std::lock_guard<std::mutex> lock(mu_); auto rows=query_exams("SELECT "+std::string(kColumns)+" FROM exams"); return rows.size(); }
-void ExamStorePostgres::clear_all(){ std::lock_guard<std::mutex> lock(mu_); (void)exec_command("DELETE FROM exams"); }
+void ExamStorePostgres::clear_all(){ std::lock_guard<std::mutex> lock(mu_); (void)exec_command("DELETE FROM exams"); (void)exec_command("DELETE FROM exam_idempotency"); }
+
+IdempotencyResult ExamStorePostgres::reserve_idempotency(const std::string& key, const std::string& fingerprint){
+  std::lock_guard<std::mutex> lock(mu_);
+  // Attempt atomic insert: ON CONFLICT DO NOTHING.
+  // exam_id=0 is a placeholder (removed after finalization).
+  const std::string insert_sql=
+    "INSERT INTO exam_idempotency (idempotency_key,request_fingerprint,exam_id,state,created_at,updated_at)"
+    " VALUES ($1,$2,0,'pending',NOW(),NOW()) ON CONFLICT (idempotency_key) DO NOTHING";
+  auto c=pool_.acquire();
+  if(!c || PQstatus(c.get())!=CONNECTION_OK) return {IdempotencyStatus::Conflict, "", 0, ""};
+  auto ir=pool_.exec_params(c.get(),insert_sql,{key,fingerprint});
+  if(!ir){
+    pool_.release(c.release());
+    return {IdempotencyStatus::Conflict, "", 0, ""};
+  }
+  // If INSERT succeeded (not just ON CONFLICT DO NOTHING) → NEW.
+  if(PQresultStatus(ir.get())==PGRES_COMMAND_OK && std::string(PQcmdTuples(ir.get()))=="1"){
+    pool_.release(c.release());
+    return {IdempotencyStatus::New, "", 0, ""};
+  }
+  // ON CONFLICT DO NOTHING fired → key exists.  Look up the existing record.
+  const std::string sel_sql=
+    "SELECT request_fingerprint,state,response_body,response_status,response_content_type"
+    " FROM exam_idempotency WHERE idempotency_key=$1";
+  auto sr=pool_.exec_params(c.get(),sel_sql,{key});
+  pool_.release(c.release());
+  if(!sr || PQresultStatus(sr.get())!=PGRES_TUPLES_OK || PQntuples(sr.get())==0)
+    return {IdempotencyStatus::Conflict, "", 0, ""};
+  std::string existing_fp=PQgetvalue(sr.get(),0,0);
+  std::string state=PQgetvalue(sr.get(),0,1);
+  if(state=="completed" && existing_fp==fingerprint){
+    IdempotencyResult res;
+    res.status=IdempotencyStatus::Replay;
+    res.response_body=PQgetvalue(sr.get(),0,2);
+    res.response_status=std::stoi(PQgetvalue(sr.get(),0,3));
+    res.response_content_type=PQgetvalue(sr.get(),0,4);
+    return res;
+  }
+  return {IdempotencyStatus::Conflict, "", 0, ""};
+}
+
+void ExamStorePostgres::finalize_idempotency(const std::string& key, const std::string& fingerprint,
+                                              int http_status, const std::string& response_body,
+                                              const std::string& content_type){
+  std::lock_guard<std::mutex> lock(mu_);
+  auto c=pool_.acquire();
+  if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+  (void)pool_.exec_params(c.get(),"BEGIN",{});
+  // INSERT exam with RETURNING id (atomic allocation).
+  const std::string insert_sql="INSERT INTO exams ("+std::string(kColumns)+") VALUES ("
+    "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING id";
+  // exam_id=0 is a placeholder; actual id comes from RETURNING.
+  std::vector<std::string> params={
+    "0","","",       // id (placeholder), name, file_path — not used in this path
+    "0","","",       // size_bytes, token, active_token
+    "","inactive","medium", // questions_json, status, security_level
+    "0","1","1",     // strict_mode, public_results, show_answers
+    "0","",         // created_by, created_at
+    "","","",       // identity_fields, panel_color, start_time
+    "","","",       // end_time, delegated_to, token_mode
+    "","","",       // token_reset_interval, token_last_reset_at, exam_started_at
+    "","","",       // tombstoned_at, congrats_message, auto_approve
+  };
+  auto ir=pool_.exec_params(c.get(),insert_sql,params);
+  if(!ir || PQresultStatus(ir.get())!=PGRES_TUPLES_OK || PQntuples(ir.get())==0){
+    (void)pool_.exec_params(c.get(),"ROLLBACK",{}); pool_.release(c.release()); return;
+  }
+  std::string exam_id=PQgetvalue(ir.get(),0,0);
+  // Finalize idempotency record with the real exam_id.
+  const std::string upd_sql=
+    "UPDATE exam_idempotency SET exam_id=$1,response_status=$2,response_body=$3,"
+    "response_content_type=$4,state='completed',finalized_at=NOW(),updated_at=NOW()"
+    " WHERE idempotency_key=$5";
+  auto ur=pool_.exec_params(c.get(),upd_sql,{exam_id,std::to_string(http_status),response_body,content_type,key});
+  if(!ur || PQresultStatus(ur.get())!=PGRES_COMMAND_OK){
+    (void)pool_.exec_params(c.get(),"ROLLBACK",{}); pool_.release(c.release()); return;
+  }
+  (void)pool_.exec_params(c.get(),"COMMIT",{});
+  pool_.release(c.release());
+}
+
+void ExamStorePostgres::release_idempotency(const std::string& key){
+  std::lock_guard<std::mutex> lock(mu_);
+  (void)exec_command("DELETE FROM exam_idempotency WHERE idempotency_key=$1",{key});
+}
 }
 #endif

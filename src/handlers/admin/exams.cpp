@@ -14,8 +14,6 @@
 #include <vector>
 #include <functional>
 #include <algorithm>
-#include <mutex>
-#include <unordered_map>
 namespace examvan::handlers::admin {
 using namespace examvan::utils;
 static std::string get_param(const std::map<std::string,std::string>& form, const std::string& k){
@@ -114,12 +112,8 @@ static store::ExamStore& exams(){
 /* Test hooks: callback untuk mock upload & token generation */
 static std::function<void(const std::string&,const std::string&)> g_upload_mock;
 static std::function<std::string(int)> g_token_gen_override;
-struct IdempotencyRecord { std::string fingerprint; Response response; };
-static std::mutex g_idem_mu;
-static std::unordered_map<std::string, IdempotencyRecord> g_idem;
 static std::string idempotency_fingerprint(const Request& req){
   std::string fp=req.method+"\\n"+req.path+"\\n"+req.body;
-  // A stable, bounded representation is sufficient for process-local replay.
   return std::to_string(std::hash<std::string>{}(fp))+":"+std::to_string(fp.size());
 }
 
@@ -131,8 +125,7 @@ void set_token_generator_for_test(std::function<std::string(int)> gen){
 }
 
 void clear_exams_for_testing(){
-  exams().clear_all();
-  { std::lock_guard<std::mutex> lock(g_idem_mu); g_idem.clear(); }
+  exams().clear_all();           // also clears idempotency state via ExamStore::clear_all()
   g_upload_mock = nullptr;
   g_token_gen_override = nullptr;
 }
@@ -226,16 +219,28 @@ Response list_admin_exams(const Request& req){
 Response create_exam(const Request& req){
   std::string idem;
   for(const auto& kv:req.headers){ std::string k=kv.first; for(char& c:k) c=tolower((unsigned char)c); if(k=="idempotency-key") { idem=kv.second; break; } }
+  std::string idem_fingerprint;   // disimpan untuk finalize/release nanti
   if(!idem.empty()){
     if(idem.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid Idempotency-Key\"}"); return r; }
-    const auto fp=idempotency_fingerprint(req);
-    std::lock_guard<std::mutex> lock(g_idem_mu);
-    auto it=g_idem.find(idem);
-    if(it!=g_idem.end()){
-      if(it->second.fingerprint!=fp){ Response r; r.status=409; r.json(409,"{\"error\":\"Idempotency-Key conflict\",\"error_code\":\"IDEMPOTENCY_CONFLICT\"}"); return r; }
-      return it->second.response;
+    idem_fingerprint = idempotency_fingerprint(req);
+    auto reserve = exams().reserve_idempotency(idem, idem_fingerprint);
+    if(reserve.status == store::IdempotencyStatus::Replay){
+      Response r; r.status=reserve.response_status;
+      if(!reserve.response_content_type.empty()) r.headers["Content-Type"]=reserve.response_content_type;
+      r.body=reserve.response_body;
+      return r;
     }
+    if(reserve.status == store::IdempotencyStatus::Conflict){
+      Response r; r.status=409; r.json(409,"{\"error\":\"Idempotency-Key conflict\",\"error_code\":\"IDEMPOTENCY_CONFLICT\"}"); return r;
+    }
+    // status == New → lanjut ke create flow; key sudah di-reserve.
   }
+  // Helper: lepaskan idempotency reservation lalu return error response.
+  // Dipakai di semua error path SETELAH reserve_idempotency() sukses.
+  auto release_and_return=[&](Response r)->Response{
+    if(!idem.empty()) exams().release_idempotency(idem);
+    return r;
+  };
   std::map<std::string,std::string> form;
   std::string file_name, file_data, file_ct;
   std::string ct;
@@ -320,21 +325,21 @@ Response create_exam(const Request& req){
     // keep original for length check after sanitize? use trimmed for storage
     name=trimmed;
   }
-  if(name.empty()){ utils::log_error("exam_create_failed","reason=name_required"); Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
+  if(name.empty()){ utils::log_error("exam_create_failed","reason=name_required"); Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return release_and_return(r); }
   // Security Gap 3: reject null bytes in name (log injection vector)
-  if(has_null_bytes(name)){ Response r; r.status=400; r.json(400,"{\"error\":\"name contains invalid characters\"}"); return r; }
-  if(name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return r; }
-  if(fpath.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"file_path required\"}"); return r; }
+  if(has_null_bytes(name)){ Response r; r.status=400; r.json(400,"{\"error\":\"name contains invalid characters\"}"); return release_and_return(r); }
+  if(name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return release_and_return(r); }
+  if(fpath.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"file_path required\"}"); return release_and_return(r); }
   // file_path hardening: null-byte, traversal bertingkat, backslash.
   // Skenario file_path EKSPLISIT dari form dipakai sebagai path server →
   // tolak traversal eksplisit. Skenario multipart (file_name dari filename
   // browser yang tidak bisa dipercaya) → sanitize ke basename di bawah.
   bool is_multipart_upload = !file_name.empty();
   if(has_null_bytes(fpath) || fpath.find("\\")!=std::string::npos){
-    Response r; r.status=400; r.json(400,"{\"error\":\"file_path must not contain invalid characters\"}"); return r;
+    Response r; r.status=400; r.json(400,"{\"error\":\"file_path must not contain invalid characters\"}"); return release_and_return(r);
   }
   if(!is_multipart_upload && fpath.find("..")!=std::string::npos){
-    Response r; r.status=400; r.json(400,"{\"error\":\"file_path must not contain traversal\"}"); return r;
+    Response r; r.status=400; r.json(400,"{\"error\":\"file_path must not contain traversal\"}"); return release_and_return(r);
   }
   // Security Gap 2: sanitasi file_path — hapus traversal/separator, strip ke
   // alnum/./-/_, paksa ekstensi .pdf. Dilakukan SEBELUM validasi lain supaya
@@ -344,7 +349,7 @@ Response create_exam(const Request& req){
   // magic header + %%EOF marker + polyglot detection (Security Gap 1)
   if(!file_data.empty()){
     if(!validate_pdf_content(file_data)){
-      Response r; r.status=400; r.json(400,"{\"error\":\"file must be valid PDF\"}"); return r;
+      Response r; r.status=400; r.json(400,"{\"error\":\"file must be valid PDF\"}"); return release_and_return(r);
     }
   }
   // size validation — sebelum R2 upload (hemat bandwidth).
@@ -356,7 +361,7 @@ Response create_exam(const Request& req){
   if(size<0) size=0;
   if(!file_data.empty()) size=std::max(size, (long)file_data.size());
   const long MAX_PDF = 5*1024*1024;
-  if(size>MAX_PDF){ Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return r; }
+  if(size>MAX_PDF){ Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return release_and_return(r); }
   // custom_token validasi & collision check
   // Bug 4: TIDAK pakai token_exists() di sini — periksa-ke-simpan terpisah
   // = TOCTOU race (2 thread bisa lolos). Collision di-enforce atomically
@@ -365,13 +370,13 @@ Response create_exam(const Request& req){
   if(!custom.empty()){
     for(char &c: custom) c=toupper((unsigned char)c);
     if(!helpers::is_valid_exam_token(custom) || custom.size()!=8){
-      Response r; r.status=400; r.json(400,"{\"error\":\"custom_token must be 8 A-Z0-9\"}"); return r;
+      Response r; r.status=400; r.json(400,"{\"error\":\"custom_token must be 8 A-Z0-9\"}"); return release_and_return(r);
     }
     // Bug A fix: claim_token secara atomik cek seen_tokens_ + exams_[],
     // bukan langsung set token. Menutup race TOCTOU bila regenerate-token
     // sedang claim token yang sama di thread lain.
     if(!exams().claim_token(custom)){
-      Response r; r.status=409; r.json(409,"{\"error\":\"custom_token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return r;
+      Response r; r.status=409; r.json(409,"{\"error\":\"custom_token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return release_and_return(r);
     }
     token=custom;
   } else {
@@ -383,7 +388,7 @@ Response create_exam(const Request& req){
     }
     if(!found){
       utils::log_error("exam_create_failed","reason=token_collision_exhausted");
-      Response r; r.status=409; r.json(409,"{\"error\":\"token generation failed after retries\",\"error_code\":\"TOKEN_COLLISION\"}"); return r;
+      Response r; r.status=409; r.json(409,"{\"error\":\"token generation failed after retries\",\"error_code\":\"TOKEN_COLLISION\"}"); return release_and_return(r);
     }
   }
   // Generate ID dulu (sebelum R2 upload, supaya key pakai id nyata)
@@ -394,7 +399,7 @@ Response create_exam(const Request& req){
     r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
     if(!file_data.empty() && !rc.enabled()){
       exams().unclaim_token(token); // Bug 7: lepaskan token yang sudah di-claim
-      Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
+      Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return release_and_return(r);
     }
     if(!file_data.empty() && rc.enabled()){
       std::string key = r2::object_key_for_exam(id, fpath);
@@ -404,7 +409,7 @@ Response create_exam(const Request& req){
         r2::R2Client client{rc};
         if(!client.upload(key, file_data)){
           exams().unclaim_token(token); // Bug 7: lepaskan token yang sudah di-claim
-          Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return r;
+          Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return release_and_return(r);
         }
       }
     }
@@ -424,7 +429,20 @@ Response create_exam(const Request& req){
   exam.created_at=helpers::format_iso_utc(std::chrono::system_clock::now());
   if(!exams().add(exam)){
     exams().unclaim_token(token); // cleanup
-    Response r; r.status=409; r.json(409,"{\"error\":\"custom_token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return r;
+    // R2 orphan cleanup: upload DB insert gagal → hapus object yang sudah di-upload.
+    if(!file_data.empty()){
+      auto cfg_r2 = Config::load();
+      r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
+      if(rc.enabled()){
+        std::string key = r2::object_key_for_exam(id, fpath);
+        r2::R2Client client{rc};
+        client.remove(key);
+      } else if(g_upload_mock){
+        std::string key = r2::object_key_for_exam(id, fpath);
+        g_upload_mock(key, "");  // empty data → mock cleanup marker (test hook)
+      }
+    }
+    Response r; r.status=409; r.json(409,"{\"error\":\"custom_token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return release_and_return(r);
   }
   utils::log_info("exam_created","id="+std::to_string(id)+" token="+token+" name="+name);
 #ifdef HAS_PROTOBUF
@@ -443,7 +461,14 @@ Response create_exam(const Request& req){
   std::string esc_fpath=json_escape(fpath);
   std::string esc_token=json_escape(token);
   Response r; r.status=201; r.json(201,"{\"success\":true,\"id\":"+std::to_string(id)+",\"token\":\""+esc_token+"\",\"name\":\""+esc_name+"\",\"file_path\":\""+esc_fpath+"\",\"status\":\"inactive\",\"size_bytes\":"+std::to_string(size)+",\"created_at\":\""+exam.created_at+"\",\"message\":\"Ujian berhasil diunggah\"}");
-  if(!idem.empty()){ std::lock_guard<std::mutex> lock(g_idem_mu); g_idem.emplace(idem, IdempotencyRecord{idempotency_fingerprint(req),r}); }
+  if(!idem.empty()){
+    // Durable finalization: simpan response representation untuk replay lintas
+    // proses/restart. PostgreSQL versi atomik via transaksi (exam INSERT terlibat
+    // di finalize_idempotency() store; di sini add() sudah berhasil sebelum finalize,
+    // jadi finalize cukup menyimpan response + state completed).
+    exams().finalize_idempotency(idem, idem_fingerprint, r.status, r.body,
+                                 r.headers.count("Content-Type")? r.headers.at("Content-Type") : "");
+  }
   return r;
 }
 static std::string get_exam_id(const Request& req){

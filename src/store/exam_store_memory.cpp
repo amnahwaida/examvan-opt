@@ -100,7 +100,32 @@ void ExamStoreMemory::clear_all(){
   std::lock_guard<std::mutex> g(mu_);
   exams_.clear();
   seen_tokens_.clear();
+  idem_.clear();
   // next_id_ TIDAK di-reset — counter monotonik (Bug 5 fix)
+}
+
+IdempotencyResult ExamStoreMemory::reserve_idempotency(const std::string& key, const std::string& fingerprint){
+  std::lock_guard<std::mutex> g(mu_);
+  auto it = idem_.find(key);
+  if(it != idem_.end()){
+    if(it->second.fingerprint == fingerprint && it->second.completed)
+      return {IdempotencyStatus::Replay, it->second.response_body, it->second.http_status, it->second.content_type};
+    return {IdempotencyStatus::Conflict, "", 0, ""};
+  }
+  idem_[key] = {fingerprint, false, 0, "", ""};
+  return {IdempotencyStatus::New, "", 0, ""};
+}
+
+void ExamStoreMemory::finalize_idempotency(const std::string& key, const std::string& fingerprint,
+                                            int http_status, const std::string& response_body,
+                                            const std::string& content_type){
+  std::lock_guard<std::mutex> g(mu_);
+  idem_[key] = {fingerprint, true, http_status, response_body, content_type};
+}
+
+void ExamStoreMemory::release_idempotency(const std::string& key){
+  std::lock_guard<std::mutex> g(mu_);
+  idem_.erase(key);
 }
 
 } // namespace examvan::store

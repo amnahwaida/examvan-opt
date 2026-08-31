@@ -5,6 +5,7 @@
 #include "config/config.hpp"
 #include "store/exam_store.hpp"
 #include <string>
+#include <future>
 using namespace examvan;
 using namespace examvan::handlers::admin;
 using namespace examvan::helpers;
@@ -51,15 +52,79 @@ static std::string multipart_body(const std::string& boundary,
 
 // 1. Backward compat: urlencoded lama tetap sukses (existing tests)
 TEST(ExamCreationProd, IdempotencyKeyReplaysSameResponse){
+  clear_exams_for_testing();
   Request first; first.body=form_body("Replay", "/tmp/replay.pdf", "100"); first.headers["Idempotency-Key"]="idem-replay-1";
   auto a=create_exam(first); ASSERT_EQ(a.status,201);
   auto b=create_exam(first); EXPECT_EQ(b.status,201); EXPECT_EQ(b.body,a.body); EXPECT_EQ(examvan::store::active_store()->count(),1u);
 }
 TEST(ExamCreationProd, IdempotencyKeyConflictRejected){
+  clear_exams_for_testing();
   Request first; first.body=form_body("Conflict A", "/tmp/a.pdf", "100"); first.headers["Idempotency-Key"]="idem-conflict-1";
   ASSERT_EQ(create_exam(first).status,201);
   Request second=first; second.body=form_body("Conflict B", "/tmp/b.pdf", "100");
   auto r=create_exam(second); EXPECT_EQ(r.status,409); EXPECT_NE(r.body.find("IDEMPOTENCY_CONFLICT"),std::string::npos);
+}
+
+// --- Durable idempotency regression tests ---
+
+TEST(ExamCreationProd, ReleaseAllowsRetryAfterValidationFailure){
+  clear_exams_for_testing();
+  // Reserve a key via a failing request (missing name → 400 → release).
+  Request bad; bad.body=form_body("", "/tmp/a.pdf", "100"); bad.headers["Idempotency-Key"]="idem-release-1";
+  auto r1=create_exam(bad); EXPECT_EQ(r1.status,400);
+  // Same key with valid payload should succeed (reservation was released).
+  Request good; good.body=form_body("ReleaseOK", "/tmp/a.pdf", "100"); good.headers["Idempotency-Key"]="idem-release-1";
+  auto r2=create_exam(good); EXPECT_EQ(r2.status,201) << "reservation should have been released on earlier failure";
+}
+
+TEST(ExamCreationProd, ReleaseAllowsRetryAfterTokenFailure){
+  clear_exams_for_testing();
+  // Claim a token, then fail with that custom token (name empty).
+  // The token should be unclaimed AND the idempotency key released.
+  Request bad; bad.body=form_body("", "/tmp/a.pdf", "100", "AAAA1111"); bad.headers["Idempotency-Key"]="idem-release-tok";
+  auto r1=create_exam(bad); EXPECT_EQ(r1.status,400);
+  // Retry with same key and different custom token should succeed.
+  Request good; good.body=form_body("TokRelease", "/tmp/a.pdf", "100", "BBBB2222"); good.headers["Idempotency-Key"]="idem-release-tok";
+  auto r2=create_exam(good); EXPECT_EQ(r2.status,201);
+}
+
+TEST(ExamCreationProd, DurableIdempotencyReplayReturnsIdenticalBody){
+  clear_exams_for_testing();
+  Request r; r.body=form_body("DurableReplay", "/tmp/d.pdf", "100"); r.headers["Idempotency-Key"]="idem-durable-1";
+  auto first=create_exam(r); ASSERT_EQ(first.status,201);
+  // Second request with same key + same fingerprint → Replay (identical body).
+  auto second=create_exam(r); EXPECT_EQ(second.status,201); EXPECT_EQ(second.body,first.body);
+  // Exam count must remain 1.
+  EXPECT_EQ(examvan::store::active_store()->count(),1u);
+}
+
+TEST(ExamCreationProd, DurableIdempotencyDifferentPayloadConflicts){
+  clear_exams_for_testing();
+  Request r1; r1.body=form_body("PayloadA", "/tmp/a.pdf", "100"); r1.headers["Idempotency-Key"]="idem-diff-1";
+  ASSERT_EQ(create_exam(r1).status,201);
+  // Same key but different body → fingerprint differs → 409.
+  Request r2; r2.body=form_body("PayloadB", "/tmp/b.pdf", "100"); r2.headers["Idempotency-Key"]="idem-diff-1";
+  auto r=create_exam(r2); EXPECT_EQ(r.status,409);
+  EXPECT_NE(r.body.find("IDEMPOTENCY_CONFLICT"),std::string::npos);
+  EXPECT_EQ(examvan::store::active_store()->count(),1u);  // still only 1 exam
+}
+
+TEST(ExamCreationProd, ConcurrentReserveSameKey_OneNewOneConflict){
+  clear_exams_for_testing();
+  // Two threads race on the same idempotency key with same fingerprint.
+  // Exactly one should succeed (201), the other should get 409 (conflict).
+  auto fn=[&](int){
+    Request r; r.body=form_body("Concurrent", "/tmp/c.pdf", "100"); r.headers["Idempotency-Key"]="idem-concurrent-1";
+    return create_exam(r);
+  };
+  auto f1=std::async(std::launch::async,fn,0);
+  auto f2=std::async(std::launch::async,fn,0);
+  auto a=f1.get(); auto b=f2.get();
+  int successes=(a.status==201?1:0)+(b.status==201?1:0);
+  int conflicts=(a.status==409?1:0)+(b.status==409?1:0);
+  EXPECT_EQ(successes,1) << "exactly one request should succeed";
+  EXPECT_EQ(conflicts,1) << "exactly one request should conflict";
+  EXPECT_EQ(examvan::store::active_store()->count(),1u);
 }
 
 TEST(ExamCreationProd, UrlEncodedStillWorks){

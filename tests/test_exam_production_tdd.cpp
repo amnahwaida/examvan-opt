@@ -1115,6 +1115,26 @@ TEST(ExamProduction, RegenerateTokenResponse_HasMessage){
     << "regenerate-token harus return message: " << res.body;
 }
 
+TEST(ExamProduction, ListExams_QueryParsingIsExactDecodedAndOverflowSafe){
+  with_clean_store(); set_r2_env(true);
+  for(int i=0;i<3;++i){ Request cr; cr.body=form_body("Q"+std::to_string(i),"/tmp/a.pdf","100"); ASSERT_EQ(create_exam(cr).status,201); }
+  Request exact; exact.query="xpage=99&page=%32&per_page=%32";
+  auto res=handlers::api::list_exams(exact);
+  EXPECT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("\"page\":2"),std::string::npos);
+  EXPECT_NE(res.body.find("\"per_page\":2"),std::string::npos);
+  Request overflow; overflow.query="page=999999999999999999999&per_page=0";
+  auto safe=handlers::api::list_exams(overflow);
+  EXPECT_EQ(safe.status,200);
+  EXPECT_NE(safe.body.find("\"page\":1"),std::string::npos);
+  EXPECT_NE(safe.body.find("\"per_page\":50"),std::string::npos);
+  Request max_page; max_page.query="page=2147483647&per_page=200";
+  auto bounded=handlers::api::list_exams(max_page);
+  EXPECT_EQ(bounded.status,200);
+  EXPECT_NE(bounded.body.find("\"page\":2147483647"),std::string::npos);
+  EXPECT_NE(bounded.body.find("\"total\":3"),std::string::npos);
+}
+
 // Bug C: dashboard_stats harus return live counts dari store
 TEST(ExamProduction, DashboardStats_ReturnsLiveCounts){
   with_clean_store(); set_r2_env(true);
@@ -1881,4 +1901,73 @@ TEST(ExamProduction, StartExam_StudentLookupReturns200){
   auto res=handlers::api::exam_by_token(req);
   EXPECT_EQ(res.status,200)
     << "start via handler harus membuat student lookup berhasil: " << res.body;
+}
+
+// ======================================================================
+// Durable idempotency store-level regression tests
+// ======================================================================
+
+TEST(ExamProduction, DurableIdem_ReserveNewReleaseReserve){
+  // Reserve → Release → Reserve again should succeed (key freed).
+  with_clean_store();
+  auto* s=store::active_store();
+  auto r1=s->reserve_idempotency("k-rel","fp1");
+  EXPECT_EQ(r1.status, store::IdempotencyStatus::New);
+  s->release_idempotency("k-rel");
+  auto r2=s->reserve_idempotency("k-rel","fp1");
+  EXPECT_EQ(r2.status, store::IdempotencyStatus::New)
+    << "after release, same key should be reservable again";
+}
+
+TEST(ExamProduction, DurableIdem_FinalizeThenReplay){
+  // Reserve → Finalize → Reserve same key+fingerprint → Replay.
+  with_clean_store();
+  auto* s=store::active_store();
+  auto r1=s->reserve_idempotency("k-replay","fp2");
+  EXPECT_EQ(r1.status, store::IdempotencyStatus::New);
+  s->finalize_idempotency("k-replay","fp2", 201, "{\"ok\":true}", "application/json");
+  auto r2=s->reserve_idempotency("k-replay","fp2");
+  EXPECT_EQ(r2.status, store::IdempotencyStatus::Replay);
+  EXPECT_EQ(r2.response_body, "{\"ok\":true}");
+  EXPECT_EQ(r2.response_status, 201);
+  EXPECT_EQ(r2.response_content_type, "application/json");
+}
+
+TEST(ExamProduction, DurableIdem_DifferentFingerprintConflicts){
+  // Reserve → Finalize → Reserve same key but different fingerprint → Conflict.
+  with_clean_store();
+  auto* s=store::active_store();
+  s->reserve_idempotency("k-conf","fp3");
+  s->finalize_idempotency("k-conf","fp3", 201, "{\"ok\":true}", "application/json");
+  auto r=s->reserve_idempotency("k-conf","fp-different");
+  EXPECT_EQ(r.status, store::IdempotencyStatus::Conflict)
+    << "different fingerprint must yield Conflict, not Replay";
+}
+
+TEST(ExamProduction, DurableIdem_ConcurrentReserveSameKey){
+  // Two threads racing on the same key: exactly one should get New.
+  with_clean_store();
+  auto* s=store::active_store();
+  std::atomic<int> news{0}, conflicts{0};
+  auto fn=[&]{
+    auto r=s->reserve_idempotency("k-concurrent","fp4");
+    if(r.status==store::IdempotencyStatus::New) news.fetch_add(1);
+    else conflicts.fetch_add(1);
+  };
+  std::thread t1(fn); std::thread t2(fn);
+  t1.join(); t2.join();
+  EXPECT_EQ(news.load(),1) << "exactly one thread should get New";
+  EXPECT_EQ(conflicts.load(),1) << "exactly one thread should get Conflict";
+}
+
+TEST(ExamProduction, DurableIdem_ClearAllClearsIdempotency){
+  // clear_all() must clear idempotency state so keys can be reused.
+  with_clean_store();
+  auto* s=store::active_store();
+  s->reserve_idempotency("k-clear","fp5");
+  s->finalize_idempotency("k-clear","fp5", 201, "{\"cleared\":true}", "application/json");
+  s->clear_all();
+  auto r=s->reserve_idempotency("k-clear","fp5");
+  EXPECT_EQ(r.status, store::IdempotencyStatus::New)
+    << "after clear_all, key should be available again";
 }
