@@ -22,6 +22,7 @@
 #include "handlers/auth/login.hpp"
 #include "middleware/scoring.hpp"
 #include <iostream>
+#include <cstdlib>
 #include <thread>
 #include <chrono>
 
@@ -46,6 +47,20 @@ int main(){
   }
   examvan::store::set_active_store(&postgres_store);
 #else
+  // No PostgreSQL support compiled in.  Without a real database, all exam
+  // data lives only in RAM and is silently lost on every restart.  Refuse
+  // to start unless the operator explicitly opts into non-persistent mode.
+  const char* allow_mem = std::getenv("EXAMVAN_ALLOW_MEMORY_STORE");
+  if(!allow_mem || std::string(allow_mem)!="1"){
+    std::cerr << "FATAL: this binary was built without PostgreSQL support (HAS_LIBPQ=0).\n"
+              << "       Exam data would be stored in RAM only and lost on restart.\n"
+              << "       To proceed anyway (non-persistent, tests only), set:\n"
+              << "         EXAMVAN_ALLOW_MEMORY_STORE=1\n"
+              << "       To fix for production, rebuild with PostgreSQL installed:\n"
+              << "         cmake -B build && cmake --build build\n";
+    return 1;
+  }
+  std::cerr << "WARNING: running without PostgreSQL — exam data is NOT persistent\n";
   examvan::DbPool db(cfg.database_url, cfg.database_max_conns);
   db.connect();
 #endif

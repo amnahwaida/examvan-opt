@@ -53,6 +53,14 @@ void Config::validate() const {
     throw std::runtime_error("R2 credentials required (R2_ACCESS_KEY_ID etc)");
   if (port < 1 || port > 65535) throw std::runtime_error("PORT out of range");
   if (database_max_conns < 1 || database_max_conns > 150) throw std::runtime_error("DATABASE_MAX_CONNS out of range");
+  // DATABASE_URL is mandatory in production.  Without it, exam data lives
+  // only in RAM and is lost on every restart.  Set EXAMVAN_ALLOW_MEMORY_STORE=1
+  // to explicitly opt into non-persistent mode (tests / development only).
+  if(database_url.empty()){
+    const char* allow = std::getenv("EXAMVAN_ALLOW_MEMORY_STORE");
+    if(!allow || std::string(allow)!="1")
+      throw std::runtime_error("DATABASE_URL required — exam data needs PostgreSQL for persistence (set DATABASE_URL or EXAMVAN_ALLOW_MEMORY_STORE=1 for non-persistent mode)");
+  }
   if(!database_url.empty()){
     if(database_url.rfind("postgresql://",0)!=0 && database_url.rfind("postgres://",0)!=0) throw std::runtime_error("DATABASE_URL must be postgresql:// or postgres://");
   }

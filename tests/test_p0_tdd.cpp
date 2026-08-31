@@ -28,6 +28,7 @@ TEST(P0_Config, SecretLengthAcceptsLongEnough) {
   c.r2_access_key = "k";
   c.r2_secret_key = "s";
   c.r2_endpoint = "https://e";
+  c.database_url = "postgresql://localhost/test";
   EXPECT_NO_THROW(c.validate());
 }
 

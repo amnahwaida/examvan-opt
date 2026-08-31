@@ -67,6 +67,7 @@ TEST(P2_Hub, HeartbeatSanitizesXSS) {
 
 TEST(P2_Config, DatabaseMaxConnsEnforced) {
   Config c; c.secret_key=std::string(32,'x'); c.admin_user="u"; c.admin_pass="p"; c.r2_access_key="k"; c.r2_secret_key="s"; c.r2_endpoint="https://e";
+  c.database_url="postgresql://localhost/test";
   c.database_max_conns=200;
   EXPECT_THROW(c.validate(), std::runtime_error);
   c.database_max_conns=60; EXPECT_NO_THROW(c.validate());
@@ -74,6 +75,7 @@ TEST(P2_Config, DatabaseMaxConnsEnforced) {
 
 TEST(P2_Config, PortRangeEnforced) {
   Config c; c.secret_key=std::string(32,'x'); c.admin_user="u"; c.admin_pass="p"; c.r2_access_key="k"; c.r2_secret_key="s"; c.r2_endpoint="https://e";
+  c.database_url="postgresql://localhost/test";
   c.port=99999; EXPECT_THROW(c.validate(), std::runtime_error);
   c.port=5000; EXPECT_NO_THROW(c.validate());
 }
