@@ -19,6 +19,9 @@ CMD ["./build-san/examvan-tests"]
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y libpq5 libhiredis-dev libcurl4 libcrypt1 libprotobuf32 curl ca-certificates && rm -rf /var/lib/apt/lists/*
+# Non-root (defense-in-depth; compose sudah read_only + no-new-privileges).
+# Server hanya membaca /app (templates/static/proto) & menulis /tmp (tmpfs).
+RUN useradd --system --uid 10001 --home-dir /app examvan
 COPY --from=builder /usr/local/lib64/libstdc++.so.6.0.32 /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.32
 RUN ln -sf libstdc++.so.6.0.32 /usr/lib/x86_64-linux-gnu/libstdc++.so.6 && ldconfig
 # Docker hardening: no-new-privileges
@@ -27,5 +30,7 @@ COPY --from=builder /app/templates /app/templates
 COPY --from=builder /app/static /app/static
 COPY --from=builder /app/proto /app/proto
 WORKDIR /app
+RUN chown -R examvan:examvan /app && chmod 755 /app /app/templates /app/static /app/proto
+USER examvan
 EXPOSE 5000
 ENTRYPOINT ["/usr/local/bin/examvan-server"]

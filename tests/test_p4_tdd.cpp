@@ -32,6 +32,7 @@ TEST(P4_Jobs, RealSqlExecution) {
 TEST(P4_Infra, DockerHardening) {
   auto d = read_file2("Dockerfile");
   EXPECT_NE(d.find("no-new-privileges"), std::string::npos) << "Docker should drop privileges";
+  EXPECT_NE(d.find("USER examvan"), std::string::npos) << "runtime image should run as non-root";
   auto comp = read_file2("docker-compose.yml");
   EXPECT_NE(comp.find("read_only"), std::string::npos) << "compose should have read_only";
   EXPECT_NE(comp.find("no-new-privileges"), std::string::npos);
