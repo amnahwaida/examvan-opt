@@ -26,4 +26,8 @@ void set_registered_user_for_test(const std::string& username,
                                   long otp_expiry_epoch_sec);
 void clear_registered_users_for_test();
 
+/* Reset rate-limiter register per-IP (statis) — dipanggil antar-test agar
+ * suite tidak kehabisan kuota 5/jam dan test CSRF tidak kena 429. */
+void reset_register_limit_for_test();
+
 } // namespace examvan::handlers::auth

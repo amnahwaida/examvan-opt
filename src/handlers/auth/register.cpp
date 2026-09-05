@@ -64,10 +64,17 @@ long now_epoch(){ return static_cast<long>(std::time(nullptr)); }
 // Kunci rate limit: nama-alur + IP.
 static std::string rl_key(const char* flow, const std::string& ip){ return std::string(flow)+":"+ip; }
 
+std::string get_setting_str(const char* k, const std::string& def){ return get_setting(k, def); }
+
+} // namespace
+
 // Per-IP register 5/jam + max_accounts_per_ip dari saas_settings.
+// (Di luar anon-namespace agar reset_register_limit_for_test punya linkage
+// eksternal untuk dipanggil suite test.)
+static middleware::RateLimiter g_reg_ip(5, std::chrono::hours(1));
+void reset_register_limit_for_test(){ g_reg_ip.reset(); }
 std::string check_register_limit(const std::string& ip){
-  static middleware::RateLimiter g_reg_ip(5, std::chrono::hours(1));
-  if(!g_reg_ip.allow(rl_key("register", ip))) return "Terlalu banyak pendaftaran dari IP ini. Coba lagi nanti.";
+  if(!g_reg_ip.allow("register:"+ip)) return "Terlalu banyak pendaftaran dari IP ini. Coba lagi nanti.";
   std::string m=get_setting("max_accounts_per_ip","3");
   int max_per_ip=3;
   try{ max_per_ip=std::stoi(m); }catch(...){}
@@ -77,10 +84,6 @@ std::string check_register_limit(const std::string& ip){
   }
   return "";
 }
-
-std::string get_setting_str(const char* k, const std::string& def){ return get_setting(k, def); }
-
-} // namespace
 
 // ============================= GET /register =============================
 Response register_page(const Request& req){
@@ -142,6 +145,7 @@ Response register_handler(const Request& req, const Config& cfg){
   else if(!valid_username(username)) err="Username 3-32 karakter (huruf kecil, angka, titik, garis bawah).";
   else if(!valid_email(email)) err="Format email tidak valid.";
   else if(!valid_password(password)) err="Password minimal 8 karakter.";
+  else if(password.size()>72) err="Password maksimal 72 karakter (batas bcrypt).";
   else if(password!=password_confirm) err="Konfirmasi password tidak cocok.";
   else if(reserved_username(username)) err="Username tersebut tidak tersedia.";
   if(err.empty()){

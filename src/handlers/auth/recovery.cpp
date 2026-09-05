@@ -180,6 +180,7 @@ Response reset_password_handler(const Request& req, const Config& cfg){
   std::string err;
   if(otp.empty() || password.empty() || password_confirm.empty()) err="OTP dan password baru wajib diisi.";
   else if(password.size()<8) err="Password minimal 8 karakter.";
+  else if(password.size()>72) err="Password maksimal 72 karakter (batas bcrypt).";
   else if(password!=password_confirm) err="Konfirmasi password tidak cocok.";
   bool ts_enabled=get_setting_str("turnstile_enabled","0")=="1";
   if(err.empty() && ts_enabled){

@@ -88,6 +88,7 @@ TEST(PublicAuth, ResetPageWithoutUsernameRedirects){
 
 TEST(PublicAuth, RegisterSuccessEmailVerifyOff){
   clear_registered_users_for_test();
+  reset_register_limit_for_test();
   auto s=csrf_session("/register");
   Config cfg=test_cfg();
   Request req; req.path="/register";
@@ -105,6 +106,7 @@ TEST(PublicAuth, RegisterSuccessEmailVerifyOff){
 
 TEST(PublicAuth, RegisterInvalidPasswordRejects){
   clear_registered_users_for_test();
+  reset_register_limit_for_test();
   auto s=csrf_session("/register");
   Config cfg=test_cfg();
   Request req; req.body="username=siswa2&email=a%40b.com&password=short&password_confirm=short&csrf_token="+enc(s.token);
@@ -116,8 +118,26 @@ TEST(PublicAuth, RegisterInvalidPasswordRejects){
   clear_registered_users_for_test();
 }
 
+TEST(PublicAuth, RegisterPasswordOver72BytesRejected){
+  clear_registered_users_for_test();
+  reset_register_limit_for_test();
+  auto s=csrf_session("/register");
+  Config cfg=test_cfg();
+  std::string longpass(80,'a'); // > 72 bytes — bcrypt memotong di 72
+  Request req; req.body="username=siswa2b&email=a%40b.com&password="+longpass+"&password_confirm="+longpass+"&csrf_token="+enc(s.token);
+  req.headers["Cookie"]="csrf_token="+s.cookie;
+  req.headers["Accept"]="application/json";
+  auto res=register_handler(req,cfg);
+  EXPECT_EQ(res.status,400);
+  EXPECT_NE(res.body.find("72"), std::string::npos) << "should mention bcrypt 72-byte cap";
+  RegisteredUser u;
+  EXPECT_FALSE(find_registered_user("siswa2b",u)) << "over-72 password must not create account";
+  clear_registered_users_for_test();
+}
+
 TEST(PublicAuth, RegisterReservedUsernameRejected){
   clear_registered_users_for_test();
+  reset_register_limit_for_test();
   auto s=csrf_session("/register");
   Config cfg=test_cfg();
   Request req; req.body="username=admin&email=a%40b.com&password=secret12&password_confirm=secret12&csrf_token="+enc(s.token);
@@ -130,6 +150,7 @@ TEST(PublicAuth, RegisterReservedUsernameRejected){
 
 TEST(PublicAuth, RegisterDuplicateUsernameRejected){
   clear_registered_users_for_test();
+  reset_register_limit_for_test();
   RegisteredUser u; u.username="dupe"; u.email="d@b.com"; u.password_hash="x"; u.status="active";
   insert_registered_user(u);
   auto s=csrf_session("/register");
@@ -145,6 +166,7 @@ TEST(PublicAuth, RegisterDuplicateUsernameRejected){
 
 TEST(PublicAuth, RegisterCsrfMismatch403){
   clear_registered_users_for_test();
+  reset_register_limit_for_test();
   Request req; req.body="username=x&email=a%40b.com&password=secret12&password_confirm=secret12&_csrf=wrong";
   req.headers["Cookie"]="csrf_token=correct";
   req.headers["Accept"]="application/json";
@@ -155,6 +177,7 @@ TEST(PublicAuth, RegisterCsrfMismatch403){
 
 TEST(PublicAuth, RegisterDoesNotEchoPassword){
   clear_registered_users_for_test();
+  reset_register_limit_for_test();
   auto s=csrf_session("/register");
   Config cfg=test_cfg();
   Request req; req.body="username=x&email=bad&password=supersecret123&password_confirm=supersecret123&csrf_token="+enc(s.token);
@@ -338,6 +361,23 @@ TEST(PublicAuth, ResetPasswordTooShortRejected){
   RegisteredUser u;
   ASSERT_TRUE(find_registered_user("reseter3",u));
   EXPECT_TRUE(helpers::verify_password("hash",u.password_hash)|| u.password_hash=="hash"); // unchanged
+  clear_registered_users_for_test();
+}
+
+TEST(PublicAuth, ResetPasswordOver72BytesRejected){
+  clear_registered_users_for_test();
+  long future=std::time(nullptr)+900;
+  set_registered_user_for_test("reseter5","r@b.com","hash","active","111222",0,future);
+  auto s=csrf_session("/reset-password?username=reseter5");
+  Config cfg=test_cfg();
+  std::string longpass(80,'b');
+  Request req; req.query="username=reseter5";
+  req.body="otp_code=111222&password="+longpass+"&password_confirm="+longpass+"&csrf_token="+enc(s.token);
+  req.headers["Cookie"]="csrf_token="+s.cookie;
+  req.headers["Accept"]="application/json";
+  auto res=reset_password_handler(req,cfg);
+  EXPECT_EQ(res.status,400);
+  EXPECT_NE(res.body.find("72"), std::string::npos) << "should mention bcrypt 72-byte cap";
   clear_registered_users_for_test();
 }
 

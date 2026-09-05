@@ -88,7 +88,18 @@ int main(){
     [&](const std::string& v){ (void)v; }
   );
 #endif
-  examvan::handlers::auth::set_user_for_test(cfg.admin_user, cfg.admin_pass, "superadmin");
+  /* Seed admin memori HANYA saat PG bukan sumber identitas (dev/uji tanpa
+   * DATABASE_URL). Di produksi DATABASE_URL selalu ada → admin harus
+   * otentikasi ke PG (id/role/status ASLI dari DB, paritas Go); seed
+   * memori di sini membuat login admin bypass DB dengan admin_id=1 +
+   * role superadmin hardcoded (sesi tidak mencerminkan user sebenarnya,
+   * dan user yang di-suspend tetap bisa login). */
+  if(cfg.database_url.empty()){
+    const char* allow=getenv("EXAMVAN_ALLOW_MEMORY_STORE");
+    bool mem_ok=allow && std::string(allow)=="1";
+    if(mem_ok || cfg.is_development())
+      examvan::handlers::auth::set_user_for_test(cfg.admin_user, cfg.admin_pass, "superadmin");
+  }
   examvan::Router router;
   examvan::register_full_routes(router, cfg);
   std::cout << "Routes (" << router.routes().size() << "): ";
