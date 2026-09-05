@@ -30,10 +30,13 @@ static void set_r2_env(bool enabled){
     setenv("R2_SECRET_ACCESS_KEY","test-secret",1);
     setenv("R2_ENDPOINT","https://test.r2.cloudflarestorage.com",1);
     setenv("R2_BUCKET","test-bucket",1);
+    // Test harness tanpa R2 nyata: opt-in eksplisit (bukan shortcut substring).
+    setenv("EXAMVAN_R2_TESTMODE","1",1);
   } else {
     setenv("R2_ACCESS_KEY_ID","",1);
     setenv("R2_SECRET_ACCESS_KEY","",1);
     setenv("R2_ENDPOINT","",1);
+    setenv("EXAMVAN_R2_TESTMODE","",1);
   }
 }
 static void set_db_env(bool enabled){
@@ -55,13 +58,20 @@ TEST(ExamFullProd, R2MandatoryFailsClosed){
   set_r2_env(true);
 }
 
-// 2. R2 enabled -> upload dianggap sukses (stub return true jika enabled)
-TEST(ExamFullProd, R2EnabledUploadStub){
+// 2. R2 fail-closed: endpoint non-R2 tanpa TESTMODE = upload gagal (bukan
+//    sukses palsu). TESTMODE eksplisit = satu-satunya jalan sukses palsu.
+TEST(ExamFullProd, R2EnabledUploadFailsClosed){
   set_r2_env(true);
   r2::R2Config cfg{ "k","s","https://e","b"};
   EXPECT_TRUE(cfg.enabled());
   r2::R2Client client{cfg};
   EXPECT_TRUE(client.enabled());
+  // Endpoint "https://e" bukan r2.cloudflarestorage.com → upload harus GAGAL
+  // (sebelumnya shortcut substring membuatnya sukses palsu).
+  setenv("EXAMVAN_R2_TESTMODE","",1);
+  EXPECT_FALSE(client.upload("exams/1/soal.pdf","%PDF-1.4 fake content\n%%EOF\n"));
+  // Opt-in eksplisit TESTMODE → sukses palsu untuk test harness.
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
   EXPECT_TRUE(client.upload("exams/1/soal.pdf","%PDF-1.4 fake content\n%%EOF\n"));
   // handler dengan R2 enabled harus tetap 201
   Request req; req.body="name=Ujian R2 OK&file_path=/tmp/a.pdf&size_bytes=100";

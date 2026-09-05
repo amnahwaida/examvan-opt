@@ -5,16 +5,134 @@
 #include "models/exam.hpp"
 #include "store/exam_store.hpp"
 #include "services/examtoken/examtoken.hpp"
+#include "handlers/r2/r2.hpp"
+#include "config/config.hpp"
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
+#endif
+#ifdef HAS_HIREDIS
+#include "redis/redis_real.hpp"
+#include <hiredis/hiredis.h>
 #endif
 #include <string>
 #include <algorithm>
 #include <cstdlib>
 #include <cctype>
 #include <limits>
+#include <functional>
+#include <map>
 
 namespace examvan::handlers::api {
+
+// Test-only hook: tangkap SubmissionJob yang di-enqueue oleh submit_exam.
+static std::function<void(const queue::SubmissionJob&)> g_enqueue_hook;
+void set_submit_enqueue_hook_for_test(std::function<void(const queue::SubmissionJob&)> hook){
+  g_enqueue_hook = std::move(hook);
+}
+
+// Ambil nilai string dari JSON body (key: "x":"value").
+static std::string json_string_field(const std::string& body, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t p=body.find(needle);
+  if(p==std::string::npos) return "";
+  size_t colon=body.find(':',p+needle.size());
+  if(colon==std::string::npos) return "";
+  size_t s=body.find_first_not_of(" \t\r\n",colon+1);
+  if(s==std::string::npos || body[s]!='"') return "";
+  ++s;
+  std::string out;
+  for(size_t i=s;i<body.size();++i){
+    if(body[i]=='\\' && i+1<body.size()){ out.push_back(body[++i]); continue; }
+    if(body[i]=='"') return out;
+    out.push_back(body[i]);
+  }
+  return "";
+}
+
+// Ambil nilai JSON mentah (string ber-quote / angka / {objek} / [array]) untuk sebuah key.
+static std::string json_raw_value(const std::string& body, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t n=body.size();
+  bool in_str=false, esc=false;
+  for(size_t i=0;i<n;){
+    if(!in_str && !esc && i+needle.size()<=n && body.compare(i,needle.size(),needle)==0){
+      size_t colon=i+needle.size();
+      while(colon<n && (body[colon]==' '||body[colon]=='\t'||body[colon]=='\n'||body[colon]=='\r')) colon++;
+      if(colon<n && body[colon]==':'){
+        size_t v=colon+1;
+        while(v<n && (body[v]==' '||body[v]=='\t'||body[v]=='\n'||body[v]=='\r')) v++;
+        if(v>=n) return "";
+        if(body[v]=='"'){
+          size_t e=v+1; while(e<n){ if(body[e]=='\\'){e+=2;continue;} if(body[e]=='"') break; e++; }
+          if(e>=n) return "";
+          return body.substr(v,e-v+1);
+        }
+        if(body[v]=='{' || body[v]=='['){
+          char open=body[v], close=(open=='{')?'}':']';
+          int depth=0; size_t e=v;
+          bool is=false, es=false;
+          for(; e<n; ++e){
+            char c=body[e];
+            if(es){ es=false; continue; }
+            if(c=='\\' && is){ es=true; continue; }
+            if(c=='"'){ is=!is; continue; }
+            if(is) continue;
+            if(c==open) depth++;
+            else if(c==close){ depth--; if(depth==0) break; }
+          }
+          if(e>=n || depth!=0) return "";
+          return body.substr(v,e-v+1);
+        }
+        size_t e=v; while(e<n && body[e]!=',' && body[e]!='}' && body[e]!=']') e++;
+        return body.substr(v,e-v);
+      }
+    }
+    char c=body[i];
+    if(esc){ esc=false; }
+    else if(c=='\\' && in_str){ esc=true; }
+    else if(c=='"'){ in_str=!in_str; }
+    i++;
+  }
+  return "";
+}
+
+// Parse {"1":"A","2":"B"} → map. Dipakai untuk answers/identity_data.
+static std::map<std::string,std::string> parse_string_map(const std::string& raw){
+  std::map<std::string,std::string> out;
+  if(raw.empty() || raw.front()!='{') return out;
+  size_t i=1;
+  while(i<raw.size()){
+    while(i<raw.size() && (raw[i]==' '||raw[i]=='\t'||raw[i]=='\n'||raw[i]=='\r'||raw[i]==',')) i++;
+    if(i>=raw.size() || raw[i]=='}') break;
+    if(raw[i]!='"'){ i++; continue; }
+    size_t e=i+1; while(e<raw.size()){ if(raw[e]=='\\'){e+=2;continue;} if(raw[e]=='"')break; e++; }
+    if(e>=raw.size()) break;
+    std::string key=raw.substr(i+1,e-i-1);
+    i=e+1;
+    while(i<raw.size() && (raw[i]==' '||raw[i]=='\t'||raw[i]=='\n'||raw[i]=='\r'||raw[i]==':')) i++;
+    if(i>=raw.size() || raw[i]!='"'){ i++; continue; }
+    size_t v=i+1; while(v<raw.size()){ if(raw[v]=='\\'){v+=2;continue;} if(raw[v]=='"')break; v++; }
+    if(v>=raw.size()) break;
+    out[key]=raw.substr(i+1,v-i-1);
+    i=v+1;
+  }
+  return out;
+}
+
+// Enqueue SubmissionJob ke Redis (frozen key examvan:submissions:pending).
+static void enqueue_job_to_redis(const queue::SubmissionJob& job){
+#ifdef HAS_HIREDIS
+  auto cfg=Config::load();
+  auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
+  if(ctx){
+    std::string payload=job.to_json();
+    auto* r=(redisReply*)redisCommand(ctx.get(),"LPUSH %s %b", queue::kQueueKey, payload.data(), payload.size());
+    if(r) freeReplyObject(r);
+  }
+#else
+  (void)job;
+#endif
+}
 
 static std::string json_escape(const std::string& s){
   std::string o; o.reserve(s.size()+16);
@@ -164,6 +282,29 @@ Response list_exams(const Request& req){
 }
 
 Response request_approval(const Request& req){
+  std::string token=json_string_field(req.body,"token");
+  if(token.empty()){
+    auto form=helpers::parse_form(req.body);
+    if(form.count("token")) token=form["token"];
+  }
+  if(token.empty()){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"token required\"}"); return r;
+  }
+  // Validasi: token harus milik exam yang ada (bukan sukses palsu).
+  auto snapshot=store::active_store()->list_all();
+  bool found=false;
+  for(auto& e: snapshot){ if(examtoken::matches(e, token)){ found=true; break; } }
+  if(!found){
+#ifdef HAS_PROTOBUF
+    if(middleware::is_protobuf_accept(req)){
+      examvan::v1::RequestApprovalResponse pb;
+      pb.set_success(false);
+      std::string out; pb.SerializeToString(&out);
+      Response r; r.status=404; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+    }
+#endif
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"token not found\"}"); return r;
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::RequestApprovalResponse pb;
@@ -173,7 +314,7 @@ Response request_approval(const Request& req){
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.json(200,"{\"status\":\"pending\"}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"status\":\"pending\"}"); return r;
 }
 
 Response exam_by_token(const Request& req){
@@ -272,11 +413,64 @@ Response exam_by_token(const Request& req){
 
 Response exam_pdf(const Request& req){
   auto it=req.params.find("exam_id");
-  if(it==req.params.end()){ Response r; r.status=404; r.json(404,"{\"error\":\"not found\"}"); return r;}
-  Response r; r.status=302; r.headers["Location"]="https://r2.example.com/bucket/exams/"+it->second+"/paper.pdf?presigned=1"; return r;
+  if(it==req.params.end() || it->second.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
+  int exam_id=0;
+  try{ exam_id=std::stoi(it->second); }catch(...){ Response r; r.status=404; r.json(404,"{\"error\":\"exam not found\"}"); return r; }
+  auto exam=store::active_store()->get_by_id(exam_id);
+  if(!exam){ Response r; r.status=404; r.json(404,"{\"error\":\"exam not found\"}"); return r; }
+  if(exam->file_path.empty()){ Response r; r.status=404; r.json(404,"{\"error\":\"file not found\"}"); return r; }
+  auto cfg=Config::load();
+  r2::R2Config rc{cfg.r2_access_key, cfg.r2_secret_key, cfg.r2_endpoint, cfg.r2_bucket};
+  if(!rc.enabled()){
+    Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
+  }
+  std::string key=r2::object_key_for_exam(exam_id, exam->file_path);
+  std::string url=r2::presign_url(rc, key, 3600);
+  if(url.empty()){
+    Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrSignFailed)+"\",\"error_code\":\""+std::string(r2::kCodeSignFailed)+"\"}"); return r;
+  }
+  Response r; r.status=302; r.headers["Location"]=url; return r;
 }
 
 Response submit_exam(const Request& req){
+  auto it=req.params.find("exam_id");
+  if(it==req.params.end() || it->second.empty()){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"exam id required\"}"); return r;
+  }
+  int exam_id=0;
+  try{ exam_id=std::stoi(it->second); }catch(...){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"invalid exam id\"}"); return r;
+  }
+  auto exam=store::active_store()->get_by_id(exam_id);
+  if(!exam){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
+  }
+  // Go parity: submit hanya valid bila ujian aktif & sudah dimulai.
+  if(!exam->is_active() || !exam->exam_started_at.has_value() || exam->exam_started_at->empty()){
+    Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"exam not started\",\"message\":\"Ujian belum dimulai\"}"); return r;
+  }
+  // Bangun job nyata (identitas + jawaban) lalu enqueue ke queue Redis.
+  queue::SubmissionJob job;
+  job.exam_id=exam_id;
+  job.student_name=json_string_field(req.body,"student_name");
+  job.exam_number=json_string_field(req.body,"exam_number");
+  job.student_class=json_string_field(req.body,"student_class");
+  job.mac_address=json_string_field(req.body,"mac_address");
+  job.answers=parse_string_map(json_raw_value(req.body,"answers"));
+  job.identity_data=parse_string_map(json_raw_value(req.body,"identity_data"));
+  job.enqueued_at=helpers::format_iso_utc(std::chrono::system_clock::now());
+  if(job.student_name.empty()){
+    auto form=helpers::parse_form(req.body);
+    if(form.count("student_name")) job.student_name=form["student_name"];
+    if(form.count("exam_number")) job.exam_number=form["exam_number"];
+    if(form.count("student_class")) job.student_class=form["student_class"];
+    if(form.count("mac_address")) job.mac_address=form["mac_address"];
+  }
+  if(g_enqueue_hook){
+    g_enqueue_hook(job);
+  } else {
+    enqueue_job_to_redis(job);
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::SubmitExamResponse pb;
@@ -286,25 +480,38 @@ Response submit_exam(const Request& req){
     Response r; r.status=202; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.status=202; r.json(202,"{\"status\":\"queued\"}"); return r;
+  Response r; r.status=202; r.json(202,"{\"success\":true,\"status\":\"queued\"}"); return r;
 }
 
 Response exam_result(const Request& req){
   auto it=req.params.find("exam_id");
-  if(it==req.params.end()){
+  if(it==req.params.end() || it->second.empty()){
 #ifdef HAS_PROTOBUF
     if(middleware::is_protobuf_accept(req)){
       examvan::v1::ExamResultResponse pb;
       pb.set_success(false);
-      pb.set_error("not found");
+      pb.set_error("exam id required");
+      std::string out; pb.SerializeToString(&out);
+      Response r; r.status=400; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+    }
+#endif
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"exam id required\"}"); return r;
+  }
+  int exam_id=0;
+  try{ exam_id=std::stoi(it->second); }catch(...){}
+  // Validasi: exam harus ada (bukan sukses palsu untuk id sembarang).
+  if(!store::active_store()->get_by_id(exam_id).has_value()){
+#ifdef HAS_PROTOBUF
+    if(middleware::is_protobuf_accept(req)){
+      examvan::v1::ExamResultResponse pb;
+      pb.set_success(false);
+      pb.set_error("exam not found");
       std::string out; pb.SerializeToString(&out);
       Response r; r.status=404; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
     }
 #endif
-    Response r; r.status=404; r.json(404,"{\"error\":\"not found\"}"); return r;
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
   }
-  int exam_id=0;
-  try{ exam_id=std::stoi(it->second); }catch(...){}
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::ExamResultResponse pb;
@@ -315,10 +522,21 @@ Response exam_result(const Request& req){
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.json(200,"{\"exam_id\":"+it->second+",\"score\":null}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"exam_id\":"+std::to_string(exam_id)+",\"score\":null,\"has_score\":false}"); return r;
 }
 
 Response access_log(const Request& req){
+  auto it=req.params.find("exam_id");
+  if(it==req.params.end() || it->second.empty()){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"exam id required\"}"); return r;
+  }
+  int exam_id=0;
+  try{ exam_id=std::stoi(it->second); }catch(...){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"invalid exam id\"}"); return r;
+  }
+  if(!store::active_store()->get_by_id(exam_id).has_value()){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::AccessLogResponse pb;
@@ -328,10 +546,21 @@ Response access_log(const Request& req){
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.json(200,"{\"logged\":true}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"logged\":true}"); return r;
 }
 
 Response complete_exam(const Request& req){
+  auto it=req.params.find("exam_id");
+  if(it==req.params.end() || it->second.empty()){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"exam id required\"}"); return r;
+  }
+  int exam_id=0;
+  try{ exam_id=std::stoi(it->second); }catch(...){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"invalid exam id\"}"); return r;
+  }
+  if(!store::active_store()->get_by_id(exam_id).has_value()){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::CompleteExamResponse pb;
@@ -341,7 +570,7 @@ Response complete_exam(const Request& req){
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.json(200,"{\"completed\":true}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"completed\":true}"); return r;
 }
 
 } // namespace examvan::handlers::api

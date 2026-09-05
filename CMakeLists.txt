@@ -245,6 +245,7 @@ add_executable(examvan-tests
   tests/test_csrf_fix_tdd.cpp
   tests/test_exam_creation_prod_tdd.cpp
   tests/test_exam_full_prod_tdd.cpp
+  tests/test_production_hardening_tdd.cpp
   tests/test_protobuf_mandatory_tdd.cpp
   tests/test_protobuf_handlers_tdd.cpp
   tests/test_exam_production_tdd.cpp

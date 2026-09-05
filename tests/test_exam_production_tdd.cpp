@@ -80,11 +80,14 @@ static void set_r2_env(bool on){
     setenv("R2_SECRET_ACCESS_KEY","test",1);
     setenv("R2_ENDPOINT","https://test.r2.cloudflarestorage.com",1);
     setenv("R2_BUCKET","test",1);
+    // Test harness tanpa R2 nyata: opt-in eksplisit (bukan shortcut substring).
+    setenv("EXAMVAN_R2_TESTMODE","1",1);
   } else {
     setenv("R2_ACCESS_KEY_ID","",1);
     setenv("R2_SECRET_ACCESS_KEY","",1);
     setenv("R2_ENDPOINT","",1);
     setenv("R2_BUCKET","test",1);
+    setenv("EXAMVAN_R2_TESTMODE","",1);
   }
 }
 // Ekstrak field JSON sederhana dari response

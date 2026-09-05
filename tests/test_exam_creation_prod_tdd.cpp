@@ -176,6 +176,7 @@ TEST(ExamCreationProd, SizeTooLarge){
 }
 TEST(ExamCreationProd, MultipartPdfSuccess){
   setenv("R2_ACCESS_KEY_ID","test",1); setenv("R2_SECRET_ACCESS_KEY","test",1); setenv("R2_ENDPOINT","https://test.r2.cloudflarestorage.com",1); setenv("R2_BUCKET","test",1);
+  setenv("EXAMVAN_R2_TESTMODE","1",1); // test harness tanpa R2 nyata: opt-in eksplisit
   std::string boundary="----WebKit123";
   auto body=multipart_body(boundary, {{"name","Ujian Multipart"}}, "pdf_file","soal.pdf","%PDF-1.4 fake content\n%%EOF\n");
   Request req; req.body=body;

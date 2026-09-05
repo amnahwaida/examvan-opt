@@ -7,8 +7,8 @@
 namespace examvan::store {
 namespace {
 constexpr const char* kColumns = "id,name,file_path,size_bytes,token,active_token,questions_json,status,security_level,strict_mode,public_results,show_answers,created_by,created_at,identity_fields,panel_color,start_time,end_time,delegated_to,token_mode,token_reset_interval,token_last_reset_at,exam_started_at,tombstoned_at,congrats_message,auto_approve";
-constexpr const char* kSchema = R"SQL(
-CREATE TABLE IF NOT EXISTS exams (
+constexpr const char* kSeq = "CREATE SEQUENCE IF NOT EXISTS exams_id_seq";
+constexpr const char* kTableExams = R"SQL(CREATE TABLE IF NOT EXISTS exams (
  id INTEGER PRIMARY KEY DEFAULT nextval('exams_id_seq'),
  name TEXT NOT NULL,
  file_path TEXT NOT NULL,
@@ -35,16 +35,15 @@ CREATE TABLE IF NOT EXISTS exams (
  tombstoned_at TEXT,
  congrats_message TEXT,
  auto_approve BOOLEAN NOT NULL DEFAULT FALSE
-);
-CREATE INDEX IF NOT EXISTS exams_active_token_idx ON exams(active_token);
-CREATE INDEX IF NOT EXISTS exams_created_at_idx ON exams(created_at DESC);
-CREATE TABLE IF NOT EXISTS exam_idempotency (
+))SQL";
+constexpr const char* kIdx1 = "CREATE INDEX IF NOT EXISTS exams_active_token_idx ON exams(active_token)";
+constexpr const char* kIdx2 = "CREATE INDEX IF NOT EXISTS exams_created_at_idx ON exams(created_at DESC)";
+constexpr const char* kTableIdem = R"SQL(CREATE TABLE IF NOT EXISTS exam_idempotency (
  idempotency_key TEXT PRIMARY KEY,
  request_fingerprint TEXT NOT NULL,
  exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-)SQL";
+))SQL";
 }
 
 bool ExamStorePostgres::exec_command(const std::string& sql, const std::vector<std::string>& params){
@@ -142,7 +141,7 @@ std::optional<std::string> ExamStorePostgres::execute_transaction_result(
 
 bool ExamStorePostgres::migrate(){
   std::lock_guard<std::mutex> lock(mu_);
-  ready_=exec_command(kSchema);
+  ready_=exec_command(kSeq) && exec_command(kTableExams) && exec_command(kIdx1) && exec_command(kIdx2) && exec_command(kTableIdem);
   // Backward-compatible migration: extend exam_idempotency for durable
   // idempotency (state machine, response replay, lease tracking).
   if(ready_){
@@ -193,7 +192,8 @@ bool ExamStorePostgres::add(const models::Exam& e){
 std::optional<models::Exam> ExamStorePostgres::get_by_id(int id){
   std::lock_guard<std::mutex> lock(mu_);
   auto rows=query_exams(std::string("SELECT ")+kColumns+" FROM exams WHERE id=$1",{std::to_string(id)});
-  if(rows.empty()) return std::nullopt; return rows.front();
+  if(rows.empty()) return std::nullopt;
+  return rows.front();
 }
 std::vector<models::Exam> ExamStorePostgres::list_all(){
   std::lock_guard<std::mutex> lock(mu_);
@@ -211,8 +211,13 @@ bool ExamStorePostgres::update(int id,const std::function<void(models::Exam&)>& 
   std::lock_guard<std::mutex> lock(mu_);
   auto rows=query_exams(std::string("SELECT ")+kColumns+" FROM exams WHERE id=$1",{std::to_string(id)}); if(rows.empty()) return false;
   mutator(rows.front()); const auto& e=rows.front();
-  const std::string sql="UPDATE exams SET name=$1,file_path=$2,size_bytes=$3,token=$4,active_token=$5,status=$6,token_mode=$7,token_reset_interval=$8,token_last_reset_at=$9,exam_started_at=$10,tombstoned_at=$11 WHERE id=$12";
-  return exec_command_nullable(sql,{e.name,e.file_path,std::to_string(e.size_bytes),e.token,e.active_token,e.status,e.token_mode,e.token_reset_interval?std::optional<std::string>(std::to_string(*e.token_reset_interval)):std::nullopt,e.token_last_reset_at,e.exam_started_at,e.tombstoned_at,std::to_string(id)});
+  // Read-modify-write: seluruh kolom mutable ikut ditulis ulang supaya
+  // update() tidak menjatuhkan field (questions_json, auto_approve, dll).
+  const std::string sql="UPDATE exams SET name=$1,file_path=$2,size_bytes=$3,token=$4,active_token=$5,status=$6,token_mode=$7,token_reset_interval=$8,token_last_reset_at=$9,exam_started_at=$10,tombstoned_at=$11,questions_json=$12,security_level=$13,strict_mode=$14,public_results=$15,show_answers=$16,identity_fields=$17,panel_color=$18,start_time=$19,end_time=$20,congrats_message=$21,auto_approve=$22,delegated_to=$23 WHERE id=$24";
+  return exec_command_nullable(sql,{e.name,e.file_path,std::to_string(e.size_bytes),e.token,e.active_token,e.status,e.token_mode,e.token_reset_interval?std::optional<std::string>(std::to_string(*e.token_reset_interval)):std::nullopt,e.token_last_reset_at,e.exam_started_at,e.tombstoned_at,
+    e.questions_json,e.security_level,std::to_string(e.strict_mode),std::to_string(e.public_results),std::to_string(e.show_answers),
+    e.identity_fields,e.panel_color,e.start_time,e.end_time,e.congrats_message,e.auto_approve?"true":"false",
+    e.delegated_to?std::optional<std::string>(std::to_string(*e.delegated_to)):std::nullopt,std::to_string(id)});
 }
 bool ExamStorePostgres::remove(int id){ std::lock_guard<std::mutex> lock(mu_); return exec_command("DELETE FROM exams WHERE id=$1",{std::to_string(id)}); }
 size_t ExamStorePostgres::count(){ std::lock_guard<std::mutex> lock(mu_); auto rows=query_exams("SELECT "+std::string(kColumns)+" FROM exams"); return rows.size(); }
@@ -262,39 +267,37 @@ void ExamStorePostgres::finalize_idempotency(const std::string& key, const std::
                                               int http_status, const std::string& response_body,
                                               const std::string& content_type){
   std::lock_guard<std::mutex> lock(mu_);
-  auto c=pool_.acquire();
-  if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
-  (void)pool_.exec_params(c.get(),"BEGIN",{});
-  // INSERT exam with RETURNING id (atomic allocation).
-  const std::string insert_sql="INSERT INTO exams ("+std::string(kColumns)+") VALUES ("
-    "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING id";
-  // exam_id=0 is a placeholder; actual id comes from RETURNING.
-  std::vector<std::string> params={
-    "0","","",       // id (placeholder), name, file_path — not used in this path
-    "0","","",       // size_bytes, token, active_token
-    "","inactive","medium", // questions_json, status, security_level
-    "0","1","1",     // strict_mode, public_results, show_answers
-    "0","",         // created_by, created_at
-    "","","",       // identity_fields, panel_color, start_time
-    "","","",       // end_time, delegated_to, token_mode
-    "","","",       // token_reset_interval, token_last_reset_at, exam_started_at
-    "","","",       // tombstoned_at, congrats_message, auto_approve
-  };
-  auto ir=pool_.exec_params(c.get(),insert_sql,params);
-  if(!ir || PQresultStatus(ir.get())!=PGRES_TUPLES_OK || PQntuples(ir.get())==0){
-    (void)pool_.exec_params(c.get(),"ROLLBACK",{}); pool_.release(c.release()); return;
+  int exam_id=0;
+  {
+    std::string needle="\"id\":";
+    auto p=response_body.find(needle);
+    if(p!=std::string::npos){
+      size_t s=p+needle.size();
+      while(s<response_body.size() && (response_body[s]==' '||response_body[s]=='\t')) ++s;
+      size_t e=s;
+      while(e<response_body.size() && isdigit((unsigned char)response_body[e])) ++e;
+      if(e>s) try{ exam_id=std::stoi(response_body.substr(s,e-s)); }catch(...){}
+    }
   }
-  std::string exam_id=PQgetvalue(ir.get(),0,0);
-  // Finalize idempotency record with the real exam_id.
   const std::string upd_sql=
     "UPDATE exam_idempotency SET exam_id=$1,response_status=$2,response_body=$3,"
     "response_content_type=$4,state='completed',finalized_at=NOW(),updated_at=NOW()"
-    " WHERE idempotency_key=$5";
-  auto ur=pool_.exec_params(c.get(),upd_sql,{exam_id,std::to_string(http_status),response_body,content_type,key});
+    " WHERE idempotency_key=$5 AND request_fingerprint=$6";
+  auto c=pool_.acquire();
+  if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+  auto ur=pool_.exec_params(c.get(),upd_sql,{std::to_string(exam_id),std::to_string(http_status),response_body,content_type,key,fingerprint});
   if(!ur || PQresultStatus(ur.get())!=PGRES_COMMAND_OK){
-    (void)pool_.exec_params(c.get(),"ROLLBACK",{}); pool_.release(c.release()); return;
+    pool_.release(c.release());
+    return;
   }
-  (void)pool_.exec_params(c.get(),"COMMIT",{});
+  if(std::string(PQcmdTuples(ur.get()))=="0"){
+    (void)pool_.exec_params(c.get(),
+      "INSERT INTO exam_idempotency (idempotency_key,request_fingerprint,exam_id,state,response_status,response_body,response_content_type,created_at,updated_at,finalized_at)"
+      " VALUES ($1,$2,$3,'completed',$4,$5,$6,NOW(),NOW(),NOW()) ON CONFLICT (idempotency_key) DO UPDATE SET"
+      " exam_id=EXCLUDED.exam_id,response_status=EXCLUDED.response_status,response_body=EXCLUDED.response_body,"
+      "response_content_type=EXCLUDED.response_content_type,state='completed',updated_at=NOW(),finalized_at=NOW()",
+      {key,fingerprint,std::to_string(exam_id),std::to_string(http_status),response_body,content_type});
+  }
   pool_.release(c.release());
 }
 

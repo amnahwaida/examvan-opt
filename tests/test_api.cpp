@@ -87,7 +87,14 @@ TEST(Api, ExamByTokenValid) {
 }
 
 TEST(Api, SubmitQueued) {
-  Request req; EXPECT_EQ(handlers::api::submit_exam(req).status,202);
+  // Kontrak baru: submit untuk exam yang valid & sudah dimulai → 202 queued.
+  std::string perm; int eid=0;
+  prepare_started_exam(perm, eid);
+  ASSERT_GT(eid,0);
+  Request req; req.params["exam_id"]=std::to_string(eid);
+  EXPECT_EQ(handlers::api::submit_exam(req).status,202);
+  // Submit tanpa exam_id → 400 (bukan 202 sukses palsu).
+  Request bad; EXPECT_EQ(handlers::api::submit_exam(bad).status,400);
 }
 
 TEST(Api, FullRouterHas40Routes) {
@@ -99,8 +106,24 @@ TEST(Api, FullRouterHas40Routes) {
 }
 
 TEST(Api, PresignPdfRedirect) {
-  Request req; req.params["exam_id"]="5";
+  // Exam tidak ada → 404 (bukan redirect ke URL palsu r2.example.com).
+  Request missing; missing.params["exam_id"]="99999";
+  EXPECT_EQ(handlers::api::exam_pdf(missing).status,404);
+  // Exam valid → 302 ke presigned URL asli (bukan domain placeholder).
+  examvan::handlers::admin::clear_exams_for_testing();
+  setenv("R2_ACCESS_KEY_ID","test",1);
+  setenv("R2_SECRET_ACCESS_KEY","test",1);
+  setenv("R2_ENDPOINT","https://test.r2.cloudflarestorage.com",1);
+  setenv("R2_BUCKET","test",1);
+  Request cr; cr.body="name=PdfRedirect&file_path=soal.pdf&size_bytes=100";
+  auto created=examvan::handlers::admin::create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  auto p=created.body.find("\"id\":");
+  ASSERT_NE(p,std::string::npos);
+  p+=5; auto e=created.body.find_first_of(",}",p);
+  Request req; req.params["exam_id"]=created.body.substr(p,e-p);
   auto res=handlers::api::exam_pdf(req);
   EXPECT_EQ(res.status,302);
-  EXPECT_NE(res.headers["Location"].find("5"), std::string::npos);
+  EXPECT_EQ(res.headers["Location"].find("r2.example.com"), std::string::npos) << "stub placeholder r2.example.com harus hilang: " << res.headers["Location"];
+  EXPECT_NE(res.headers["Location"].find("X-Amz-Signature="), std::string::npos) << res.headers["Location"];
 }

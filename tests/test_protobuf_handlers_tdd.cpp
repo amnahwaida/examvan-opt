@@ -23,6 +23,7 @@ static std::string prepare_started_exam_for_api(){
   setenv("R2_SECRET_ACCESS_KEY","test",1);
   setenv("R2_ENDPOINT","https://test.r2.cloudflarestorage.com",1);
   setenv("R2_BUCKET","test",1);
+  setenv("EXAMVAN_R2_TESTMODE","1",1); // test harness tanpa R2 nyata: opt-in eksplisit
   Request cr; cr.body="name=ProtoActive&file_path=/tmp/a.pdf&size_bytes=100";
   auto created=handlers::admin::create_exam(cr);
   EXPECT_EQ(created.status,201) << created.body;
@@ -37,6 +38,14 @@ static std::string prepare_started_exam_for_api(){
   int id=std::stoi(created.body.substr(ip,ie-ip));
   store::active_store()->update(id,[](models::Exam& ex){ ex.status="active"; ex.exam_started_at="2026-08-31T00:00:00Z"; });
   return token;
+}
+
+// Kembalikan id exam yang valid + sudah dimulai (untuk endpoint alur siswa).
+static int prepare_started_exam_id_for_api(){
+  prepare_started_exam_for_api();
+  auto exams=store::active_store()->list_all();
+  if(exams.empty()) return -1;
+  return exams.back().id;
 }
 
 /*
@@ -185,6 +194,7 @@ TEST(ProtobufHandlers, CreateExam_ProtobufInboundDecode) {
 }
 
 TEST(ProtobufHandlers, CreateExam_MultipartStillWorks) {
+  setenv("EXAMVAN_R2_TESTMODE","1",1); // test harness tanpa R2 nyata: opt-in eksplisit
   std::string ct = "multipart/form-data; boundary=----TestPB";
   std::string body = "------TestPB\r\n"
     "Content-Disposition: form-data; name=\"name\"\r\n\r\nUjian Multipart\r\n"
@@ -556,8 +566,11 @@ TEST(ProtobufHandlers, ExamByToken_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, RequestApproval_ValidProtobufResponse) {
+  std::string token=prepare_started_exam_for_api();
+  ASSERT_FALSE(token.empty());
   auto req = pb_accept();
   req.method = "POST";
+  req.body="token="+token;
   auto res = handlers::api::request_approval(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -569,7 +582,9 @@ TEST(ProtobufHandlers, RequestApproval_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, RequestApproval_JsonStillWorks) {
-  Request req; req.method = "POST";
+  std::string token=prepare_started_exam_for_api();
+  ASSERT_FALSE(token.empty());
+  Request req; req.method = "POST"; req.body="token="+token;
   auto res = handlers::api::request_approval(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"pending\""), std::string::npos);
@@ -580,9 +595,11 @@ TEST(ProtobufHandlers, RequestApproval_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, SubmitExam_ValidProtobufResponse) {
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
   auto req = pb_accept();
   req.method = "POST";
-  req.params["exam_id"] = "1";
+  req.params["exam_id"] = std::to_string(eid);
   auto res = handlers::api::submit_exam(req);
   EXPECT_EQ(res.status, 202);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -594,7 +611,9 @@ TEST(ProtobufHandlers, SubmitExam_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, SubmitExam_JsonStillWorks) {
-  Request req; req.method = "POST"; req.params["exam_id"] = "1";
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
+  Request req; req.method = "POST"; req.params["exam_id"] = std::to_string(eid);
   auto res = handlers::api::submit_exam(req);
   EXPECT_EQ(res.status, 202);
   EXPECT_NE(res.body.find("\"status\":\"queued\""), std::string::npos);
@@ -605,8 +624,10 @@ TEST(ProtobufHandlers, SubmitExam_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, ExamResult_ValidProtobufResponse) {
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
   auto req = pb_accept();
-  req.params["exam_id"] = "1";
+  req.params["exam_id"] = std::to_string(eid);
   auto res = handlers::api::exam_result(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -617,11 +638,13 @@ TEST(ProtobufHandlers, ExamResult_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, ExamResult_JsonStillWorks) {
-  Request req; req.params["exam_id"] = "1";
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
+  Request req; req.params["exam_id"] = std::to_string(eid);
   auto res = handlers::api::exam_result(req);
   EXPECT_EQ(res.status, 200);
   // exam_result returns {exam_id, score} — no explicit "success" field
-  EXPECT_NE(res.body.find("\"exam_id\":1"), std::string::npos);
+  EXPECT_NE(res.body.find("\"exam_id\":"+std::to_string(eid)), std::string::npos);
   EXPECT_NE(res.body.find("\"score\""), std::string::npos);
 }
 
@@ -630,9 +653,11 @@ TEST(ProtobufHandlers, ExamResult_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, AccessLog_ValidProtobufResponse) {
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
   auto req = pb_accept();
   req.method = "POST";
-  req.params["exam_id"] = "1";
+  req.params["exam_id"] = std::to_string(eid);
   auto res = handlers::api::access_log(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -644,7 +669,9 @@ TEST(ProtobufHandlers, AccessLog_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, AccessLog_JsonStillWorks) {
-  Request req; req.method = "POST"; req.params["exam_id"] = "1";
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
+  Request req; req.method = "POST"; req.params["exam_id"] = std::to_string(eid);
   auto res = handlers::api::access_log(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"logged\":true"), std::string::npos);
@@ -655,9 +682,11 @@ TEST(ProtobufHandlers, AccessLog_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, CompleteExam_ValidProtobufResponse) {
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
   auto req = pb_accept();
   req.method = "POST";
-  req.params["exam_id"] = "1";
+  req.params["exam_id"] = std::to_string(eid);
   auto res = handlers::api::complete_exam(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -669,7 +698,9 @@ TEST(ProtobufHandlers, CompleteExam_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, CompleteExam_JsonStillWorks) {
-  Request req; req.method = "POST"; req.params["exam_id"] = "1";
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
+  Request req; req.method = "POST"; req.params["exam_id"] = std::to_string(eid);
   auto res = handlers::api::complete_exam(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"completed\":true"), std::string::npos);

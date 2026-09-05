@@ -27,8 +27,8 @@ struct R2Client {
   R2Config cfg;
   bool enabled() const { return cfg.enabled(); }
   std::string signed_url(const std::string& key, int ttl=3600) const { return presign_url(cfg,key,ttl); }
-  bool upload(const std::string& key, const std::string& data) const { (void)key;(void)data; return enabled(); }
-  bool remove(const std::string& key) const { (void)key; return enabled(); }
+  bool upload(const std::string& key, const std::string& data, const std::string& content_type="application/pdf") const;
+  bool remove(const std::string& key) const;
 };
 
 } // namespace examvan::r2

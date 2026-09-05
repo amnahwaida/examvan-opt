@@ -73,12 +73,65 @@ static std::string json_unescape(const std::string& s){
   }
   return o;
 }
+// Parse {"1":"A","2":"B"} di dalam objek JSON untuk key tertentu.
+static std::map<std::string,std::string> parse_map_from_json(const std::string& s, const std::string& key){
+  std::map<std::string,std::string> out;
+  std::string needle="\""+key+"\"";
+  auto p=s.find(needle); if(p==std::string::npos) return out;
+  auto c=s.find(':',p); if(c==std::string::npos) return out;
+  size_t q=s.find('{',c); if(q==std::string::npos) return out;
+  size_t e=q; int depth=0; bool in_str=false; bool esc=false;
+  for(;e<s.size();++e){
+    char ch=s[e];
+    if(esc){ esc=false; continue; }
+    if(ch=='\\' && in_str){ esc=true; continue; }
+    if(ch=='"'){ in_str=!in_str; continue; }
+    if(in_str) continue;
+    if(ch=='{') depth++;
+    else if(ch=='}'){ depth--; if(depth==0) break; }
+  }
+  if(e>=s.size() || depth!=0) return out;
+  std::string obj=s.substr(q,e-q+1);
+  size_t i=1;
+  while(i<obj.size()){
+    while(i<obj.size() && (obj[i]==' '||obj[i]=='\t'||obj[i]=='\n'||obj[i]=='\r'||obj[i]==',')) i++;
+    if(i>=obj.size() || obj[i]=='}') break;
+    if(obj[i]!='"'){ i++; continue; }
+    size_t k1=i+1; size_t k2=k1;
+    while(k2<obj.size()){ if(obj[k2]=='\\'){ k2+=2; continue; } if(obj[k2]=='"') break; k2++; }
+    if(k2>=obj.size()) break;
+    std::string k=json_unescape(obj.substr(k1,k2-k1));
+    i=k2+1;
+    while(i<obj.size() && (obj[i]==' '||obj[i]=='\t'||obj[i]=='\n'||obj[i]=='\r'||obj[i]==':')) i++;
+    if(i>=obj.size() || obj[i]!='"'){ i++; continue; }
+    size_t v1=i+1; size_t v2=v1;
+    while(v2<obj.size()){ if(obj[v2]=='\\'){ v2+=2; continue; } if(obj[v2]=='"') break; v2++; }
+    if(v2>=obj.size()) break;
+    out[k]=json_unescape(obj.substr(v1,v2-v1));
+    i=v2+1;
+  }
+  return out;
+}
+static std::string map_to_json(const std::map<std::string,std::string>& m){
+  std::ostringstream ss; ss<<"{";
+  bool first=true;
+  for(auto& kv: m){
+    if(!first) ss<<",";
+    first=false;
+    ss<<"\""<<json_escape(kv.first)<<"\":\""<<json_escape(kv.second)<<"\"";
+  }
+  ss<<"}";
+  return ss.str();
+}
 std::string SubmissionJob::to_json() const {
   std::ostringstream ss;
   ss<<"{\"job_id\":\""<<json_escape(job_id)<<"\",\"exam_id\":"<<exam_id
     <<",\"student_name\":\""<<json_escape(student_name)<<"\",\"exam_number\":\""<<json_escape(exam_number)
     <<"\",\"student_class\":\""<<json_escape(student_class)<<"\",\"mac_address\":\""<<json_escape(mac_address)
-    <<"\",\"retries\":"<<retries<<",\"enqueued_at\":\""<<json_escape(enqueued_at)<<"\"}";
+    <<"\",\"retries\":"<<retries<<",\"enqueued_at\":\""<<json_escape(enqueued_at)<<"\""
+    <<",\"answers\":"<<map_to_json(answers)
+    <<",\"identity_data\":"<<map_to_json(identity_data)
+    <<"}";
   return ss.str();
 }
 
@@ -111,6 +164,8 @@ std::optional<SubmissionJob> SubmissionJob::from_json(const std::string& s){
   try{j.exam_id=std::stoi(extract("exam_id"));}catch(...){}
   j.student_name=extract("student_name");
   j.mac_address=extract("mac_address");
+  j.answers=parse_map_from_json(s,"answers");
+  j.identity_data=parse_map_from_json(s,"identity_data");
   return j;
 }
 

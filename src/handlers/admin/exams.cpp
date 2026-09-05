@@ -7,6 +7,7 @@
 #include "store/exam_store.hpp"
 #include "services/examtoken/examtoken.hpp"
 #include <chrono>
+#include <cstdio>
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
@@ -408,8 +409,16 @@ Response create_exam(const Request& req){
       } else {
         r2::R2Client client{rc};
         if(!client.upload(key, file_data)){
-          exams().unclaim_token(token); // Bug 7: lepaskan token yang sudah di-claim
-          Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return release_and_return(r);
+          // Fail-closed DEFAULT: PDF gagal diupload → create BATAL (502).
+          // Ujian tanpa file = data rusak yang tidak terlihat oleh admin.
+          // EXAMVAN_R2_STRICT=0 adalah opt-out eksplisit (dev) agar lanjut.
+          const char* strict=getenv("EXAMVAN_R2_STRICT");
+          bool non_strict = strict && std::string(strict)=="0";
+          if(!non_strict){
+            exams().unclaim_token(token); // Bug 7: lepaskan token yang sudah di-claim
+            Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return release_and_return(r);
+          }
+          fprintf(stderr,"[r2] upload failed key=%s size=%zu, continuing (EXAMVAN_R2_STRICT=0)\n",key.c_str(),file_data.size());
         }
       }
     }
@@ -507,6 +516,53 @@ static std::optional<int> json_int_field(const std::string& body, const std::str
   if(s==std::string::npos) return std::nullopt;
   try { size_t n=0; int value=std::stoi(body.substr(s),&n); (void)n; return value; }
   catch(...) { return std::nullopt; }
+}
+
+// Ambil nilai JSON mentah (string ber-quote / angka / {objek} / [array]) untuk sebuah key.
+static std::string json_raw_value(const std::string& body, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t n=body.size();
+  bool in_str=false, esc=false;
+  for(size_t i=0;i<n;){
+    if(!in_str && !esc && i+needle.size()<=n && body.compare(i,needle.size(),needle)==0){
+      size_t colon=i+needle.size();
+      while(colon<n && (body[colon]==' '||body[colon]=='\t'||body[colon]=='\n'||body[colon]=='\r')) colon++;
+      if(colon<n && body[colon]==':'){
+        size_t v=colon+1;
+        while(v<n && (body[v]==' '||body[v]=='\t'||body[v]=='\n'||body[v]=='\r')) v++;
+        if(v>=n) return "";
+        if(body[v]=='"'){
+          size_t e=v+1; while(e<n){ if(body[e]=='\\'){e+=2;continue;} if(body[e]=='"') break; e++; }
+          if(e>=n) return "";
+          return body.substr(v,e-v+1);
+        }
+        if(body[v]=='{' || body[v]=='['){
+          char open=body[v], close=(open=='{')?'}':']';
+          int depth=0; size_t e=v;
+          bool is=false, es=false;
+          for(; e<n; ++e){
+            char c=body[e];
+            if(es){ es=false; continue; }
+            if(c=='\\' && is){ es=true; continue; }
+            if(c=='"'){ is=!is; continue; }
+            if(is) continue;
+            if(c==open) depth++;
+            else if(c==close){ depth--; if(depth==0) break; }
+          }
+          if(e>=n || depth!=0) return "";
+          return body.substr(v,e-v+1);
+        }
+        size_t e=v; while(e<n && body[e]!=',' && body[e]!='}' && body[e]!=']') e++;
+        return body.substr(v,e-v);
+      }
+    }
+    char c=body[i];
+    if(esc){ esc=false; }
+    else if(c=='\\' && in_str){ esc=true; }
+    else if(c=='"'){ in_str=!in_str; }
+    i++;
+  }
+  return "";
 }
 
 Response update_exam(const Request& req){
@@ -699,6 +755,25 @@ Response delete_exam(const Request& req){
   if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
   int id=0;
   try{ id=std::stoi(id_str); }catch(...){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid exam id\"}"); return r; }
+  auto exam=exams().get_by_id(id);
+  if(!exam){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  // K3: hapus object PDF di R2 juga — jangan tinggalkan orphan (frontend
+  // menjanjikan "File PDF juga akan dihapus permanen").
+  auto cfg_r2=Config::load();
+  r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
+  std::string key=r2::object_key_for_exam(id, exam->file_path);
+  if(g_upload_mock){
+    g_upload_mock(key, ""); // data kosong = penanda penghapusan (test hook)
+  } else if(rc.enabled()){
+    r2::R2Client client{rc};
+    if(!client.remove(key)){
+      utils::log_error("exam_delete_r2_failed","id="+id_str+" key="+key);
+    }
+  } else {
+    // Go parity: tanpa R2, PDF tidak bisa dibersihkan → tolak delete agar
+    // tidak ada baris DB tanpa object R2. Frontend menampilkan warning.
+    Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
+  }
   if(!exams().remove(id)){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
   utils::log_info("exam_deleted","id="+id_str);
 #ifdef HAS_PROTOBUF
@@ -716,5 +791,70 @@ Response export_xlsx(const Request&){
   // Bug D: export_xlsx belum diimplementasi — jangan balas 200 dengan
   // konten XLSX palsu (user mendapat file corrupt). Jelas 501 + pesan.
   Response r; r.status=501; r.json(501,"{\"error\":\"XLSX export not implemented\",\"error_code\":\"NOT_IMPLEMENTED\"}"); return r;
+}
+Response get_exam_questions(const Request& req){
+  auto id_str=get_exam_id(req);
+  if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
+  int id=0;
+  try{ id=std::stoi(id_str); }catch(...){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid exam id\"}"); return r; }
+  auto exam=exams().get_by_id(id);
+  if(!exam){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  // questions/identity_fields tersimpan sebagai JSON mentah (TEXT); [] bila kosong.
+  std::string questions = exam->questions_json.has_value() && !exam->questions_json->empty()
+    ? *exam->questions_json : "[]";
+  std::string identity = exam->identity_fields.has_value() && !exam->identity_fields->empty()
+    ? *exam->identity_fields : "[]";
+  std::string json="{\"success\":true,\"id\":"+std::to_string(id)
+    +",\"token\":\""+json_escape(exam->token)+"\""
+    +",\"security_level\":\""+json_escape(exam->security_level)+"\""
+    +",\"strict_mode\":"+(exam->strict_mode?"true":"false")
+    +",\"public_results\":"+std::to_string(exam->public_results)
+    +",\"show_answers\":"+std::to_string(exam->show_answers)
+    +",\"panel_color\":"+(exam->panel_color?("\""+json_escape(*exam->panel_color)+"\""):"null")
+    +",\"start_time\":"+(exam->start_time?("\""+json_escape(*exam->start_time)+"\""):"null")
+    +",\"end_time\":"+(exam->end_time?("\""+json_escape(*exam->end_time)+"\""):"null")
+    +",\"congrats_message\":"+(exam->congrats_message?("\""+json_escape(*exam->congrats_message)+"\""):"null")
+    +",\"questions\":"+questions
+    +",\"identity_fields\":"+identity
+    +",\"assigned_pengawas\":[],\"available_pengawas\":[]}";
+  Response r; r.json(200, json); return r;
+}
+Response save_exam_questions(const Request& req){
+  auto id_str=get_exam_id(req);
+  if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
+  int id=0;
+  try{ id=std::stoi(id_str); }catch(...){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid exam id\"}"); return r; }
+  if(!exams().get_by_id(id)){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  std::string questions=json_raw_value(req.body,"questions");
+  std::string identity=json_raw_value(req.body,"identity_fields");
+  std::string sec=json_string_field(req.body,"security_level");
+  std::string color=json_string_field(req.body,"panel_color");
+  std::string st=json_string_field(req.body,"start_time");
+  std::string et=json_string_field(req.body,"end_time");
+  std::string congrats=json_string_field(req.body,"congrats_message");
+  auto strict=json_int_field(req.body,"strict_mode");
+  // Validasi: questions/identity_fields wajib array bila dikirim (bukan string).
+  if(!questions.empty() && questions.front()!='['){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"questions must be an array\"}"); return r;
+  }
+  if(!identity.empty() && identity.front()!='['){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"identity_fields must be an array\"}"); return r;
+  }
+  if(!sec.empty() && sec!="low" && sec!="medium" && sec!="high"){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"invalid security_level\"}"); return r;
+  }
+  bool updated=exams().update(id,[&](models::Exam& e){
+    if(!questions.empty()) e.questions_json=questions;
+    if(!identity.empty()) e.identity_fields=identity;
+    if(!sec.empty()) e.security_level=sec;
+    if(strict.has_value()) e.strict_mode=*strict;
+    if(!color.empty()) e.panel_color=color; else e.panel_color.reset();
+    if(!st.empty()) e.start_time=st; else e.start_time.reset();
+    if(!et.empty()) e.end_time=et; else e.end_time.reset();
+    if(!congrats.empty()) e.congrats_message=congrats; else e.congrats_message.reset();
+  });
+  if(!updated){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  utils::log_info("exam_questions_saved","id="+id_str);
+  Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Konfigurasi soal berhasil disimpan\"}"); return r;
 }
 } // namespace examvan::handlers::admin
