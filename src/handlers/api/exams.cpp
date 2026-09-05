@@ -269,12 +269,20 @@ Response list_exams(const Request& req){
   for(int i=begin;i<end;++i){
     if(i>begin) data+=",";
     const auto& e=exams[i];
+    // C1: jangan bocorkan token/active_token/file_path ke publik — token
+    // adalah kunci akses ujian. Paritas Go ListExams: hanya id/name/status/
+    // size_mb/start_time/end_time/created_at. (start_time/end_time sengaja
+    // dilewati di sini — schema C++ menyimpannya sebagai optional string;
+    // size_mb ditambahkan utk model Android.)
+    std::string size_mb;
+    {
+      char buf[32]; snprintf(buf,sizeof(buf),"%.2f", double(e.size_bytes)/(1024.0*1024.0));
+      size_mb=buf;
+    }
     data+="{\"id\":"+std::to_string(e.id)+
       ",\"name\":\""+json_escape(e.name)+"\""+
-      ",\"token\":\""+json_escape(e.token)+"\""+
-      ",\"active_token\":\""+json_escape(e.active_token.empty()?e.token:e.active_token)+"\""+
-      ",\"file_path\":\""+json_escape(e.file_path)+"\""+
       ",\"status\":\""+json_escape(e.status)+"\""+
+      ",\"size_mb\":"+size_mb+
       ",\"created_at\":\""+json_escape(e.created_at)+"\"}";
   }
   data+="]";
