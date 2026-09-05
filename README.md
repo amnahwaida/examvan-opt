@@ -331,6 +331,7 @@ Syarat aman: PG/Redis/R2 `single source`, skema tidak berubah, cookie dual-key v
 | `migrasi-cpp/03-peta-modul-dan-kontrak-api.md` | endpoint/WS/sesi beku (7.1 client non-browser) |
 | `migrasi-cpp/04-strategi-pengujian.md` | 3 lapis + TEST-FIRST |
 | `migrasi-cpp/05-rollback-dan-cutover.md` | dual-run, kriteria, prosedur mundur |
+| `docs/review-temuan-2026-09-06.md` | temuan review menyeluruh pass 14 (paritas Go API siswa/admin, CSRF, R2 key, uWS 413) |
 
 ---
 
