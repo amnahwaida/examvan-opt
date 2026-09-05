@@ -115,15 +115,12 @@ TEST(ProtobufHandlers, DashboardStats_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, ListUsers_ValidProtobufResponse) {
+  // M1: stub protobuf dihapus — klien Accept:x-protobuf mendapat JSON nyata
+  // (konten benar; bukan daftar kosong palsu).
   auto req = pb_accept();
   auto res = handlers::admin::list_users(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::UserList pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid UserList protobuf";
-  EXPECT_TRUE(pb.success());
-  EXPECT_GE(pb.total(), 0);
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos) << res.body;
 }
 
 TEST(ProtobufHandlers, ListUsers_JsonStillWorks) {
@@ -239,14 +236,11 @@ TEST(ProtobufHandlers, ExportXlsx_NoProtobufNeeded) {
 // ======================================================================
 
 TEST(ProtobufHandlers, ListVouchers_ValidProtobufResponse) {
+  // M1: stub protobuf dihapus — JSON nyata untuk Accept:x-protobuf.
   auto req = pb_accept();
   auto res = handlers::admin::list_vouchers(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::VoucherList pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid VoucherList protobuf";
-  EXPECT_TRUE(pb.success());
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos) << res.body;
 }
 
 TEST(ProtobufHandlers, ListVouchers_JsonStillWorks) {
@@ -325,15 +319,11 @@ TEST(ProtobufHandlers, UpdateSettings_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, PengawasExams_ValidProtobufResponse) {
+  // M1: stub protobuf dihapus — JSON nyata untuk Accept:x-protobuf.
   auto req = pb_accept();
   auto res = handlers::admin::pengawas_exams(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::PengawasExamList pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid PengawasExamList protobuf";
-  EXPECT_TRUE(pb.success());
-  EXPECT_TRUE(pb.is_privileged());
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos) << res.body;
 }
 
 TEST(ProtobufHandlers, PengawasExams_JsonStillWorks) {
@@ -344,14 +334,11 @@ TEST(ProtobufHandlers, PengawasExams_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, PengawasSubmissions_ValidProtobufResponse) {
-  auto req = pb_accept();
+  // M1: stub protobuf dihapus — JSON nyata (butuh exam_id, tanpa DB → kosong).
+  auto req = pb_accept(); req.params["exam_id"]="1";
   auto res = handlers::admin::pengawas_submissions(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::PengawasSubmissionList pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid PengawasSubmissionList protobuf";
-  EXPECT_TRUE(pb.success());
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos) << res.body;
 }
 
 TEST(ProtobufHandlers, PengawasSubmissions_JsonStillWorks) {
@@ -362,15 +349,11 @@ TEST(ProtobufHandlers, PengawasSubmissions_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, PendingApprovals_ValidProtobufResponse) {
-  auto req = pb_accept();
+  // M1: stub protobuf dihapus — JSON nyata.
+  auto req = pb_accept(); req.params["exam_id"]="1";
   auto res = handlers::admin::pending_approvals(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::ApprovalList pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid ApprovalList protobuf";
-  EXPECT_TRUE(pb.success());
-  EXPECT_GE(pb.total(), 0);
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos) << res.body;
 }
 
 TEST(ProtobufHandlers, PendingApprovals_JsonStillWorks) {
@@ -406,15 +389,11 @@ TEST(ProtobufHandlers, SetAutoApprove_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, ListSubmissions_ValidProtobufResponse) {
+  // M1: stub protobuf dihapus — JSON nyata (tanpa DB → kosong).
   auto req = pb_accept();
   auto res = handlers::admin::list_submissions(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::SubmissionList pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid SubmissionList protobuf";
-  EXPECT_TRUE(pb.success());
-  EXPECT_GE(pb.total(), 0);
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos) << res.body;
 }
 
 TEST(ProtobufHandlers, ListSubmissions_JsonStillWorks) {
@@ -425,14 +404,11 @@ TEST(ProtobufHandlers, ListSubmissions_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, SubmissionDetail_ValidProtobufResponse) {
-  auto req = pb_accept();
+  // M1: stub protobuf dihapus — JSON nyata (tanpa DB → jujur 404).
+  auto req = pb_accept(); req.params["id"]="1";
   auto res = handlers::admin::submission_detail(req);
-  EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::SubmissionDetail pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid SubmissionDetail protobuf";
-  EXPECT_TRUE(pb.success());
+  EXPECT_TRUE(res.status==200 || res.status==404) << res.body;
+  if(res.status==200){ EXPECT_NE(res.body.find("\"success\":true"), std::string::npos); }
 }
 
 TEST(ProtobufHandlers, SubmissionDetail_JsonStillWorks) {
@@ -440,20 +416,15 @@ TEST(ProtobufHandlers, SubmissionDetail_JsonStillWorks) {
   auto res = handlers::admin::submission_detail(req);
   // tanpa DB → jujur 404; dengan PG mengembalikan detail
   EXPECT_TRUE(res.status==200 || res.status==404);
-  if(res.status==200) EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
+  if(res.status==200){ EXPECT_NE(res.body.find("\"success\":true"), std::string::npos); }
 }
 
 TEST(ProtobufHandlers, QueueStatus_ValidProtobufResponse) {
+  // M1: stub protobuf dihapus — JSON nyata untuk Accept:x-protobuf.
   auto req = pb_accept();
   auto res = handlers::admin::queue_status(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::QueueStatusResponse pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid QueueStatusResponse protobuf";
-  EXPECT_TRUE(pb.success());
-  EXPECT_EQ(pb.pending(), 0);
-  EXPECT_EQ(pb.failed(), 0);
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos) << res.body;
 }
 
 TEST(ProtobufHandlers, QueueStatus_JsonStillWorks) {

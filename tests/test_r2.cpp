@@ -5,9 +5,14 @@
 using namespace examvan;
 
 TEST(R2, PresignEnabled) {
-  r2::R2Config c{"k","s","https://ep","b"};
-  EXPECT_TRUE(c.enabled());
+  // M10: fail-closed — endpoint non-R2 tidak boleh menghasilkan URL.
+  r2::R2Config bad{"k","s","https://ep","b"};
+  EXPECT_TRUE(bad.enabled());
+  EXPECT_EQ(r2::presign_url(bad,"key.pdf"), "") << "endpoint non-R2 harus ditolak";
+  r2::R2Config c{"k","s","https://ep.r2.cloudflarestorage.com","b"};
   EXPECT_NE(r2::presign_url(c,"key.pdf").find("b/key.pdf"), std::string::npos);
+  // Expiry tak wajar → di-clamp ke 3600, bukan dipakai mentah.
+  EXPECT_NE(r2::presign_url(c,"key.pdf",-5).find("X-Amz-Expires=3600"), std::string::npos);
   r2::R2Config c2{"","","",""}; EXPECT_FALSE(c2.enabled());
 }
 

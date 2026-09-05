@@ -120,9 +120,10 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
   char tmp[4096];
   auto flush_queue=[&](){
     while (!client->send_queue.empty()) {
-      std::string msg;
-      { std::lock_guard<std::mutex> g(client->mu); if (client->send_queue.empty()) break; msg = client->send_queue.front(); client->send_queue.pop(); }
-      std::string frame; frame.push_back(char(0x81));
+      std::string msg; bool binary=false;
+      { std::lock_guard<std::mutex> g(client->mu); if (client->send_queue.empty()) break; msg = client->send_queue.front().first; binary = client->send_queue.front().second; client->send_queue.pop(); }
+      // 0x81 = TEXT, 0x82 = BINARY (balasan protobuf harus BINARY, M8).
+      std::string frame; frame.push_back(char(binary ? 0x82 : 0x81));
       if (msg.size() < 126) frame.push_back(char(msg.size()));
       else if (msg.size() < 65536) { frame.push_back(char(126)); frame.push_back(char(msg.size() >> 8)); frame.push_back(char(msg.size() & 0xFF)); }
       else { uint64_t l=msg.size(); frame.push_back(char(127)); for(int i=7;i>=0;--i) frame.push_back(char((l>>(i*8))&0xFF)); }
@@ -331,7 +332,6 @@ static void handle_client(int cfd, examvan::Router* router, const examvan::Confi
 #ifdef HAS_UWEBSOCKETS
 static std::unique_ptr<uWS::App> g_app = nullptr;
 static std::thread g_uWS_thread;
-static thread_local std::string g_uWS_body;
 #endif
 
 bool Server::listen(const ServerOpts& opts) {
@@ -398,24 +398,39 @@ bool Server::listen(const ServerOpts& opts) {
       std::string xrealip(std::string_view(req->getHeader("x-real-ip")));
       std::string xuser(std::string_view(req->getHeader("x-user")));
       std::string xvers(std::string_view(req->getHeader("x-version")));
-      res->onAborted([res](){
-        g_uWS_body.clear();
+      // State per-request (H1). Body TIDAK boleh jadi variabel global bersama:
+      // uWS v20 tetap mengantar onData setelah res->end() (HttpContext memanggil
+      // inStream selama pointer-nya terpasang, markDone tidak men-null-nya),
+      // jadi tanpa flag "responded" kode 413 bisa mengeksekusi end() dua kali,
+      // dan tanpa buffer per-request sisa body bocor ke request berikutnya pada
+      // koneksi keep-alive yang sama.
+      auto st = std::make_shared<struct { std::string body; bool responded=false; bool aborted=false; }>();
+      res->onAborted([res, st](){
+        st->aborted = true;
+        st->responded = true;
+        st->body.clear();
+        if(res->hasResponded()) return;
         res->writeStatus("500");
         res->end();
       });
-      res->onData([router_ptr, res, method, path, cookie, xver, origin, xcsrf, accept, xreq, ctype, idem, xexam, xff, xrealip, xuser, xvers](std::string_view chunk, bool last){
-        g_uWS_body.append(chunk);
+      res->onData([router_ptr, res, st, method, path, cookie, xver, origin, xcsrf, accept, xreq, ctype, idem, xexam, xff, xrealip, xuser, xvers](std::string_view chunk, bool last){
+        // Request sudah dijawab (413/abort) atau koneksi batal → sisa chunk yang
+        // masih di-buffer uWS untuk request INI harus diabaikan, bukan ditambah.
+        if(st->responded || st->aborted) return;
+        st->body.append(chunk.data(), chunk.size());
         // Batas body 5MB (sama dgn jalur posix & admin_api). Tanpa ini route
         // public (/api/exams/:id/submit dll) menerima body tak terbatas di
-        // produksi (uWS) → DoS memori via g_uWS_body.
-        if(g_uWS_body.size()>5*1024*1024){
-          g_uWS_body.clear();
+        // produksi (uWS) → DoS memori. Setelah 413, koneksi ditutup supaya sisa
+        // body request tidak membocori request keep-alive berikutnya.
+        if(st->body.size()>5*1024*1024){
+          st->responded = true;
           res->writeStatus("413");
-          res->end("payload too large");
+          res->end("payload too large", true /* closeConnection */);
           return;
         }
         if(!last) return;
-        examvan::Request r; r.method=method; r.path=path; r.body=g_uWS_body;
+        st->responded = true;
+        examvan::Request r; r.method=method; r.path=path; r.body=st->body;
         if(!cookie.empty()) r.headers["Cookie"]=cookie;
         if(!xver.empty()) r.headers["X-App-Version"]=xver;
         if(!origin.empty()) r.headers["Origin"]=origin;
@@ -429,7 +444,7 @@ bool Server::listen(const ServerOpts& opts) {
         if(!xrealip.empty()) r.headers["X-Real-IP"]=xrealip;
         if(!xuser.empty()) r.headers["X-User"]=xuser;
         if(!xvers.empty()) r.headers["X-Version"]=xvers;
-        g_uWS_body.clear();
+        st->body.clear();
         auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
         if(resp.status==0) resp.status=404;
         res->writeStatus(std::to_string(resp.status));
@@ -469,9 +484,10 @@ bool Server::listen(const ServerOpts& opts) {
         if(!c) return;
         hub_ptr->handle_message(c, std::string(msg));
         while(!c->send_queue.empty()){
-          std::string m;
-          { std::lock_guard<std::mutex> g(c->mu); if(c->send_queue.empty()) break; m=c->send_queue.front(); c->send_queue.pop(); }
-          ws->send(m, uWS::OpCode::TEXT);
+          std::string m; bool binary=false;
+          { std::lock_guard<std::mutex> g(c->mu); if(c->send_queue.empty()) break; m=c->send_queue.front().first; binary=c->send_queue.front().second; c->send_queue.pop(); }
+          // M8: balasan protobuf dikirim sebagai BINARY, socket.io JSON sebagai TEXT.
+          ws->send(m, binary ? uWS::OpCode::BINARY : uWS::OpCode::TEXT);
         }
       },
       .close = [hub_ptr](auto *ws, int, std::string_view){

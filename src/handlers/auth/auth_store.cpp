@@ -79,12 +79,13 @@ static bool mem_activate(const std::string& username){
   it->second.otp_expiry_epoch=0;
   return true;
 }
-static bool mem_bump_attempts(const std::string& username){
+// M6: kembalikan JUMLAH percobaan baru (bukan bool) supaya handler bisa
+// memutuskan "disable pada percobaan ke-N" secara atomik tanpa read-then-act.
+static int mem_bump_attempts(const std::string& username){
   std::lock_guard<std::mutex> g(g_mu);
   auto it=g_users.find(username);
-  if(it==g_users.end()) return false;
-  it->second.otp_attempts++;
-  return true;
+  if(it==g_users.end()) return -1;
+  return ++it->second.otp_attempts;
 }
 static bool mem_update_password(const std::string& username, const std::string& password_hash){
   std::lock_guard<std::mutex> g(g_mu);
@@ -137,7 +138,7 @@ bool update_user_otp(const std::string& username, const std::string& otp_code, l
   return mem_update_otp(username, otp_code, otp_expiry_epoch);
 }
 bool activate_registered_user(const std::string& username){ return mem_activate(username); }
-bool bump_otp_attempts(const std::string& username){ return mem_bump_attempts(username); }
+int bump_otp_attempts(const std::string& username){ return mem_bump_attempts(username); }
 bool update_user_password(const std::string& username, const std::string& password_hash){
   return mem_update_password(username, password_hash);
 }
@@ -328,24 +329,29 @@ bool activate_registered_user(const std::string& username){
   return false;
 }
 
-bool bump_otp_attempts(const std::string& username){
+int bump_otp_attempts(const std::string& username){
   RegisteredUser u;
   if(mem_find(username, u)) return mem_bump_attempts(username);
 #ifdef HAS_LIBPQ
   try{
     examvan::db::RealPool real;
-    if(!open_pool(real)) return false;
+    if(!open_pool(real)) return -1;
     auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
+    if(!c || PQstatus(c.get())!=CONNECTION_OK) return -1;
+    // M6: increment atomik + RETURNING — handler mendapat JUMLAH BARU, bukan
+    // bool, sehingga keputusan disable tidak bergantung pada baca yang basi.
     auto r=real.exec_params(c.get(),
-      "UPDATE admin_users SET otp_attempts = otp_attempts + 1 WHERE LOWER(username)=LOWER($1)",
+      "UPDATE admin_users SET otp_attempts = otp_attempts + 1 WHERE LOWER(username)=LOWER($1) RETURNING otp_attempts",
       {username});
-    bool ok=r && PQresultStatus(r.get())==PGRES_COMMAND_OK;
+    int n=-1;
+    if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0){
+      try{ n=std::stoi(PQgetvalue(r.get(),0,0)); }catch(...){ n=-1; }
+    }
     real.release(c.release());
-    return ok;
+    return n;
   }catch(...){}
 #endif
-  return false;
+  return -1;
 }
 
 bool update_user_password(const std::string& username, const std::string& password_hash){

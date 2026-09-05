@@ -86,18 +86,12 @@ Response pengawas_detail_page(const Request&){
 
 // ===== daftar ujian (pengawas) ==============================================
 Response pengawas_exams(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::PengawasExamList pb; pb.set_success(true); pb.set_is_privileged(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — list kosong padahal ada data. */
   auto q=helpers::parse_form(req.query);
   int page=1, per_page=10;
   try{ page=std::stoi(get_param(q,"page")); }catch(...){}
   try{ per_page=std::stoi(get_param(q,"per_page")); }catch(...){}
-  if(page<1) page=1;
+  if(page<1) page=1; else if(page>1000000) page=1000000;
   if(per_page<5) per_page=5; else if(per_page>50) per_page=50;
   std::string search=get_param(q,"search");
   int uid=session_admin_id_from(req);
@@ -151,7 +145,7 @@ Response pengawas_exams(const Request& req){
       " FROM exams e"+where+" ORDER BY e.id DESC"
       " LIMIT $"+std::to_string(params.size()+1)+" OFFSET $"+std::to_string(params.size()+2);
     params.push_back(std::to_string(per_page));
-    params.push_back(std::to_string((page-1)*per_page));
+    params.push_back(std::to_string(static_cast<int64_t>(page-1)*static_cast<int64_t>(per_page)));
     auto r=real.exec_params(c.get(),sql,params);
     if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
       int n=PQntuples(r.get());
@@ -215,13 +209,7 @@ Response pengawas_exams(const Request& req){
 
 // ===== submissions per exam =================================================
 Response pengawas_submissions(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::PengawasSubmissionList pb; pb.set_success(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus. */
   std::string exam_id;
   auto it=req.params.find("exam_id");
   if(it!=req.params.end() && !it->second.empty()) exam_id=it->second;
@@ -234,7 +222,7 @@ Response pengawas_submissions(const Request& req){
   int page=1, per_page=20;
   try{ page=std::stoi(get_param(q,"page")); }catch(...){}
   try{ per_page=std::stoi(get_param(q,"per_page")); }catch(...){}
-  if(page<1) page=1;
+  if(page<1) page=1; else if(page>1000000) page=1000000;
   if(per_page<1) per_page=20; else if(per_page>200) per_page=200;
 #ifdef HAS_LIBPQ
   std::string arr="[]", exam_name="", active_token="";
@@ -252,7 +240,7 @@ Response pengawas_submissions(const Request& req){
     std::string sql="SELECT s.id,s.student_name,s.exam_number,s.student_class,s.score,s.start_time,s.mac_address,s.created_at, COUNT(*) OVER() AS total"
       " FROM submissions s WHERE s.exam_id=$1 ORDER BY s.id DESC"
       " LIMIT $2 OFFSET $3";
-    auto r=real.exec_params(c.get(),sql,{exam_id,std::to_string(per_page),std::to_string((page-1)*per_page)});
+    auto r=real.exec_params(c.get(),sql,{exam_id,std::to_string(per_page),std::to_string(static_cast<int64_t>(page-1)*static_cast<int64_t>(per_page))});
     if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
       int n=PQntuples(r.get());
       int total=0; if(n>0) total=std::atoi(PQgetvalue(r.get(),0,8));
@@ -288,13 +276,7 @@ Response pengawas_submissions(const Request& req){
 
 // ===== approvals ============================================================
 Response pending_approvals(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::ApprovalList pb; pb.set_success(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus. */
   std::string exam_id;
   auto it=req.params.find("exam_id");
   if(it!=req.params.end() && !it->second.empty()) exam_id=it->second;
@@ -303,7 +285,7 @@ Response pending_approvals(const Request& req){
   int page=1, limit=100;
   try{ page=std::stoi(get_param(q,"page")); }catch(...){}
   try{ limit=std::stoi(get_param(q,"limit")); }catch(...){}
-  if(page<1) page=1;
+  if(page<1) page=1; else if(page>1000000) page=1000000;
   if(limit<1) limit=100; else if(limit>500) limit=500;
 #ifdef HAS_LIBPQ
   std::string arr="[]";
@@ -314,7 +296,7 @@ Response pending_approvals(const Request& req){
     if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
     auto r=real.exec_params(c.get(),
       "SELECT id,mac_address,student_name,exam_number,student_class,identity_data,status,created_at, COUNT(*) OVER() AS total FROM exam_approvals WHERE exam_id=$1 AND status='pending' ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-      {exam_id,std::to_string(limit),std::to_string((page-1)*limit)});
+      {exam_id,std::to_string(limit),std::to_string(static_cast<int64_t>(page-1)*static_cast<int64_t>(limit))});
     if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
       got=true;
       int n=PQntuples(r.get());
@@ -346,13 +328,8 @@ Response pending_approvals(const Request& req){
 }
 
 Response set_approval(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::SetApprovalResponse pb; pb.set_success(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — "success" TANPA mengubah approval adalah
+   * no-op berbahaya (pengawas percaya device disetujui). Eksekusi nyata. */
   std::string exam_id, mac;
   auto it=req.params.find("exam_id");
   if(it!=req.params.end() && !it->second.empty()) exam_id=it->second;
@@ -380,13 +357,7 @@ Response set_approval(const Request& req){
 }
 
 Response get_auto_approve(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::AutoApproveResponse pb; pb.set_success(true); pb.set_enabled(false);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — enabled=false palsu. */
   std::string exam_id;
   auto it=req.params.find("exam_id");
   if(it!=req.params.end() && !it->second.empty()) exam_id=it->second;
@@ -407,13 +378,7 @@ Response get_auto_approve(const Request& req){
 }
 
 Response set_auto_approve(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::SetAutoApproveResponse pb; pb.set_success(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — sukses palsu tanpa UPDATE. */
   std::string exam_id;
   auto it=req.params.find("exam_id");
   if(it!=req.params.end() && !it->second.empty()) exam_id=it->second;

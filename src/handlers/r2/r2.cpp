@@ -41,6 +41,11 @@ static std::string sha256_hex(const std::string& s){
 std::string presign_url(const R2Config& cfg, const std::string& key, int expires_seconds){
   if(!cfg.enabled()) return "";
   if(cfg.bucket.empty()) return "";
+  // M10: fail-closed sama seperti upload/verify/remove — endpoint non-R2
+  // (mis. salah konfigurasi) TIDAK boleh menghasilkan URL yang menunjuk host
+  // lain. Tanpa cek ini, presigned URL diam-diam mengarah ke host attacker.
+  if(cfg.endpoint.find("r2.cloudflarestorage.com")==std::string::npos) return "";
+  if(expires_seconds<=0 || expires_seconds>7*24*3600) expires_seconds=3600;
   std::time_t now=time(nullptr);
   char date_full[32];
   {

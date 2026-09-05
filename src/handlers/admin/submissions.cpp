@@ -81,18 +81,12 @@ Response submissions_page(const Request&){
 
 // ===== list ================================================================
 Response list_submissions(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::SubmissionList pb; pb.set_success(true); pb.set_total(0);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — list kosong padahal ada data. */
   auto q=helpers::parse_form(req.query);
   int page=1, per_page=20;
   try{ page=std::stoi(get_param(q,"page")); }catch(...){}
   try{ per_page=std::stoi(get_param(q,"per_page")); }catch(...){}
-  if(page<1) page=1;
+  if(page<1) page=1; else if(page>1000000) page=1000000;
   if(per_page<1) per_page=20; else if(per_page>200) per_page=200;
   std::string exam_id=get_param(q,"exam_id");
   std::string search=get_param(q,"search");
@@ -117,7 +111,7 @@ Response list_submissions(const Request& req){
       " FROM submissions s LEFT JOIN exams e ON e.id=s.exam_id"+where
       +" ORDER BY s.id DESC LIMIT $"+std::to_string(params.size()+1)+" OFFSET $"+std::to_string(params.size()+2);
     params.push_back(std::to_string(per_page));
-    params.push_back(std::to_string((page-1)*per_page));
+    params.push_back(std::to_string(static_cast<int64_t>(page-1)*static_cast<int64_t>(per_page)));
     auto r=real.exec_params(c.get(),sql,params);
     if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
       int n=PQntuples(r.get());
@@ -156,13 +150,7 @@ Response list_submissions(const Request& req){
 
 // ===== detail ==============================================================
 Response submission_detail(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::SubmissionDetail pb; pb.set_success(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — detail kosong padahal ada data. */
   std::string id_str;
   auto it=req.params.find("id");
   if(it!=req.params.end() && !it->second.empty()) id_str=it->second;
@@ -209,13 +197,7 @@ Response submission_detail(const Request& req){
 
 // ===== queue status =========================================================
 Response queue_status(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::QueueStatusResponse pb; pb.set_success(true); pb.set_pending(0); pb.set_failed(0);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — pending 0 padahal bisa ada antrean. */
   long long pending=0, failed=0;
 #ifdef HAS_HIREDIS
   auto cfg=Config::load();
@@ -234,13 +216,7 @@ Response queue_status(const Request& req){
 
 // ===== delete ===============================================================
 Response delete_submission(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::DeleteSubmissionResponse pb; pb.set_success(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — "success" tanpa DELETE adalah no-op. */
   std::string id_str;
   auto it=req.params.find("id");
   if(it!=req.params.end() && !it->second.empty()) id_str=it->second;

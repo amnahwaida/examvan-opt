@@ -45,8 +45,10 @@ bool update_user_otp(const std::string& username, const std::string& otp_code, l
 // UPDATE status aktif + bersihkan OTP (register/confirm sukses).
 bool activate_registered_user(const std::string& username);
 
-// UPDATE otp_attempts (+1) — salah tebak OTP.
-bool bump_otp_attempts(const std::string& username);
+// UPDATE otp_attempts (+1) — salah tebak OTP. Mengembalikan JUMLAH percobaan
+// BARU setelah increment (atomik; M6 — cegah race confirm/resend yang membaca
+// nilai lama). -1 bila user tidak ditemukan / gagal.
+int bump_otp_attempts(const std::string& username);
 
 // UPDATE password_hash + bersihkan OTP (reset sukses).
 bool update_user_password(const std::string& username, const std::string& password_hash);

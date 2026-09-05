@@ -64,6 +64,46 @@ static std::string json_string_field(const std::string& body, const std::string&
   return "";
 }
 
+#ifdef HAS_LIBPQ
+// M15: baca skalar JSON mentah — string ber-quote ATAU angka tanpa quote
+// ("max_exams": 5 → "5"). json_string_field di atas HANYA membaca ber-quote,
+// sehingga angka polos dari frontend dibaca "" → atoll("")=0 (limit ter-reset
+// diam-diam ke 0 tiap simpan paket).
+static std::string json_raw_scalar(const std::string& body, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t n=body.size();
+  bool in_str=false, esc=false;
+  for(size_t i=0;i<n;){
+    if(!in_str && !esc && i+needle.size()<=n && body.compare(i,needle.size(),needle)==0){
+      size_t colon=i+needle.size();
+      while(colon<n && (body[colon]==' '||body[colon]=='\t'||body[colon]=='\n'||body[colon]=='\r')) colon++;
+      if(colon<n && body[colon]==':'){
+        size_t v=colon+1;
+        while(v<n && (body[v]==' '||body[v]=='\t'||body[v]=='\n'||body[v]=='\r')) v++;
+        if(v>=n) return "";
+        if(body[v]=='"'){
+          size_t e=v+1; while(e<n){ if(body[e]=='\\'){ e+=2; continue; } if(body[e]=='"') break; e++; }
+          if(e>=n) return "";
+          return body.substr(v+1,e-v-1);
+        }
+        size_t e=v; while(e<n && body[e]!=',' && body[e]!='}' && body[e]!=']') e++;
+        std::string s=body.substr(v,e-v);
+        s.erase(0,s.find_first_not_of(" \t\r\n"));
+        size_t t=s.find_last_not_of(" \t\r\n");
+        if(t!=std::string::npos) s.erase(t+1);
+        return s;
+      }
+    }
+    char c=body[i];
+    if(esc) esc=false;
+    else if(c=='\\' && in_str) esc=true;
+    else if(c=='"') in_str=!in_str;
+    i++;
+  }
+  return "";
+}
+#endif // HAS_LIBPQ — json_raw_scalar dipakai save_packages (HAS_LIBPQ)
+
 static int session_admin_id_from(const Request& req){
   for(auto& kv:req.headers){ std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch); if(k=="x-internal-admin-id"){ try{ return std::stoi(kv.second); }catch(...){} } }
   return 0;
@@ -105,18 +145,12 @@ static int duration_days(const std::string& dt){
 
 // ===== list ================================================================
 Response list_vouchers(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::VoucherList pb; pb.set_success(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — daftar kosong padahal ada data. */
   auto q=helpers::parse_form(req.query);
   int page=1, per_page=20;
   try{ page=std::stoi(get_param(q,"page")); }catch(...){}
   try{ per_page=std::stoi(get_param(q,"per_page")); }catch(...){}
-  if(page<1) page=1;
+  if(page<1) page=1; else if(page>1000000) page=1000000;
   if(per_page<1) per_page=20; else if(per_page>200) per_page=200;
   std::string search=get_param(q,"search");
   std::string pagination="{\"page\":"+std::to_string(page)+",\"per_page\":"+std::to_string(per_page)+",\"total\":0,\"total_pages\":0}";
@@ -136,7 +170,7 @@ Response list_vouchers(const Request& req){
       " FROM vouchers v LEFT JOIN admin_users u ON u.id=v.created_by"+where+" ORDER BY v.id DESC"
       " LIMIT $"+std::to_string(params.size()+1)+" OFFSET $"+std::to_string(params.size()+2);
     params.push_back(std::to_string(per_page));
-    params.push_back(std::to_string((page-1)*per_page));
+    params.push_back(std::to_string(static_cast<int64_t>(page-1)*static_cast<int64_t>(per_page)));
     auto r=real.exec_params(c.get(),sql,params);
     if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
       int n=PQntuples(r.get());
@@ -387,7 +421,7 @@ Response list_audit_logs(const Request& req){
   int page=1, per_page=20;
   try{ page=std::stoi(get_param(q,"page")); }catch(...){}
   try{ per_page=std::stoi(get_param(q,"per_page")); }catch(...){}
-  if(page<1) page=1;
+  if(page<1) page=1; else if(page>1000000) page=1000000;
   if(per_page<1) per_page=20; else if(per_page>200) per_page=200;
   std::string search=get_param(q,"search");
   std::string pagination="{\"page\":"+std::to_string(page)+",\"per_page\":"+std::to_string(per_page)+",\"total\":0,\"total_pages\":0}";
@@ -407,7 +441,7 @@ Response list_audit_logs(const Request& req){
       " FROM voucher_redemptions vr LEFT JOIN admin_users u ON u.id=vr.user_id LEFT JOIN vouchers v ON v.id=vr.voucher_id"+where
       +" ORDER BY vr.redeemed_at DESC LIMIT $"+std::to_string(params.size()+1)+" OFFSET $"+std::to_string(params.size()+2);
     params.push_back(std::to_string(per_page));
-    params.push_back(std::to_string((page-1)*per_page));
+    params.push_back(std::to_string(static_cast<int64_t>(page-1)*static_cast<int64_t>(per_page)));
     auto r=real.exec_params(c.get(),sql,params);
     if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
       int n=PQntuples(r.get());
@@ -503,11 +537,16 @@ Response redeem_voucher(const Request& req){
       if(role.find("superadmin")!=std::string::npos){ result="__super__"; real.release(c.release()); return; }
       if(std::string(PQgetvalue(us.get(),0,1))=="t"){ result="__operator_created__"; real.release(c.release()); return; }
     } else { result="notfound"; real.release(c.release()); return; }
-    // 2. cari voucher (case-insensitive + trim)
+    // 2. cari voucher (case-insensitive + trim). M13: bungkus dalam transaksi +
+    //    SELECT ... FOR UPDATE — dua redeem konkuren utk voucher max_usage=1
+    //    sama-sama membaca used_count=0 lalu sama-sama increment (double-spend)
+    //    tanpa lock baris. FOR UPDATE mengunci baris voucher sampai COMMIT.
+    real.exec_params(c.get(),"BEGIN",{});
     auto v=real.exec_params(c.get(),
-      "SELECT id,code,package,duration_type,max_usage,used_count,expires_at,is_active,is_custom,COALESCE(custom_label,''),COALESCE(custom_max_exams,0),COALESCE(custom_max_pdf_size,0),COALESCE(custom_max_concurrent_exams,0),COALESCE(custom_max_storage_size,0),COALESCE(custom_max_users,0),COALESCE(custom_role,'') FROM vouchers WHERE UPPER(TRIM(code))=UPPER(TRIM($1))",
+      "SELECT id,code,package,duration_type,max_usage,used_count,expires_at,is_active,is_custom,COALESCE(custom_label,''),COALESCE(custom_max_exams,0),COALESCE(custom_max_pdf_size,0),COALESCE(custom_max_concurrent_exams,0),COALESCE(custom_max_storage_size,0),COALESCE(custom_max_users,0),COALESCE(custom_role,'') FROM vouchers WHERE UPPER(TRIM(code))=UPPER(TRIM($1)) FOR UPDATE",
       {code});
-    if(!v || PQresultStatus(v.get())!=PGRES_TUPLES_OK || PQntuples(v.get())==0){ result="__invalid__"; real.release(c.release()); return; }
+    auto rollback_release=[&]{ real.exec_params(c.get(),"ROLLBACK",{}); real.release(c.release()); };
+    if(!v || PQresultStatus(v.get())!=PGRES_TUPLES_OK || PQntuples(v.get())==0){ result="__invalid__"; rollback_release(); return; }
     std::string vid=PQgetvalue(v.get(),0,0);
     std::string vcode=PQgetvalue(v.get(),0,1);
     std::string vpackage=PQgetvalue(v.get(),0,2);
@@ -527,7 +566,7 @@ Response redeem_voucher(const Request& req){
     // 3. validasi: aktif, belum kedaluwarsa, kuota belum penuh — semua pesan SAMA (anti-oracle)
     if(!voucher_usable(vis_active, vexp) || vused>=vmax){
       result="__invalid__";
-      real.release(c.release()); return;
+      rollback_release(); return;
     }
     // 4. entitlement: package → limit; custom → field kustom
     std::string pkg=vpackage;
@@ -546,24 +585,28 @@ Response redeem_voucher(const Request& req){
         max_storage=std::atoll(PQgetvalue(ps.get(),0,3));
         max_users=std::atoll(PQgetvalue(ps.get(),0,4));
         role=PQgetvalue(ps.get(),0,5);
-      } else { result="__invalid__"; real.release(c.release()); return; }
+      } else { result="__invalid__"; rollback_release(); return; }
     }
     int days=duration_days(vdur);
     long long remaining_seconds=(long long)days*86400;
-    // 5. used_count++ + INSERT redemption + UPDATE user — dalam satu koneksi
+    // 5. used_count++ + INSERT redemption + UPDATE user — satu transaksi
+    //    (M13): bila salah satu gagal, ROLLBACK — used_count tidak boleh
+    //    terbakar tanpa redemption.
     auto up=real.exec_params(c.get(),"UPDATE vouchers SET used_count=used_count+1 WHERE id=$1",{vid});
-    if(!up || PQresultStatus(up.get())!=PGRES_COMMAND_OK){ result="__fail__"; real.release(c.release()); return; }
+    if(!up || PQresultStatus(up.get())!=PGRES_COMMAND_OK){ result="__fail__"; rollback_release(); return; }
     auto ins=real.exec_params(c.get(),
       "INSERT INTO voucher_redemptions (voucher_id,user_id,is_active,package,max_exams,max_pdf_size,max_concurrent_exams,max_storage_size,max_users,role,remaining_seconds,activated_at) VALUES ($1,$2,true,$3,$4,$5,$6,$7,$8,$9,$10,now())",
       {vid,std::to_string(uid),pkg,std::to_string(max_exams),std::to_string(max_pdf),
        std::to_string(max_conc),std::to_string(max_storage),std::to_string(max_users),role,std::to_string(remaining_seconds)});
-    if(!ins || PQresultStatus(ins.get())!=PGRES_TUPLES_OK){ result="__fail__"; real.release(c.release()); return; }
+    if(!ins || PQresultStatus(ins.get())!=PGRES_TUPLES_OK){ result="__fail__"; rollback_release(); return; }
     auto usr=real.exec_params(c.get(),
       "UPDATE admin_users SET package=$2,max_exams=$3,max_pdf_size=$4,max_concurrent_exams=$5,max_storage_size=$6,package_role=$7,expires_at=now() + ($8 * interval '1 second') WHERE id=$1",
       {std::to_string(uid),pkg,std::to_string(max_exams),std::to_string(max_pdf),
        std::to_string(max_conc),std::to_string(max_storage),role,std::to_string(remaining_seconds)});
-    if(!usr || PQresultStatus(usr.get())!=PGRES_COMMAND_OK){ result="__fail__"; real.release(c.release()); return; }
+    if(!usr || PQresultStatus(usr.get())!=PGRES_COMMAND_OK){ result="__fail__"; rollback_release(); return; }
     utils::log_info("voucher_redeemed","user="+std::to_string(uid)+" code="+vcode);
+    auto cm=real.exec_params(c.get(),"COMMIT",{});
+    if(!cm || (PQresultStatus(cm.get())!=PGRES_COMMAND_OK && PQresultStatus(cm.get())!=PGRES_TUPLES_OK)){ result="__fail__"; real.release(c.release()); return; }
     result="ok";
     real.release(c.release());
   });
@@ -688,11 +731,13 @@ Response save_packages(const Request& req){
       std::string key=json_string_field(o,"key");
       if(key.empty()) continue;
       std::string label=json_string_field(o,"label");
-      long long max_exams=std::atoll(json_string_field(o,"max_exams").c_str());
-      double pdf_mb=std::atof(json_string_field(o,"max_pdf_size_mb").c_str());
-      long long max_conc=std::atoll(json_string_field(o,"max_concurrent_exams").c_str());
-      double storage_mb=std::atof(json_string_field(o,"max_storage_mb").c_str());
-      long long max_users=std::atoll(json_string_field(o,"max_users").c_str());
+      // M15: angka bisa dikirim tanpa quote — pakai json_raw_scalar (bukan
+      // json_string_field yang hanya membaca ber-quote → atoll("")=0).
+      long long max_exams=std::atoll(json_raw_scalar(o,"max_exams").c_str());
+      double pdf_mb=std::atof(json_raw_scalar(o,"max_pdf_size_mb").c_str());
+      long long max_conc=std::atoll(json_raw_scalar(o,"max_concurrent_exams").c_str());
+      double storage_mb=std::atof(json_raw_scalar(o,"max_storage_mb").c_str());
+      long long max_users=std::atoll(json_raw_scalar(o,"max_users").c_str());
       std::string role=json_string_field(o,"role");
       // role bisa array JSON ["operator"] — string_field gagal → ambil mentah
       if(role.empty()){ std::string needle2="\"role\"";

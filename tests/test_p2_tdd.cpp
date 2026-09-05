@@ -65,7 +65,7 @@ TEST(P2_Hub, HeartbeatSanitizesXSS) {
   hub.handle_message(c, marshal_socketio("heartbeat",payload));
   EXPECT_TRUE(other->send_queue.size()>0 || got_broadcast);
   if(other->send_queue.size()>0){
-    auto msg=other->send_queue.front();
+    auto msg=other->send_queue.front().first;
     EXPECT_EQ(msg.find("<script>"), std::string::npos) << msg;
   }
 }

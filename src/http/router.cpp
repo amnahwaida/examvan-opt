@@ -38,7 +38,10 @@ bool Router::match(const std::string& pat, const std::string& path, std::map<std
   split(pat,pp); split(dec_path,ap);
   if(pp.size()!=ap.size()) return false;
   for(size_t i=0;i<pp.size();++i){
-    if(!pp[i].empty() && pp[i][0]==':') out[pp[i].substr(1)]=helpers::url_decode(ap[i]);
+    // ap[i] berasal dari dec_path yang SUDAH di-url-decode (baris 32) —
+    // decode kedua di sini membuat %252F menjadi '/' dan mengubah makna param
+    // (M11). Parameter diambil apa adanya dari path yang sudah ter-decode.
+    if(!pp[i].empty() && pp[i][0]==':') out[pp[i].substr(1)]=ap[i];
     else if(pp[i]!=ap[i]) return false;
   }
   return true;

@@ -3,6 +3,7 @@
 #include "handlers/auth/auth_helpers.hpp"
 #include "handlers/auth/template_renderer.hpp"
 #include "session/csrf.hpp"
+#include "session/csrf.hpp"
 #include "session/cookie.hpp"
 #include "middleware/turnstile.hpp"
 #include "middleware/ratelimit.hpp"
@@ -320,9 +321,11 @@ Response register_confirm_handler(const Request& req, const Config& cfg){
     if(wants_json(req)){ Response r; r.json(400, "{\"error\":\"Kode OTP kedaluwarsa. Silakan daftar ulang.\"}"); return r; }
     Response r; r.status=302; r.headers["Location"]="/login"; return r;
   }
-  if(otp!=u.otp_code){
-    bump_otp_attempts(username);
-    if(u.otp_attempts+1>=kMaxOtpAttempts){
+  if(!verify_csrf(otp,u.otp_code)){ /* CT-compare (M4) */
+    // M6: putuskan disable dari JUMLAH BARU (atomik) — bukan u.otp_attempts
+    // yang dibaca sebelum increment (bisa basi di tengah race confirm/resend).
+    int attempts=bump_otp_attempts(username);
+    if(attempts>=kMaxOtpAttempts){
       // Nonaktifkan OTP (bukan hapus akun) — mencegah CSRF-DoS: penyerang
       // yang memaksa browser korban POST 5× OTP salah tidak boleh menghapus
       // akun; kode OTP dinonaktifkan sehingga percobaan berikutnya ditolak.

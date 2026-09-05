@@ -10,11 +10,11 @@
 
 namespace examvan {
 
-bool Client::try_send(const std::string& msg) {
+bool Client::try_send(const std::string& msg, bool binary) {
   std::lock_guard<std::mutex> g(mu);
   if (closed) return false;
   if (send_queue.size() >= max_queue) return false;
-  send_queue.push(msg);
+  send_queue.push({msg, binary});
   return true;
 }
 void Client::close() {
@@ -128,7 +128,7 @@ void Hub::handle_message(std::shared_ptr<Client> c, const std::string& raw){
         std::string payload = now_rfc3339();
         pong.set_payload(payload);
         std::string out; pong.SerializeToString(&out);
-        c->try_send(out);
+        c->try_send(out, true /* binary: balasan protobuf, M8 */);
         return;
       }
       if(env.event()=="heartbeat"){ handle_heartbeat(c, env.payload()); return; }

@@ -53,13 +53,26 @@ std::string request_csrf_token(const Request& req, const std::map<std::string,st
   std::string tok=get_hdr_ci(req,"X-CSRF-Token");
   if(tok.empty()) tok=get_hdr_ci(req,"X-XSRF-Token");
   if(tok.empty()){
-    auto f=form.find("csrf_token"); if(f==form.end()) f=form.find("_csrf"); if(f==form.end()) f=form.find("csrf");
-    if(f!=form.end()) tok=f->second;
+    // M5: pilih jalur ekstraksi SESUAI Content-Type — body JSON tidak boleh
+    // dibaca sebagai form (dan sebaliknya). Tanpa ini body ambigu bisa
+    // diekstrak lewat jalur yang dikontrol halaman attacker, melemahkan
+    // skema double-submit.
+    std::string ct=get_hdr_ci(req,"Content-Type");
+    bool is_json = ct.find("application/json")!=std::string::npos;
+    bool is_form = ct.find("application/x-www-form-urlencoded")!=std::string::npos ||
+                   ct.find("multipart/form-data")!=std::string::npos;
+    if(is_form || (!is_json && ct.empty())){
+      auto f=form.find("csrf_token"); if(f==form.end()) f=form.find("_csrf"); if(f==form.end()) f=form.find("csrf");
+      if(f!=form.end()) tok=f->second;
+    }
+    if(tok.empty() && is_json){
+      tok=json_field(req.body,"csrf_token");
+      if(tok.empty()) tok=json_field(req.body,"_csrf");
+      if(tok.empty()) tok=json_field(req.body,"csrf");
+      if(tok.empty()) tok=json_field(req.body,"x-csrf-token");
+    }
+    // Content-Type lain (mis. text/plain) tanpa header CSRF → tidak ada token.
   }
-  if(tok.empty()) tok=json_field(req.body,"csrf_token");
-  if(tok.empty()) tok=json_field(req.body,"_csrf");
-  if(tok.empty()) tok=json_field(req.body,"csrf");
-  if(tok.empty()) tok=json_field(req.body,"x-csrf-token");
   return tok;
 }
 

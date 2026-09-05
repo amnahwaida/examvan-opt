@@ -16,9 +16,10 @@ TEST(Handlers, NotFound) {
   EXPECT_EQ(r.dispatch(req).status,404);
 }
 TEST(Handlers, WSRoute) {
+  // M7: stub GET /ws/:room_id dihapus — jalur WS asli lewat server (uWS/posix)
+  // yang memeriksa Origin, bukan router HTTP. GET /ws/... biasa → 404.
   Config cfg; Router r; register_routes(r,cfg);
   Request req; req.method="GET"; req.path="/ws/123";
   auto res=r.dispatch(req);
-  EXPECT_EQ(res.status,101);
-  EXPECT_NE(res.body.find("123"), std::string::npos);
+  EXPECT_EQ(res.status,404);
 }

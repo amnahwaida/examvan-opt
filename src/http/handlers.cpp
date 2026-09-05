@@ -1,6 +1,5 @@
 #include "http/handlers.hpp"
 #include "session/cookie.hpp"
-#include "websocket/socketio.hpp"
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -77,14 +76,11 @@ void register_routes(Router& r, const Config& cfg){
     rr.body="<html><head><title>EXAMVAN "+cfg.version+"</title></head><body><nav><a href=\"/login\">Login</a> <a href=\"/hasil\">Cek Hasil</a> <a href=\"/download\">Download</a></nav><h1>EXAMVAN Platform Ujian</h1><p>Versi "+cfg.version+"</p></body></html>";
     return rr;
   });
-  r.add("GET","/ws/:room_id", [](const Request& req){
-    auto it=req.params.find("room_id");
-    std::string room=it!=req.params.end()?it->second:"";
-    // json_string: room dari path bisa mengandung " → escape (dulu injeksi
-    // JSON refleksi di body respons; jalur WS asli lewat g_app->ws, stub ini
-    // hanya untuk GET HTTP biasa).
-    Response res; res.json(101,"{\"upgrade\":\"websocket\",\"room\":"+examvan::json_string(room)+"}"); return res;
-  });
+  /* M7: stub GET /ws/:room_id DIHAPUS. Jalur WS asli hanya lewat g_app->ws
+   * (uWS) / handle_ws (posix) yang memeriksa Origin. Stub 101 JSON di sini
+   * membuat HTTP GET /ws/... biasa (dan upgrade yang gagal jatuh ke router)
+   * merefleksikan room tanpa cek Origin → oracle enumerasi. Tanpa stub, GET
+   * /ws/... → 404 biasa. */
 }
 
 }  // namespace examvan

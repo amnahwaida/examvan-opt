@@ -180,20 +180,14 @@ static const char* kUserCols=
 #endif
 
 Response list_users(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::UserList pb;
-    pb.set_success(true);
-    pb.set_total(0);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf di AWAL fungsi dihapus — balasan kosong "success" untuk
+   * klien Accept: x-protobuf membuat daftar tampak kosong padahal ada data.
+   * Klien protobuf mendapat JSON nyata (konten benar; content-type beda). */
   auto q=helpers::parse_form(req.query);
   int page=1, per_page=10;
   try{ page=std::stoi(get_param(q,"page")); }catch(...){}
   try{ per_page=std::stoi(get_param(q,"per_page")); }catch(...){}
-  if(page<1) page=1;
+  if(page<1) page=1; else if(page>1000000) page=1000000;
   if(per_page<5) per_page=5; else if(per_page>200) per_page=200;
   std::string search=get_param(q,"search");
   std::string role_filter=get_param(q,"role");
@@ -225,7 +219,7 @@ Response list_users(const Request& req){
     std::string sql="SELECT "+std::string(kUserCols)+", COUNT(*) OVER() AS total FROM admin_users u"+where+order
       +" LIMIT $"+std::to_string(params.size()+1)+" OFFSET $"+std::to_string(params.size()+2);
     params.push_back(std::to_string(per_page));
-    params.push_back(std::to_string((page-1)*per_page));
+    params.push_back(std::to_string(static_cast<int64_t>(page-1)*static_cast<int64_t>(per_page)));
     auto r=real.exec_params(c.get(),sql,params);
     if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
       int n=PQntuples(r.get());
@@ -286,15 +280,9 @@ static std::string body_field(const Request& req, const std::string& key){
 }
 
 Response create_user(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::CreateUserResponse pb;
-    pb.set_success(true);
-    pb.set_id(1);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf di awal dihapus — id palsu "1" tanpa INSERT membuat
+   * klien protobuf percaya user tersimpan padahal tidak. Lanjut ke logika
+   * nyata (respons JSON). */
   std::string username=body_field(req,"username");
   std::string password=body_field(req,"password");
   std::string role=body_field(req,"role"); if(role.empty()) role="guru";
@@ -393,13 +381,8 @@ static std::string path_after(const Request& req, const std::string& marker){
 }
 
 Response edit_user(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::EditUserResponse pb; pb.set_success(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — sukses palsu tanpa UPDATE. Lanjut ke
+   * logika nyata (respons JSON). */
   // id bisa dari params :id (PUT) atau path /users/:id/edit
   std::string id_str;
   auto it=req.params.find("id");
@@ -468,13 +451,8 @@ Response edit_user(const Request& req){
 }
 
 Response delete_user(const Request& req){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::DeleteUserResponse pb; pb.set_success(true);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
-#endif
+  /* M1: stub protobuf awal dihapus — "success" TANPA DELETE adalah no-op yang
+   * membahayakan (klien protobuf percaya user terhapus). Hapus selalu nyata. */
   std::string id_str;
   auto it=req.params.find("id");
   if(it!=req.params.end() && !it->second.empty()) id_str=it->second;

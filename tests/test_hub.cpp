@@ -21,7 +21,7 @@ TEST(Hub, BroadcastToRoom) {
   h.add_client(c);
   h.broadcast_to_room("5","student_update","{\"event\":\"heartbeat\"}");
   ASSERT_FALSE(c->send_queue.empty());
-  auto msg=c->send_queue.front();
+  auto msg=c->send_queue.front().first;
   auto p=parse_socketio(msg);
   ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->event,"student_update");
@@ -65,7 +65,7 @@ TEST(Hub, PingPong) {
   h.add_client(c);
   h.handle_message(c, marshal_socketio("ping","null"));
   ASSERT_FALSE(c->send_queue.empty());
-  auto p=parse_socketio(c->send_queue.front());
+  auto p=parse_socketio(c->send_queue.front().first);
   ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->event,"pong");
 }
@@ -96,6 +96,6 @@ TEST(Hub, SanitizedBroadcast) {
   h.add_client(other);
   h.handle_message(c, marshal_socketio("heartbeat","{\"mac_address\":\"aa\",\"student_name\":\"<b>evil</b>\"}"));
   ASSERT_FALSE(other->send_queue.empty());
-  auto msg=other->send_queue.front();
+  auto msg=other->send_queue.front().first;
   EXPECT_EQ(msg.find("<b>"), std::string::npos);
 }

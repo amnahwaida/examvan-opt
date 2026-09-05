@@ -210,9 +210,10 @@ Response reset_password_handler(const Request& req, const Config& cfg){
     Response r; r.status=400; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=rp.set_cookie;
     r.body=rp.body; return r;
   }
-  if(otp!=u.otp_code){
-    bump_otp_attempts(username);
-    if(u.otp_attempts+1>=kMaxOtpAttempts){
+  if(!verify_csrf(otp,u.otp_code)){ /* CT-compare (M4) */
+    // M6: keputusan disable dari jumlah BARU (atomik), bukan baca yang basi.
+    int attempts=bump_otp_attempts(username);
+    if(attempts>=kMaxOtpAttempts){
       update_user_otp(username, "", 0); // nonaktifkan OTP setelah 5x salah
       if(wants_json(req)){ Response r; r.json(400, "{\"error\":\"Terlalu banyak percobaan. Minta kode baru.\"}"); return r; }
       RenderedAuthPage rp=page_register_confirm_like("reset_password", username, "Terlalu banyak percobaan. Minta kode baru.", "");

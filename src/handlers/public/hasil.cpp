@@ -535,7 +535,7 @@ Response cek_hasil_api(const Request& req){
   int page=1, per_page=100;
   try{ page=std::stoi(getp("page")); }catch(...){}
   try{ per_page=std::stoi(getp("per_page")); }catch(...){}
-  if(page<1) page=1;
+  if(page<1) page=1; else if(page>1000000) page=1000000;
   if(per_page<1) per_page=1; else if(per_page>500) per_page=500;
   std::string search=getp("search");
 

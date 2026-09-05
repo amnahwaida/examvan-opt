@@ -217,6 +217,10 @@ Response login_handler(const Request& req, const Config& cfg){
   if(!next_val.empty()){
     std::string nx = helpers::url_decode(next_val);
     nx = helpers::url_decode(nx);
+    // H2: url_decode mengubah %0d/%0a menjadi CR/LF — tolak eksplisit supaya
+    // CRLF tidak lolos ke header Location (uWS writeHeader menulis apa adanya).
+    // Periksa nx yang SUDAH ter-decode (bukan string encode-nya).
+    if(nx.find('\r')!=std::string::npos || nx.find('\n')!=std::string::npos) nx.clear();
     if(!nx.empty() && nx[0]=='/' && (nx.size()==1 || nx[1]!='/') && nx.find('\\')==std::string::npos && nx.find("%2f")==std::string::npos && nx.find("%2F")==std::string::npos && nx.find("%5c")==std::string::npos && nx.find("%5C")==std::string::npos && nx.find("//")==std::string::npos && nx.find("..")==std::string::npos && nx.find(':')==std::string::npos) target=nx;
   }
   Response r; r.status=303; r.headers["Location"]=target; r.headers["Set-Cookie"]=cookie;

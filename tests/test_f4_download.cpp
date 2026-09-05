@@ -5,7 +5,7 @@ using namespace examvan::handlers::public_;
 using namespace examvan::r2;
 
 TEST(F4Download, Apk302Presign) {
-  R2Config cfg{"k","s","https://ep","b"};
+  R2Config cfg{"k","s","https://ep.r2.cloudflarestorage.com","b"};
   auto url=presign_url(cfg, object_key_for_app("2.7.2","student"), 3600);
   EXPECT_NE(url.find("b/apps/android/2.7.2"), std::string::npos);
   EXPECT_NE(url.find("X-Amz-Signature"), std::string::npos);

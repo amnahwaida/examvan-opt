@@ -16,10 +16,12 @@ struct Client {
   std::string room;
   bool privileged{false};
   bool closed{false};
-  std::queue<std::string> send_queue;
+  // Pasangan (pesan, is_binary): balasan protobuf (ping/pong, heartbeat)
+  // harus dikirim sebagai frame BINARY, socket.io JSON sebagai TEXT (M8).
+  std::queue<std::pair<std::string,bool>> send_queue;
   static constexpr size_t max_queue = 256;
   std::mutex mu;
-  bool try_send(const std::string& msg);
+  bool try_send(const std::string& msg, bool binary = false);
   void close();
 };
 

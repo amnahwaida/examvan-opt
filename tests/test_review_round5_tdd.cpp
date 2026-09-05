@@ -11,9 +11,11 @@ TEST(R5_Queue, BatchUsesRealPool){
   ASSERT_FALSE(c.empty());
   auto pos=c.find("void Worker::run_batch");
   ASSERT_NE(pos, std::string::npos);
-  std::string seg=c.substr(pos, 1200);
+  std::string seg=c.substr(pos, 2600);
   EXPECT_NE(seg.find("RealPool"), std::string::npos) << "run_batch should use RealPool for batch insert: " << seg;
   EXPECT_NE(seg.find("exec_params"), std::string::npos);
+  // M3: worker meng-upsert baris terakhir (bukan INSERT dobel) via advisory lock.
+  EXPECT_NE(seg.find("pg_advisory_xact_lock"), std::string::npos) << "run_batch should serialize per (exam,mac) upsert: " << seg;
 }
 TEST(R5_Cors, WiredInRouter){
   auto c=rf("src/http/router_full.cpp");

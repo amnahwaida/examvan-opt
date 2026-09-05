@@ -323,18 +323,36 @@ void Worker::run_batch(){
         for(auto &b: batch){
           auto& j=b.first;
           auto& score=b.second;
-          // Best-effort: gagal insert tidak mematikan worker (hasil exec_params
-          // sengaja diabaikan). Kolom = schema Go webui/internal/database/
-          // schema.sql: submissions(exam_id, student_name, exam_number,
-          // student_class, answers_json, score, start_time, mac_address,
-          // identity_data). TIDAK ada kolom job_id/status/submitted_at —
-          // INSERT lama pasti gagal (undefined column) di produksi.
+          // M3 (paritas Go upsertSubmissionRow): skema submissions TIDAK punya
+          // unique constraint, jadi INSERT ... ON CONFLICT DO NOTHING tidak
+          // pernah menahan apa pun → worker selalu INSERT baris baru → siswa
+          // yang heartbeat-join (placeholder) LALU submit punya 2 baris, dan
+          // retry submit membuat baris ketiga. Upsert: kunci advisory lock per
+          // (exam, device), UPDATE baris terakhir utk (exam, device,
+          // exam_number bila ada) — placeholder ATAU sudah-submit — baru INSERT
+          // bila tak ada baris yang cocok. Retry menimpa baris yang sama.
           std::string score_text = score.has_value() ? std::to_string(*score) : "";
           real.exec_params(c.get(),
-            "INSERT INTO submissions (exam_id, student_name, exam_number, student_class, answers_json, score, start_time, mac_address, identity_data)"
-            " VALUES ($1,$2,$3,$4,$5,NULLIF($6,'')::double precision,$7,$8,$9) ON CONFLICT DO NOTHING",
-            {std::to_string(j.exam_id), j.student_name, j.exam_number, j.student_class,
-             map_to_json(j.answers), score_text, j.start_time, j.mac_address, map_to_json(j.identity_data)});
+            "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
+            {"approval:"+std::to_string(j.exam_id)+":"+j.mac_address});
+          auto up=real.exec_params(c.get(),
+            "UPDATE submissions SET answers_json=$1, score=NULLIF($2,'')::double precision,"
+            " start_time=COALESCE(start_time,NULLIF($3,'')), student_name=$4, exam_number=$5,"
+            " student_class=$6, identity_data=$7"
+            " WHERE id=(SELECT id FROM submissions WHERE exam_id=$8 AND mac_address=$9"
+            "   AND ($10='' OR exam_number=$10) ORDER BY created_at DESC LIMIT 1)"
+            " RETURNING id",
+            {map_to_json(j.answers), score_text, j.start_time, j.student_name, j.exam_number,
+             j.student_class, map_to_json(j.identity_data), std::to_string(j.exam_id), j.mac_address,
+             j.exam_number});
+          bool updated=up && PQresultStatus(up.get())==PGRES_TUPLES_OK && PQntuples(up.get())>0;
+          if(!updated){
+            real.exec_params(c.get(),
+              "INSERT INTO submissions (exam_id, student_name, exam_number, student_class, answers_json, score, start_time, mac_address, identity_data)"
+              " VALUES ($1,$2,$3,$4,$5,NULLIF($6,'')::double precision,$7,$8,$9)",
+              {std::to_string(j.exam_id), j.student_name, j.exam_number, j.student_class,
+               map_to_json(j.answers), score_text, j.start_time, j.mac_address, map_to_json(j.identity_data)});
+          }
         }
       }
 #else
@@ -412,28 +430,47 @@ static int drain_heartbeat_batch(redisContext* ctx, db::RealPool& real, PGconn* 
   for(auto& p: payloads){
     auto hb=parse_heartbeat_payload(p);
     if(!hb) continue; // malformed → drop
+    // M2: SAVEPOINT per payload — payload well-formed dengan FK exam yang sudah
+    // dihapus membuat statement gagal → tanpa savepoint seluruh transaksi
+    // masuk status aborted, COMMIT gagal, dan SELURUH batch 500 di-requeue tiap
+    // 30 detik selamanya (poison-loop). Dengan savepoint, satu payload buruk
+    // di-rollback dan di-drop; batch lain tetap lanjut.
+    real.exec_params(conn,"SAVEPOINT hb_row",{});
+    bool row_ok=true;
     const std::string now_txt=helpers::format_iso_utc(std::chrono::system_clock::now());
-    real.exec_params(conn,
+    auto ins=real.exec_params(conn,
       "INSERT INTO student_access_logs (exam_id, student_identifier, student_name, exam_number, student_class, event, ip_address, device_info, created_at)"
       " VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
       {std::to_string(hb->exam_id), hb->mac_address, hb->student_name, hb->exam_number,
        hb->student_class, hb->event.empty()?"heartbeat":hb->event, hb->ip_address, hb->device_info,
        hb->last_seen.empty()?now_txt:hb->last_seen});
-    // Monitoring row (paritas Go): student harus muncul di "Monitoring Perangkat".
-    auto latest=real.exec_params(conn,
-      "SELECT answers_json FROM submissions WHERE exam_id=$1 AND mac_address=$2 ORDER BY created_at DESC LIMIT 1",
-      {std::to_string(hb->exam_id), hb->mac_address});
-    bool need_empty=true;
-    if(latest && PQresultStatus(latest.get())==PGRES_TUPLES_OK && PQntuples(latest.get())>0){
-      const std::string answers=PQgetisnull(latest.get(),0,0)? "": std::string(PQgetvalue(latest.get(),0,0));
-      if(answers.empty()) need_empty=false; // placeholder row sudah ada (belum submit)
+    if(!ins || (PQresultStatus(ins.get())!=PGRES_COMMAND_OK && PQresultStatus(ins.get())!=PGRES_TUPLES_OK)) row_ok=false;
+    if(row_ok){
+      // Monitoring row (paritas Go): student harus muncul di "Monitoring Perangkat".
+      auto latest=real.exec_params(conn,
+        "SELECT answers_json FROM submissions WHERE exam_id=$1 AND mac_address=$2 ORDER BY created_at DESC LIMIT 1",
+        {std::to_string(hb->exam_id), hb->mac_address});
+      bool need_empty=true;
+      if(latest && PQresultStatus(latest.get())==PGRES_TUPLES_OK && PQntuples(latest.get())>0){
+        const std::string answers=PQgetisnull(latest.get(),0,0)? "": std::string(PQgetvalue(latest.get(),0,0));
+        if(answers.empty()) need_empty=false; // placeholder row sudah ada (belum submit)
+      }
+      if(need_empty){
+        auto ph=real.exec_params(conn,
+          "INSERT INTO submissions (exam_id, student_name, exam_number, student_class, mac_address, start_time, created_at, identity_data)"
+          " VALUES ($1,$2,$3,$4,$5,$6,$7,'{}')",
+          {std::to_string(hb->exam_id), hb->student_name, hb->exam_number, hb->student_class,
+           hb->mac_address, hb->last_seen.empty()?now_txt:hb->last_seen, now_txt});
+        if(!ph || (PQresultStatus(ph.get())!=PGRES_COMMAND_OK && PQresultStatus(ph.get())!=PGRES_TUPLES_OK)) row_ok=false;
+      }
     }
-    if(need_empty){
-      real.exec_params(conn,
-        "INSERT INTO submissions (exam_id, student_name, exam_number, student_class, mac_address, start_time, created_at, identity_data)"
-        " VALUES ($1,$2,$3,$4,$5,$6,$7,'{}')",
-        {std::to_string(hb->exam_id), hb->student_name, hb->exam_number, hb->student_class,
-         hb->mac_address, hb->last_seen.empty()?now_txt:hb->last_seen, now_txt});
+    if(!row_ok){
+      // Rollback hanya baris ini (mis. FK exam hilang) → drop payload, batch
+      // lain tetap diproses. RELEASE setelah rollback membersihkan savepoint.
+      real.exec_params(conn,"ROLLBACK TO SAVEPOINT hb_row",{});
+      real.exec_params(conn,"RELEASE SAVEPOINT hb_row",{});
+    } else {
+      real.exec_params(conn,"RELEASE SAVEPOINT hb_row",{});
     }
   }
   auto commit=real.exec_params(conn,"COMMIT",{});
