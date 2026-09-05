@@ -80,7 +80,8 @@ std::string build_exam_table_html(const std::vector<models::Exam>& exams){
 } // namespace
 
 Response dashboard_page(const Request& req){
-  std::string html=render_admin_template("dashboard","2.7.2");
+  RenderedAdminPage rp=render_admin_page("dashboard","2.7.2");
+  std::string html=rp.html;
   if(!html.empty()){
     // Render daftar ujian LIVE dari in-memory store, ganti empty-state statis.
     // (Sebelumnya dashboard.rendered.html = snapshot statis dgn empty-state,
@@ -104,7 +105,10 @@ Response dashboard_page(const Request& req){
     }
     auto it=req.headers.find("X-User");
     if(it!=req.headers.end()) html+=html_escape(it->second);
-    Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.body=html; return r;
+    // C5: set cookie CSRF agar token meta cocok dengan cookie yang diverifikasi.
+    Response r; r.status=200; r.headers["Content-Type"]="text/html";
+    if(!rp.csrf_cookie.empty()) r.headers["Set-Cookie"]=rp.csrf_cookie;
+    r.body=html; return r;
   }
   // Fallback tetap menyediakan form upload dasar, bukan halaman kosong yang
   // membuat admin tidak bisa memakai alur create exam saat template hilang.

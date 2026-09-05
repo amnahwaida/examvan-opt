@@ -110,6 +110,28 @@ void register_full_routes(Router& r, const Config& cfg){
           Response rr; rr.status=403; rr.json(403,"{\"success\":false,\"message\":\"forbidden\"}"); return rr;
         }
       }
+      // C5: CSRF — mutasi (POST/PUT/DELETE/PATCH) admin wajib header
+      // X-CSRF-Token/X-XSRF-Token yang cocok dengan cookie csrf_token
+      // (double-submit, paritas Go CSRFRequired; frontend admin-core.js
+      // mengirim token dari <meta name=csrf-token>). GET/HEAD/OPTIONS bebas.
+      {
+        std::string m=req.method;
+        bool mutating = m=="POST" || m=="PUT" || m=="DELETE" || m=="PATCH";
+        if(mutating){
+          std::string cookie_hdr;
+          auto itc=req.headers.find("Cookie");
+          if(itc!=req.headers.end()) cookie_hdr=itc->second;
+          std::string session_csrf=extract_cookie(cookie_hdr,"csrf_token");
+          std::string tok;
+          for(auto& kv: req.headers){
+            std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch);
+            if(k=="x-csrf-token" || k=="x-xsrf-token"){ tok=kv.second; break; }
+          }
+          if(session_csrf.empty() || tok.empty() || !verify_csrf(session_csrf, tok)){
+            Response rr; rr.status=403; rr.json(403,"{\"success\":false,\"message\":\"CSRF token tidak valid. Silakan refresh halaman.\"}"); return rr;
+          }
+        }
+      }
       // C7: ownership scope "exam" — route per-exam (detail/toggle/delete/
       // questions/delegate/export) hanya untuk superadmin, PEMILIK
       // (created_by), atau user yang didelegasi (delegated_to). Tanpa ini guru

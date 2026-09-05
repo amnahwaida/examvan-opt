@@ -197,9 +197,12 @@ Response settings_page(const Request& req){
       +"}}";
     Response r; r.json(200,json); return r;
   }
-  std::string html=render_admin_template("settings","2.7.2");
-  if(!html.empty()){
-    Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.body=html; return r;
+  RenderedAdminPage rp=render_admin_page("settings","2.7.2");
+  if(!rp.html.empty()){
+    // C5: set cookie CSRF agar token meta cocok dengan cookie yang diverifikasi.
+    Response r; r.status=200; r.headers["Content-Type"]="text/html";
+    if(!rp.csrf_cookie.empty()) r.headers["Set-Cookie"]=rp.csrf_cookie;
+    r.body=rp.html; return r;
   }
   Response r; r.status=200; r.headers["Content-Type"]="text/html";
   r.body="<html><body><h1>Settings</h1></body></html>"; return r;

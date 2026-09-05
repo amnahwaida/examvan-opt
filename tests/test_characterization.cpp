@@ -168,6 +168,39 @@ TEST(Characterization, ExamOwnershipScopedToCreatorOrSuperadmin) {
   store::active_store()->clear_all();
 }
 
+TEST(Characterization, AdminMutationRequiresCsrfCookieMatch) {
+  /* C5: mutasi admin (POST/PUT/DELETE) wajib header X-CSRF-Token yang cocok
+   * dgn cookie csrf_token. Tanpa token / token beda → 403; token cocok → lolos
+   * gate CSRF (baru mungkin gagal di handler, bukan 403 CSRF). */
+  Config cfg; cfg.secret_key=std::string(32,'x');
+  Router r; register_full_routes(r,cfg);
+  // Siapkan session superadmin + exam miliknya utk target POST.
+  store::active_store()->clear_all();
+  examvan::models::Exam e; e.id=200; e.name="CSRF Target"; e.token="CSRFAB12";
+  e.status="inactive"; e.created_by=1;
+  store::active_store()->add(e);
+  std::string cookie=session_cookie_for(cfg, 1, "superadmin");
+  // POST tanpa X-CSRF-Token → 403 CSRF.
+  Request no_tok; no_tok.method="POST"; no_tok.path="/admin/api/exams/200/toggle";
+  no_tok.headers["Cookie"]=cookie; no_tok.headers["Accept"]="application/json";
+  auto r1=r.dispatch(no_tok);
+  EXPECT_EQ(r1.status,403) << "mutation without CSRF token must be 403: " << r1.body;
+  // POST dengan token tapi cookie csrf_token beda → 403.
+  Request bad_tok=no_tok;
+  bad_tok.headers["X-CSRF-Token"]="wrongtoken";
+  auto r2=r.dispatch(bad_tok);
+  EXPECT_EQ(r2.status,403) << "mutation with mismatched CSRF must be 403: " << r2.body;
+  // POST dengan cookie csrf_token + header cocok → lolos gate (bukan 403 CSRF).
+  // (Simulasikan cookie csrf_token yg juga di-set halaman: set cookie ganda.)
+  Request ok=no_tok;
+  std::string csrf="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+  ok.headers["Cookie"]=cookie+"; csrf_token="+csrf;
+  ok.headers["X-CSRF-Token"]=csrf;
+  auto r3=r.dispatch(ok);
+  EXPECT_NE(r3.status,403) << "mutation with matching CSRF must pass the gate: " << r3.body;
+  store::active_store()->clear_all();
+}
+
 TEST(Characterization, LoginRateLimitedPerIp) {
   /* POST /login di-rate-limit 10/mnt per-IP di lapisan C++ (bukan hanya
    * nginx). IP unik agar tidak mengganggu test lain (limiter statis). */
