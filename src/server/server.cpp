@@ -405,6 +405,15 @@ bool Server::listen(const ServerOpts& opts) {
       });
       res->onData([router_ptr, res, method, path, cookie, xver, origin, xcsrf, accept, xreq, ctype, idem, xexam, xff, xrealip, xuser, xvers](std::string_view chunk, bool last){
         g_uWS_body.append(chunk);
+        // Batas body 5MB (sama dgn jalur posix & admin_api). Tanpa ini route
+        // public (/api/exams/:id/submit dll) menerima body tak terbatas di
+        // produksi (uWS) → DoS memori via g_uWS_body.
+        if(g_uWS_body.size()>5*1024*1024){
+          g_uWS_body.clear();
+          res->writeStatus("413");
+          res->end("payload too large");
+          return;
+        }
         if(!last) return;
         examvan::Request r; r.method=method; r.path=path; r.body=g_uWS_body;
         if(!cookie.empty()) r.headers["Cookie"]=cookie;
