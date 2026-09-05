@@ -2,11 +2,19 @@
 #include "http/router_full.hpp"
 #include "config/config.hpp"
 #include "handlers/public/hasil.hpp"
+#include "session/cookie.hpp"
+#include "handlers/auth/login.hpp"
 #include <fstream>
 #include <string>
 #include <vector>
 
 using namespace examvan;
+
+// Bangun cookie session dengan role tertentu (payload = pola login.cpp).
+static std::string session_cookie_for(const Config& cfg, int admin_id, const std::string& role){
+  std::string payload=b64_encode("admin_id="+std::to_string(admin_id)+"&username=u&role=["+role+"]");
+  return "examvan_session="+encode_cookie_value(cfg.secret_key, payload);
+}
 
 static std::string slurp(const std::string& p){
   std::ifstream f(p); if(!f) return ""; return std::string((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
@@ -105,6 +113,32 @@ TEST(Characterization, AdminRedirectNotShadowedByTokenCatchall) {
   auto res=r.dispatch(req);
   EXPECT_EQ(res.status,302);
   EXPECT_EQ(res.headers["Location"], "/admin/dashboard");
+}
+
+TEST(Characterization, AdminManagementRequiresSuperadmin) {
+  /* admin_api dulu hanya cek session+status — guru/pengawas yang aktif bisa
+   * panggil /admin/api/users (hapus user), vouchers, saas-settings dsb.
+   * Sekarang route manajemen butuh superadmin → non-superadmin 403. */
+  Config cfg; cfg.secret_key=std::string(32,'x');
+  Router r; register_full_routes(r,cfg);
+  // Non-superadmin (guru) → 403 pada route manajemen.
+  Request req; req.method="GET"; req.path="/admin/api/users";
+  req.headers["Cookie"]=session_cookie_for(cfg, 2, "guru");
+  req.headers["X-CSRF-Token"]="x"; req.headers["Accept"]="application/json";
+  auto res=r.dispatch(req);
+  EXPECT_EQ(res.status,403) << "guru must be forbidden from user management";
+  // Superadmin → bukan 403 (handler dipanggil; tanpa PG bisa 200/401, bukan 403).
+  Request req2; req2.method="GET"; req2.path="/admin/api/users";
+  req2.headers["Cookie"]=session_cookie_for(cfg, 1, "superadmin");
+  req2.headers["Accept"]="application/json";
+  auto res2=r.dispatch(req2);
+  EXPECT_NE(res2.status,403) << "superadmin must not be forbidden";
+  // Route data (exams) tetap terbuka utk guru.
+  Request req3; req3.method="GET"; req3.path="/admin/api/exams";
+  req3.headers["Cookie"]=session_cookie_for(cfg, 2, "guru");
+  req3.headers["Accept"]="application/json";
+  auto res3=r.dispatch(req3);
+  EXPECT_NE(res3.status,403) << "guru can access exam data routes";
 }
 
 TEST(Characterization, LoginRateLimitedPerIp) {

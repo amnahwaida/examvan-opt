@@ -40,8 +40,11 @@ void register_full_routes(Router& r, const Config& cfg){
    * handler tidak dieksekusi → 401 JSON (format dipahami apiFetch admin-core.js:
    * event auth:expired + redirect /admin/login?next=). */
   static middleware::RateLimiter g_admin_rl(100, std::chrono::seconds(60));
-  auto admin_api=[cfg](Handler h)->Handler{
-    return [cfg,h](const Request& req)->Response{
+  /* role_req: "superadmin" → route hanya untuk superadmin (manajemen users/
+   * vouchers/settings/packages). Kosong → route data/eksam untuk semua
+   * user active (guru/pengawas). require_role() di middleware/auth.hpp. */
+  auto admin_api=[cfg](Handler h, std::string role_req={})->Handler{
+    return [cfg,h,role_req](const Request& req)->Response{
       if(req.body.size()>5*1024*1024){ Response rr; rr.status=413; rr.body="payload too large"; return rr; }
       std::string ip="global";
       auto it_ip=req.headers.find("X-Real-IP");
@@ -97,6 +100,15 @@ void register_full_routes(Router& r, const Config& cfg){
         }
       }
 #endif
+      // Role gate: manajemen (users/vouchers/settings/packages) hanya
+      // superadmin. Sebelumnya TIDAK ada cek role — guru/pengawas yang
+      // aktif bisa hapus user, ubah saas_settings, dsb (privilege escalation).
+      if(!role_req.empty()){
+        bool ok_role = sess.is_super_admin || sess.role.find(role_req)!=std::string::npos;
+        if(!ok_role){
+          Response rr; rr.status=403; rr.json(403,"{\"success\":false,\"message\":\"forbidden\"}"); return rr;
+        }
+      }
       // Teruskan admin_id session ke handler via header internal (nilai dari
       // session terverifikasi, meng-overwrite apapun yang dikirim klien).
       // create_exam memakainya untuk created_by (FK exams_created_by_fkey).
@@ -217,32 +229,32 @@ void register_full_routes(Router& r, const Config& cfg){
     return handlers::admin::submissions_page(req);
   });
   r.add("GET","/admin/api/stats", admin_api(handlers::admin::dashboard_stats));
-  r.add("GET","/admin/api/saas-settings", admin_api(handlers::admin::settings_page));
-  r.add("POST","/admin/api/saas-settings", admin_api(handlers::admin::update_settings));
-  r.add("GET","/admin/api/users", admin_api(handlers::admin::list_users));
-  r.add("GET","/admin/api/users/:id", admin_api(handlers::admin::user_detail));
-  r.add("POST","/admin/api/users", admin_api(handlers::admin::create_user));
-  r.add("PUT","/admin/api/users/:id", admin_api(handlers::admin::edit_user));
-  r.add("POST","/admin/api/users/:id/edit", admin_api(handlers::admin::edit_user));
-  r.add("DELETE","/admin/api/users/:id", admin_api(handlers::admin::delete_user));
-  r.add("POST","/admin/api/users/:id/delete", admin_api(handlers::admin::delete_user));
-  r.add("POST","/admin/api/users/:id/toggle-status", admin_api(handlers::admin::user_toggle_status));
-  r.add("POST","/admin/api/users/:id/verify", admin_api(handlers::admin::user_verify));
-  r.add("POST","/admin/api/users/:id/deactivate-package", admin_api(handlers::admin::user_deactivate_package));
-  r.add("POST","/admin/api/instansi/update", admin_api(handlers::admin::instansi_update));
-  r.add("POST","/admin/api/change-password", admin_api(handlers::admin::change_password));
-  r.add("GET","/admin/api/vouchers", admin_api(handlers::admin::list_vouchers));
-  r.add("POST","/admin/api/vouchers", admin_api(handlers::admin::create_voucher));
-  r.add("POST","/admin/api/vouchers/batch", admin_api(handlers::admin::create_vouchers_batch));
-  r.add("GET","/admin/api/vouchers/mine", admin_api(handlers::admin::vouchers_mine));
-  r.add("POST","/admin/api/vouchers/redeem", admin_api(handlers::admin::redeem_voucher));
-  r.add("POST","/admin/api/vouchers/activate", admin_api(handlers::admin::activate_voucher));
-  r.add("GET","/admin/api/vouchers/audit-logs", admin_api(handlers::admin::list_audit_logs));
-  r.add("POST","/admin/api/vouchers/:id/toggle", admin_api(handlers::admin::toggle_voucher));
-  r.add("POST","/admin/api/vouchers/:id/delete", admin_api(handlers::admin::delete_voucher));
-  r.add("GET","/admin/api/vouchers/:id/redemptions", admin_api(handlers::admin::voucher_redemptions));
-  r.add("GET","/admin/api/packages", admin_api(handlers::admin::list_packages));
-  r.add("POST","/admin/api/packages", admin_api(handlers::admin::save_packages));
+  r.add("GET","/admin/api/saas-settings", admin_api(handlers::admin::settings_page, "superadmin"));
+  r.add("POST","/admin/api/saas-settings", admin_api(handlers::admin::update_settings, "superadmin"));
+  r.add("GET","/admin/api/users", admin_api(handlers::admin::list_users, "superadmin"));
+  r.add("GET","/admin/api/users/:id", admin_api(handlers::admin::user_detail, "superadmin"));
+  r.add("POST","/admin/api/users", admin_api(handlers::admin::create_user, "superadmin"));
+  r.add("PUT","/admin/api/users/:id", admin_api(handlers::admin::edit_user, "superadmin"));
+  r.add("POST","/admin/api/users/:id/edit", admin_api(handlers::admin::edit_user, "superadmin"));
+  r.add("DELETE","/admin/api/users/:id", admin_api(handlers::admin::delete_user, "superadmin"));
+  r.add("POST","/admin/api/users/:id/delete", admin_api(handlers::admin::delete_user, "superadmin"));
+  r.add("POST","/admin/api/users/:id/toggle-status", admin_api(handlers::admin::user_toggle_status, "superadmin"));
+  r.add("POST","/admin/api/users/:id/verify", admin_api(handlers::admin::user_verify, "superadmin"));
+  r.add("POST","/admin/api/users/:id/deactivate-package", admin_api(handlers::admin::user_deactivate_package, "superadmin"));
+  r.add("POST","/admin/api/instansi/update", admin_api(handlers::admin::instansi_update, "superadmin"));
+  r.add("POST","/admin/api/change-password", admin_api(handlers::admin::change_password, "superadmin"));
+  r.add("GET","/admin/api/vouchers", admin_api(handlers::admin::list_vouchers, "superadmin"));
+  r.add("POST","/admin/api/vouchers", admin_api(handlers::admin::create_voucher, "superadmin"));
+  r.add("POST","/admin/api/vouchers/batch", admin_api(handlers::admin::create_vouchers_batch, "superadmin"));
+  r.add("GET","/admin/api/vouchers/mine", admin_api(handlers::admin::vouchers_mine, "superadmin"));
+  r.add("POST","/admin/api/vouchers/redeem", admin_api(handlers::admin::redeem_voucher, "superadmin"));
+  r.add("POST","/admin/api/vouchers/activate", admin_api(handlers::admin::activate_voucher, "superadmin"));
+  r.add("GET","/admin/api/vouchers/audit-logs", admin_api(handlers::admin::list_audit_logs, "superadmin"));
+  r.add("POST","/admin/api/vouchers/:id/toggle", admin_api(handlers::admin::toggle_voucher, "superadmin"));
+  r.add("POST","/admin/api/vouchers/:id/delete", admin_api(handlers::admin::delete_voucher, "superadmin"));
+  r.add("GET","/admin/api/vouchers/:id/redemptions", admin_api(handlers::admin::voucher_redemptions, "superadmin"));
+  r.add("GET","/admin/api/packages", admin_api(handlers::admin::list_packages, "superadmin"));
+  r.add("POST","/admin/api/packages", admin_api(handlers::admin::save_packages, "superadmin"));
   r.add("GET","/admin/api/exams", admin_api(handlers::admin::list_admin_exams));
   r.add("POST","/admin/api/exams", admin_api(handlers::admin::create_exam));
   r.add("POST","/admin/api/upload", admin_api(handlers::admin::create_exam));
@@ -275,8 +287,8 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/admin/api/pengawas/exams/:exam_id/approvals/:mac_address", admin_api(handlers::admin::set_approval));
   r.add("GET","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::get_auto_approve));
   r.add("POST","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::set_auto_approve));
-  r.add("GET","/admin/api/system-apps", admin_api(handlers::admin::settings_page));
-  r.add("POST","/admin/api/system-apps", admin_api(handlers::admin::update_settings));
+  r.add("GET","/admin/api/system-apps", admin_api(handlers::admin::settings_page, "superadmin"));
+  r.add("POST","/admin/api/system-apps", admin_api(handlers::admin::update_settings, "superadmin"));
 }
 
 } // namespace examvan
