@@ -4,6 +4,7 @@
 #include "handlers/public/hasil.hpp"
 #include "session/cookie.hpp"
 #include "handlers/auth/login.hpp"
+#include "store/exam_store.hpp"
 #include <fstream>
 #include <string>
 #include <vector>
@@ -139,6 +140,32 @@ TEST(Characterization, AdminManagementRequiresSuperadmin) {
   req3.headers["Accept"]="application/json";
   auto res3=r.dispatch(req3);
   EXPECT_NE(res3.status,403) << "guru can access exam data routes";
+}
+
+TEST(Characterization, ExamOwnershipScopedToCreatorOrSuperadmin) {
+  /* C7: route per-exam (questions/delete) wajib scope kepemilikan — guru yang
+   * bukan pembuat (created_by) exam tsb harus 403. Tanpa scope, guru instansi
+   * mana pun bisa baca kunci jawaban / hapus exam lintas sekolah. */
+  Config cfg; cfg.secret_key=std::string(32,'x');
+  // Seed exam di store dengan created_by=1 (superadmin).
+  store::active_store()->clear_all();
+  examvan::models::Exam e; e.id=100; e.name="Milik Superadmin"; e.token="OWNABC12";
+  e.status="active"; e.created_by=1; e.questions_json="[{\"number\":1,\"key\":\"A\"}]";
+  store::active_store()->add(e);
+  Router r; register_full_routes(r,cfg);
+  // Guru lain (admin_id=2) minta questions exam 100 → 403.
+  Request q; q.method="GET"; q.path="/admin/api/exams/100/questions";
+  q.headers["Cookie"]=session_cookie_for(cfg, 2, "guru");
+  q.headers["Accept"]="application/json";
+  auto res=r.dispatch(q);
+  EXPECT_EQ(res.status,403) << "non-owner guru must be forbidden from questions: " << res.body;
+  // Superadmin (admin_id=1) → bukan 403.
+  Request q2; q2.method="GET"; q2.path="/admin/api/exams/100/questions";
+  q2.headers["Cookie"]=session_cookie_for(cfg, 1, "superadmin");
+  q2.headers["Accept"]="application/json";
+  auto res2=r.dispatch(q2);
+  EXPECT_NE(res2.status,403) << "superadmin must not be forbidden: " << res2.body;
+  store::active_store()->clear_all();
 }
 
 TEST(Characterization, LoginRateLimitedPerIp) {

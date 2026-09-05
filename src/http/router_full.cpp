@@ -23,6 +23,7 @@
 #include "middleware/ratelimit.hpp"
 #include "middleware/body_limit.hpp"
 #include "middleware/cors.hpp"
+#include "store/exam_store.hpp"
 #ifdef HAS_LIBPQ
 #include "db/pool_real.hpp"
 #include "db/pool.hpp"
@@ -43,8 +44,8 @@ void register_full_routes(Router& r, const Config& cfg){
   /* role_req: "superadmin" → route hanya untuk superadmin (manajemen users/
    * vouchers/settings/packages). Kosong → route data/eksam untuk semua
    * user active (guru/pengawas). require_role() di middleware/auth.hpp. */
-  auto admin_api=[cfg](Handler h, std::string role_req={})->Handler{
-    return [cfg,h,role_req](const Request& req)->Response{
+  auto admin_api=[cfg](Handler h, std::string role_req={}, std::string scope={})->Handler{
+    return [cfg,h,role_req,scope](const Request& req)->Response{
       if(req.body.size()>5*1024*1024){ Response rr; rr.status=413; rr.body="payload too large"; return rr; }
       std::string ip="global";
       auto it_ip=req.headers.find("X-Real-IP");
@@ -106,6 +107,74 @@ void register_full_routes(Router& r, const Config& cfg){
       if(!role_req.empty()){
         bool ok_role = sess.is_super_admin || sess.role.find(role_req)!=std::string::npos;
         if(!ok_role){
+          Response rr; rr.status=403; rr.json(403,"{\"success\":false,\"message\":\"forbidden\"}"); return rr;
+        }
+      }
+      // C7: ownership scope "exam" — route per-exam (detail/toggle/delete/
+      // questions/delegate/export) hanya untuk superadmin, PEMILIK
+      // (created_by), atau user yang didelegasi (delegated_to). Tanpa ini guru
+      // instansi mana pun bisa baca/ubah/hapus exam lintas sekolah (termasuk
+      // kunci jawaban). Scope memakai store (id di path) — paritas Go
+      // checkExamOwnership (tanpa dimensi instansi: store C++ tidak punya
+      // kolom instansi; pemilik/delegasi/superadmin tercakup).
+      if(scope=="exam"){
+        // Ekstrak exam id dari path (:id atau :exam_id).
+        std::string eid;
+        auto pid=req.params.find("exam_id");
+        if(pid!=req.params.end()) eid=pid->second;
+        else { auto p2=req.params.find("id"); if(p2!=req.params.end()) eid=p2->second; }
+        bool owner_ok=sess.is_super_admin;
+        if(!owner_ok && !eid.empty()){
+          try{
+            int exam_id=std::stoi(eid);
+            auto e=store::active_store()->get_by_id(exam_id);
+            if(e){
+              if(e->created_by==sess.admin_id) owner_ok=true;
+              if(!owner_ok && e->delegated_to && *e->delegated_to==sess.admin_id) owner_ok=true;
+            }
+          }catch(...){}
+        }
+        // Tanpa id di path (mis. list/bulk) → biarkan handler memutuskan.
+        if(!eid.empty() && !owner_ok){
+          Response rr; rr.status=403; rr.json(403,"{\"success\":false,\"message\":\"forbidden\"}"); return rr;
+        }
+      }
+      // C8: scope "submission" — resolve submission id → exam_id lalu terapkan
+      // kepemilikan exam (superadmin | created_by | delegated). Tanpa PG
+      // (unit test / dev memory) fail-open, konsisten dgn revalidasi sesi.
+      if(scope=="submission"){
+        std::string sid;
+        auto p3=req.params.find("id");
+        if(p3!=req.params.end()) sid=p3->second;
+        bool sub_ok=sess.is_super_admin;
+        if(!sub_ok && !sid.empty()){
+#ifdef HAS_LIBPQ
+          try{
+            std::string db_url=Config::load().database_url;
+            if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+            if(!db_url.empty()){
+              std::string ci=pg_conninfo_from_url(db_url);
+              if(ci.empty()) ci=db_url;
+              examvan::db::RealPool real(ci, 2);
+              if(real.connect()){
+                if(auto c=real.acquire()){
+                  auto res=real.exec_params(c.get(),
+                    "SELECT exam_id FROM submissions WHERE id=$1",{sid});
+                  if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0){
+                    int exam_id=0; try{ exam_id=std::stoi(PQgetvalue(res.get(),0,0)); }catch(...){}
+                    auto e=store::active_store()->get_by_id(exam_id);
+                    if(e){
+                      if(e->created_by==sess.admin_id) sub_ok=true;
+                      if(!sub_ok && e->delegated_to && *e->delegated_to==sess.admin_id) sub_ok=true;
+                    }
+                  }
+                }
+              }
+            }
+          }catch(...){}
+#endif
+        }
+        if(!sid.empty() && !sub_ok){
           Response rr; rr.status=403; rr.json(403,"{\"success\":false,\"message\":\"forbidden\"}"); return rr;
         }
       }
@@ -258,35 +327,35 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/admin/api/exams", admin_api(handlers::admin::list_admin_exams));
   r.add("POST","/admin/api/exams", admin_api(handlers::admin::create_exam));
   r.add("POST","/admin/api/upload", admin_api(handlers::admin::create_exam));
-  r.add("PUT","/admin/api/exams/:id", admin_api(handlers::admin::update_exam));
-  r.add("DELETE","/admin/api/exams/:id", admin_api(handlers::admin::delete_exam));
+  r.add("PUT","/admin/api/exams/:id", admin_api(handlers::admin::update_exam,"","exam"));
+  r.add("DELETE","/admin/api/exams/:id", admin_api(handlers::admin::delete_exam,"","exam"));
   r.add("POST","/admin/api/exams/bulk-toggle", admin_api(handlers::admin::bulk_toggle_exams));
   r.add("POST","/admin/api/exams/bulk-delete", admin_api(handlers::admin::bulk_delete_exams));
-  r.add("GET","/admin/api/exams/:exam_id/delegate-data", admin_api(handlers::admin::delegate_data));
-  r.add("POST","/admin/api/exams/:exam_id/delegate", admin_api(handlers::admin::delegate_exam));
-  r.add("POST","/admin/api/exams/:exam_id/toggle", admin_api(handlers::admin::update_exam));
-  r.add("POST","/admin/api/exams/:exam_id/delete", admin_api(handlers::admin::delete_exam));
-  r.add("POST","/admin/api/exams/:exam_id/edit", admin_api(handlers::admin::update_exam));
-  r.add("POST","/admin/api/exams/:exam_id/start", admin_api(handlers::admin::update_exam));
-  r.add("POST","/admin/api/exams/:exam_id/stop", admin_api(handlers::admin::update_exam));
-  r.add("POST","/admin/api/exams/:exam_id/regenerate-token", admin_api(handlers::admin::update_exam));
-  r.add("POST","/admin/api/exams/:exam_id/edit-token", admin_api(handlers::admin::update_exam));
-  r.add("POST","/admin/api/exams/:exam_id/token-mode", admin_api(handlers::admin::update_exam));
-  r.add("GET","/admin/api/exams/:exam_id/questions", admin_api(handlers::admin::get_exam_questions));
-  r.add("POST","/admin/api/exams/:exam_id/questions", admin_api(handlers::admin::save_exam_questions));
-  r.add("GET","/admin/api/exams/:id/export", admin_api(handlers::admin::export_xlsx));
+  r.add("GET","/admin/api/exams/:exam_id/delegate-data", admin_api(handlers::admin::delegate_data,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/delegate", admin_api(handlers::admin::delegate_exam,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/toggle", admin_api(handlers::admin::update_exam,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/delete", admin_api(handlers::admin::delete_exam,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/edit", admin_api(handlers::admin::update_exam,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/start", admin_api(handlers::admin::update_exam,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/stop", admin_api(handlers::admin::update_exam,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/regenerate-token", admin_api(handlers::admin::update_exam,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/edit-token", admin_api(handlers::admin::update_exam,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/token-mode", admin_api(handlers::admin::update_exam,"","exam"));
+  r.add("GET","/admin/api/exams/:exam_id/questions", admin_api(handlers::admin::get_exam_questions,"","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/questions", admin_api(handlers::admin::save_exam_questions,"","exam"));
+  r.add("GET","/admin/api/exams/:id/export", admin_api(handlers::admin::export_xlsx,"","exam"));
   r.add("GET","/admin/api/submissions", admin_api(handlers::admin::list_submissions));
   // Static export route must precede /:id/detail (router uses first-match).
   r.add("GET","/admin/api/submissions/export", admin_api(handlers::admin::export_xlsx));
-  r.add("GET","/admin/api/submissions/:id/detail", admin_api(handlers::admin::submission_detail));
+  r.add("GET","/admin/api/submissions/:id/detail", admin_api(handlers::admin::submission_detail,"","submission"));
   r.add("GET","/admin/api/queue/status", admin_api(handlers::admin::queue_status));
-  r.add("POST","/admin/api/submissions/:id/delete", admin_api(handlers::admin::delete_submission));
+  r.add("POST","/admin/api/submissions/:id/delete", admin_api(handlers::admin::delete_submission,"","submission"));
   r.add("GET","/admin/api/pengawas/exams", admin_api(handlers::admin::pengawas_exams));
-  r.add("GET","/admin/api/pengawas/exams/:exam_id/submissions", admin_api(handlers::admin::pengawas_submissions));
-  r.add("GET","/admin/api/pengawas/exams/:exam_id/approvals", admin_api(handlers::admin::pending_approvals));
-  r.add("POST","/admin/api/pengawas/exams/:exam_id/approvals/:mac_address", admin_api(handlers::admin::set_approval));
-  r.add("GET","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::get_auto_approve));
-  r.add("POST","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::set_auto_approve));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/submissions", admin_api(handlers::admin::pengawas_submissions,"","exam"));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/approvals", admin_api(handlers::admin::pending_approvals,"","exam"));
+  r.add("POST","/admin/api/pengawas/exams/:exam_id/approvals/:mac_address", admin_api(handlers::admin::set_approval,"","exam"));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::get_auto_approve,"","exam"));
+  r.add("POST","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::set_auto_approve,"","exam"));
   r.add("GET","/admin/api/system-apps", admin_api(handlers::admin::settings_page, "superadmin"));
   r.add("POST","/admin/api/system-apps", admin_api(handlers::admin::update_settings, "superadmin"));
 }
