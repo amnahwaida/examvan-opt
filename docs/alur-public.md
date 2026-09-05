@@ -26,7 +26,7 @@ frozen (`EXAMVAN/webui`). Berlaku untuk versi 2.7.x.
 | GET | `/hasil` | `public_::cek_hasil_page` | ✅ live |
 | GET | `/hasil/:token` | `public_::hasil_page` | ✅ live |
 | GET | `/:token` | 302 → `/hasil/:token` | ✅ live |
-| GET | `/api/hasil/:token` | `public_::cek_hasil_api` | ✅ live + rate limit (ini) |
+| GET | `/api/hasil/:token` | `public_::cek_hasil_api` | ✅ live + rate limit 30/mnt |
 
 ## Alur Pendaftaran (`/register`)
 
@@ -66,12 +66,14 @@ Catatan penting:
 
 ## Alur Konfirmasi Email (`/register/confirm`)
 
-1. `GET /register/confirm?username=X` — cek user status `pending_otp` +
-   `otp_code` ada; jika tidak → 302 `/login`. Render `.username`,
-   `.email`, `.masked_email` (email termasking).
+1. `GET /register/confirm?username=X` — halaman **selalu dirender (200)**,
+   netral terhadap status user (anti enumerasi): email termasking hanya
+   diisi bila user benar-benar `pending_otp`.
 2. `POST /register/confirm?username=X` (CSRF + rate limit 5/menit):
-   - kode salah → `otp_attempts+1`; pada percobaan ke-5 user **dihapus**;
-   - kode kedaluwarsa (> 15 menit) → user **dihapus**;
+   - kode salah → `otp_attempts+1`; pada percobaan ke-5 OTP **dinonaktifkan**
+     (bukan hapus akun — mencegah CSRF-DoS lewat POST 5× OTP salah);
+   - kode kedaluwarsa (> 15 menit) → user **dihapus** (anti penimbunan
+     akun pending);
    - kode benar → `status=active`, `otp_code=NULL`, flash, 302 `/login`.
 3. `POST /register/resend?username=X` (CSRF, JSON): rotasi OTP baru bila
    status masih `pending_otp` dan di luar cooldown 60 detik; respons seragam

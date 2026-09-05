@@ -39,14 +39,17 @@ long now_epoch(){ return static_cast<long>(std::time(nullptr)); }
 
 std::string get_setting_str(const char* k, const std::string& def){ return get_setting(k, def); }
 
-std::string page_register_confirm_like(const std::string& name, const std::string& username,
-                                       const std::string& error, const std::string& masked){
+// Render halaman error reset/confirm + KEMBALIKAN cookie CSRF-nya juga —
+// tanpa Set-Cookie, token di hidden input tak cocok dengan cookie lama dan
+// percobaan ulang akan gagal verifikasi CSRF (double-submit).
+RenderedAuthPage page_register_confirm_like(const std::string& name, const std::string& username,
+                                            const std::string& error, const std::string& masked){
   PublicAuthPage p; p.name=name; p.username=username; p.error=error;
   p.masked_email=masked;
   p.email_enabled=true;
   p.turnstile_enabled=get_setting_str("turnstile_enabled","0")=="1";
   p.turnstile_site_key=get_setting_str("turnstile_site_key","");
-  return render_auth_page(p).body;
+  return render_auth_page(p);
 }
 
 // Cek apakah ada sesi login aktif → sudah login tidak boleh lihat forgot/reset.
@@ -167,9 +170,9 @@ Response reset_password_handler(const Request& req, const Config& cfg){
   static middleware::RateLimiter g_reset_rl(5, std::chrono::minutes(1));
   if(!g_reset_rl.allow("reset:"+ip)){
     if(wants_json(req)){ Response r; r.json(429, "{\"error\":\"Terlalu banyak percobaan. Coba lagi nanti.\"}"); return r; }
-    Response r; r.status=429; r.headers["Content-Type"]="text/html";
-    r.body=page_register_confirm_like("reset_password", username, "Terlalu banyak percobaan. Coba lagi nanti.", "");
-    return r;
+    RenderedAuthPage rp=page_register_confirm_like("reset_password", username, "Terlalu banyak percobaan. Coba lagi nanti.", "");
+    Response r; r.status=429; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=rp.set_cookie;
+    r.body=rp.body; return r;
   }
   std::string otp=form.count("otp_code")? form["otp_code"]:"";
   std::string password=form.count("password")? form["password"]:"";
@@ -186,39 +189,39 @@ Response reset_password_handler(const Request& req, const Config& cfg){
   }
   if(!err.empty()){
     if(wants_json(req)){ Response r; r.json(400, "{\"error\":\""+err+"\"}"); return r; }
-    Response r; r.status=400; r.headers["Content-Type"]="text/html";
-    r.body=page_register_confirm_like("reset_password", username, err, "");
-    return r;
+    RenderedAuthPage rp=page_register_confirm_like("reset_password", username, err, "");
+    Response r; r.status=400; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=rp.set_cookie;
+    r.body=rp.body; return r;
   }
   RegisteredUser u;
   if(!find_registered_user(username, u) || u.status!="active" || u.otp_code.empty()){
     // User tak ditemukan / tidak punya OTP aktif → pesan seragam.
     if(wants_json(req)){ Response r; r.json(400, "{\"error\":\"Kode OTP salah atau sudah tidak berlaku.\"}"); return r; }
-    Response r; r.status=400; r.headers["Content-Type"]="text/html";
-    r.body=page_register_confirm_like("reset_password", username, "Kode OTP salah atau sudah tidak berlaku.", "");
-    return r;
+    RenderedAuthPage rp=page_register_confirm_like("reset_password", username, "Kode OTP salah atau sudah tidak berlaku.", "");
+    Response r; r.status=400; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=rp.set_cookie;
+    r.body=rp.body; return r;
   }
   long now=now_epoch();
   if(u.otp_expiry_epoch>0 && now>u.otp_expiry_epoch){
     update_user_otp(username, "", 0); // nonaktifkan OTP kedaluwarsa
     if(wants_json(req)){ Response r; r.json(400, "{\"error\":\"Kode OTP sudah kedaluwarsa.\"}"); return r; }
-    Response r; r.status=400; r.headers["Content-Type"]="text/html";
-    r.body=page_register_confirm_like("reset_password", username, "Kode OTP sudah kedaluwarsa.", "");
-    return r;
+    RenderedAuthPage rp=page_register_confirm_like("reset_password", username, "Kode OTP sudah kedaluwarsa.", "");
+    Response r; r.status=400; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=rp.set_cookie;
+    r.body=rp.body; return r;
   }
   if(otp!=u.otp_code){
     bump_otp_attempts(username);
     if(u.otp_attempts+1>=kMaxOtpAttempts){
       update_user_otp(username, "", 0); // nonaktifkan OTP setelah 5x salah
       if(wants_json(req)){ Response r; r.json(400, "{\"error\":\"Terlalu banyak percobaan. Minta kode baru.\"}"); return r; }
-      Response r; r.status=400; r.headers["Content-Type"]="text/html";
-      r.body=page_register_confirm_like("reset_password", username, "Terlalu banyak percobaan. Minta kode baru.", "");
-      return r;
+      RenderedAuthPage rp=page_register_confirm_like("reset_password", username, "Terlalu banyak percobaan. Minta kode baru.", "");
+      Response r; r.status=400; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=rp.set_cookie;
+      r.body=rp.body; return r;
     }
     if(wants_json(req)){ Response r; r.json(400, "{\"error\":\"Kode OTP salah atau sudah tidak berlaku.\"}"); return r; }
-    Response r; r.status=400; r.headers["Content-Type"]="text/html";
-    r.body=page_register_confirm_like("reset_password", username, "Kode OTP salah atau sudah tidak berlaku.", "");
-    return r;
+    RenderedAuthPage rp=page_register_confirm_like("reset_password", username, "Kode OTP salah atau sudah tidak berlaku.", "");
+    Response r; r.status=400; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=rp.set_cookie;
+    r.body=rp.body; return r;
   }
   // OTP benar → update password + bersihkan OTP.
   update_user_password(username, helpers::hash_password(password));

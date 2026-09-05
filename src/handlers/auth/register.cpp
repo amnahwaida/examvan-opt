@@ -255,11 +255,13 @@ Response register_confirm_page(const Request& req){
   p.email_enabled=true;
   p.turnstile_enabled=get_setting_str("turnstile_enabled","0")=="1";
   p.turnstile_site_key=get_setting_str("turnstile_site_key","");
+  // Netral: halaman SELALU dirender (200) baik user pending maupun tidak —
+  // menghindari oracle enumerasi (200 vs 302 membocorkan status pending).
+  // Email termasking hanya diisi bila benar-benar user pending.
   if(!username.empty()){
     RegisteredUser u;
     if(find_registered_user(username, u) && u.status=="pending_otp" && !u.otp_code.empty()){
       p.username=u.username;
-      p.email=u.email;
       // Mask email: a***@domain.
       size_t at=u.email.find('@');
       std::string masked=u.email;
@@ -270,13 +272,15 @@ Response register_confirm_page(const Request& req){
         masked+=dom;
       }
       p.masked_email=masked;
-      RenderedAuthPage rp=render_auth_page(p);
-      Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=rp.set_cookie;
-      r.body=rp.body; return r;
+    } else {
+      // User tidak ditemukan / bukan pending → halaman tetap dirender netral
+      // (tanpa email); POST akan ditolak seragam seperti sebelumnya.
+      p.username=username;
     }
   }
-  // User tidak ada / sudah aktif → arahkan ke login (jangan bocorkan status).
-  Response r; r.status=302; r.headers["Location"]="/login"; return r;
+  RenderedAuthPage rp=render_auth_page(p);
+  Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=rp.set_cookie;
+  r.body=rp.body; return r;
 }
 
 // ========================= POST /register/confirm =========================
@@ -315,8 +319,11 @@ Response register_confirm_handler(const Request& req, const Config& cfg){
   if(otp!=u.otp_code){
     bump_otp_attempts(username);
     if(u.otp_attempts+1>=kMaxOtpAttempts){
-      delete_registered_user(username);
-      if(wants_json(req)){ Response r; r.json(400, "{\"error\":\"Terlalu banyak percobaan. Silakan daftar ulang.\"}"); return r; }
+      // Nonaktifkan OTP (bukan hapus akun) — mencegah CSRF-DoS: penyerang
+      // yang memaksa browser korban POST 5× OTP salah tidak boleh menghapus
+      // akun; kode OTP dinonaktifkan sehingga percobaan berikutnya ditolak.
+      update_user_otp(username, "", 0);
+      if(wants_json(req)){ Response r; r.json(400, "{\"error\":\"Terlalu banyak percobaan. Minta kode baru.\"}"); return r; }
       Response r; r.status=302; r.headers["Location"]="/login"; return r;
     }
     if(wants_json(req)){ Response r; r.json(400, "{\"error\":\"Kode OTP salah atau sudah tidak berlaku.\"}"); return r; }

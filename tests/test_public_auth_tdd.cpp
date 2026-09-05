@@ -168,12 +168,13 @@ TEST(PublicAuth, RegisterDoesNotEchoPassword){
 
 // ============================= /register/confirm =============================
 
-TEST(PublicAuth, ConfirmPageUnknownUserRedirectsLogin){
+TEST(PublicAuth, ConfirmPageUnknownUserNeutral){
   clear_registered_users_for_test();
+  // Netral: halaman selalu 200 untuk user tak dikenal (anti enumerasi status).
   Request req; req.query="username=nobody";
   auto res=register_confirm_page(req);
-  EXPECT_EQ(res.status,302);
-  EXPECT_EQ(res.headers["Location"],"/login");
+  EXPECT_EQ(res.status,200);
+  EXPECT_TRUE(res.body.find("csrf_token")!=std::string::npos || res.body.find("otp")!=std::string::npos);
 }
 
 TEST(PublicAuth, ConfirmWrongOtpIncrementsAndDeletesAt5){
@@ -200,7 +201,9 @@ TEST(PublicAuth, ConfirmWrongOtpIncrementsAndDeletesAt5){
   req2.headers["Accept"]="application/json";
   auto res2=register_confirm_handler(req2,cfg);
   EXPECT_EQ(res2.status,400);
-  EXPECT_FALSE(find_registered_user("siswa9",u)) << "5th wrong attempt deletes user";
+  // 5× salah → OTP dinonaktifkan (bukan hapus akun) — anti CSRF-DoS.
+  ASSERT_TRUE(find_registered_user("siswa9",u)) << "5th wrong attempt disables OTP, does NOT delete user";
+  EXPECT_TRUE(u.otp_code.empty()) << "otp should be disabled";
   clear_registered_users_for_test();
 }
 
@@ -345,5 +348,29 @@ TEST(PublicAuth, ResetCsrfMismatch403){
   req.headers["Accept"]="application/json";
   auto res=reset_password_handler(req,test_cfg());
   EXPECT_EQ(res.status,403);
+  clear_registered_users_for_test();
+}
+TEST(PublicAuth, ResetErrorRerenderSetsCsrfCookie){
+  // Form HTML (bukan JSON): error reset harus re-render halaman dengan
+  // Set-Cookie csrf_token BARU agar percobaan ulang tidak gagal CSRF.
+  clear_registered_users_for_test();
+  long future=std::time(nullptr)+900;
+  set_registered_user_for_test("reseter4","r@b.com","hash","active","999000",0,future);
+  auto s=csrf_session("/reset-password?username=reseter4");
+  Config cfg=test_cfg();
+  Request req; req.query="username=reseter4";
+  req.body="otp_code=000000&password=newpass12&password_confirm=newpass12&csrf_token="+enc(s.token);
+  req.headers["Cookie"]="csrf_token="+s.cookie;
+  // Tanpa Accept:application/json → jalur HTML.
+  auto res=reset_password_handler(req,cfg);
+  EXPECT_EQ(res.status,400);
+  auto it=res.headers.find("Set-Cookie");
+  ASSERT_NE(it,res.headers.end()) << "error re-render must set a fresh CSRF cookie";
+  std::string new_cookie=extract_cookie(it->second,"csrf_token");
+  EXPECT_FALSE(new_cookie.empty());
+  EXPECT_NE(new_cookie,s.cookie) << "cookie should be rotated on error page";
+  // Token di body HTML harus cocok dengan cookie baru.
+  std::string html_token=csrf_from_html(res.body);
+  EXPECT_EQ(html_token,new_cookie) << "html hidden token must match new cookie";
   clear_registered_users_for_test();
 }

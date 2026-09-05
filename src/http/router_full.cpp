@@ -161,7 +161,10 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/api/exams/:exam_id/result", handlers::api::exam_result);
   r.add("POST","/api/exams/:exam_id/access-log", handlers::api::access_log);
   r.add("POST","/api/exams/:exam_id/complete", handlers::api::complete_exam);
-  r.add("GET","/api/hasil/:token", handlers::public_::cek_hasil_api);
+  /* /api/hasil/:token di-rate-limit 30/mnt per-IP (paritas Go; lihat doc
+   alur-public). Halaman /hasil memakai endpoint ini juga. */
+  static middleware::RateLimiter g_hasil_api_rl(30, std::chrono::minutes(1));
+  r.add("GET","/api/hasil/:token", rl_wrap(g_hasil_api_rl, handlers::public_::cek_hasil_api));
   r.add("POST","/api/webhook", handlers::api::webhook);
 
   r.add("GET","/admin", [](const Request&){ Response rr; rr.status=302; rr.headers["Location"]="/admin/dashboard"; return rr; });

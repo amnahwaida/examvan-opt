@@ -3,6 +3,7 @@
 #include <cctype>
 #include <unordered_map>
 #include <mutex>
+#include <chrono>
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
@@ -220,8 +221,24 @@ bool find_registered_user_by_email(const std::string& email, RegisteredUser& out
 }
 
 int count_recent_registrations_by_ip(const std::string& ip){
-  // Peta memori tidak melacak IP → kembalikan 0 (tidak membatasi di mode uji).
-  (void)ip; return 0;
+  // Peta memori tidak melacak IP → fallback ke 0 (mode uji/dev tanpa PG).
+#ifdef HAS_LIBPQ
+  try{
+    examvan::db::RealPool real;
+    if(!open_pool(real)) return 0;
+    auto c=real.acquire();
+    if(!c || PQstatus(c.get())!=CONNECTION_OK) return 0;
+    auto r=real.exec_params(c.get(),
+      "SELECT COUNT(*) FROM admin_users WHERE registered_ip=$1 AND created_at > now() - interval '24 hours'",{ip});
+    int n=0;
+    if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0){
+      try{ n=std::stoi(PQgetvalue(r.get(),0,0)); }catch(...){}
+    }
+    real.release(c.release());
+    return n;
+  }catch(...){}
+#endif
+  return 0;
 }
 
 bool insert_registered_user(const RegisteredUser& u){
@@ -257,7 +274,8 @@ bool insert_registered_user(const RegisteredUser& u){
           u.registered_ip,       // $12
         };
         auto r=real.exec_params(c.get(), sql, params);
-        bool ok=r && PQresultStatus(r.get())==PGRES_TUPLES_OK;
+        // INSERT tanpa RETURNING → status COMMAND_OK (bukan TUPLES_OK).
+        bool ok=r && (PQresultStatus(r.get())==PGRES_COMMAND_OK || PQresultStatus(r.get())==PGRES_TUPLES_OK);
         if(ok){ pg_ok=true; real.release(c.release()); return true; }
         real.release(c.release());
       }
@@ -370,20 +388,45 @@ bool delete_registered_user(const std::string& username){
   return false;
 }
 
+/* get_setting di-cache 5 detik (TLL) — tanpa cache, tiap panggilan membuka
+ * pool + koneksi PG baru (~8 koneksi per registrasi). Cache memuat SEMUA
+ * setting dalam satu query (pola load_all_settings admin/settings.cpp). */
 std::string get_setting(const std::string& key, const std::string& def){
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return def;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return def;
-    auto r=real.exec_params(c.get(), "SELECT value FROM saas_settings WHERE key=$1", {key});
-    std::string out=def;
-    if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0){
-      out=PQgetvalue(r.get(),0,0);
+    using clock=std::chrono::steady_clock;
+    static std::mutex mu;
+    static std::unordered_map<std::string,std::string> cache;
+    static clock::time_point loaded{};
+    static bool ever_loaded=false;
+    constexpr auto ttl=std::chrono::seconds(5);
+    auto now=clock::now();
+    {
+      std::lock_guard<std::mutex> g(mu);
+      if(ever_loaded && now-loaded<ttl){
+        auto it=cache.find(key);
+        return it!=cache.end()? it->second : def;
+      }
     }
-    real.release(c.release());
-    return out;
+    // Muat ulang (di luar kunci — satu pemenang, sisanya pakai cache lama).
+    std::unordered_map<std::string,std::string> fresh;
+    examvan::db::RealPool real;
+    if(open_pool(real)){
+      auto c=real.acquire();
+      if(c && PQstatus(c.get())==CONNECTION_OK){
+        auto r=real.exec_params(c.get(),"SELECT key,value FROM saas_settings",{});
+        if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
+          for(int i=0;i<PQntuples(r.get());i++) fresh[PQgetvalue(r.get(),i,0)]=PQgetvalue(r.get(),i,1);
+        }
+        real.release(c.release());
+      }
+    }
+    {
+      std::lock_guard<std::mutex> g(mu);
+      if(!fresh.empty()){ cache=std::move(fresh); loaded=now; ever_loaded=true; }
+      auto it=cache.find(key);
+      return it!=cache.end()? it->second : def;
+    }
   }catch(...){}
 #endif
   return def;
