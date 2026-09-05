@@ -1430,7 +1430,8 @@ TEST(ExamProduction, StudentToken_ActiveExam_ReturnsData){
   Request req; req.params["token"]=token;
   auto res=handlers::api::exam_by_token(req);
   EXPECT_EQ(res.status,200) << "token yang valid harus return 200: " << res.body;
-  EXPECT_NE(res.body.find("\"status\":\"active\""), std::string::npos) << res.body;
+  // M9: status kini nested di objek "exam".
+  EXPECT_NE(res.body.find("\"status\":\"active\""), std::string::npos) << "BODY: " << res.body;
 }
 
 // K14: student lookup — dynamic mode menolak permanent token

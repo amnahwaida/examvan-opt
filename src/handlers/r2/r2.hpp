@@ -21,6 +21,12 @@ struct R2Config {
 
 std::string presign_url(const R2Config& cfg, const std::string& key, int expires_seconds = 3600);
 std::string object_key_for_exam(int exam_id, const std::string& filename);
+// Layout Go (era legacy): pdfs/{file_path} — dipakai utk baca/deteksi.
+std::string object_key_pdf_legacy(const std::string& filename);
+// Cari key PDF yang benar-benar ada: prefer pdfs/{filename} (layout Go),
+// fallback exams/{id}/{filename} (layout C++ lama). Mengembalikan key yang
+// HEAD-nya sukses; kosong bila tak ada / R2 tidak tersedia.
+std::string resolve_existing_pdf_key(const R2Config& cfg, int exam_id, const std::string& filename);
 std::string object_key_for_app(const std::string& version, const std::string& flavor);
 
 struct R2Client {

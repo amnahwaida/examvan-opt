@@ -547,8 +547,10 @@ TEST(ProtobufHandlers, ExamByToken_JsonStillWorks) {
   Request req; req.method = "GET"; req.params["token"] = token;
   auto res = handlers::api::exam_by_token(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_NE(res.body.find("\"token\":\""+token+"\""), std::string::npos);
+  // M9: payload kini nested di "exam" (paritas Go TokenExamResponse) — token
+  // tidak lagi diekspos di level atas.
   EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
+  EXPECT_NE(res.body.find("\"exam\""), std::string::npos) << res.body;
 }
 
 // ======================================================================

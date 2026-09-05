@@ -385,39 +385,8 @@ const std::string kDefaultIdentityFields =
   "{\"key\":\"student_class\",\"label\":\"Kelas\",\"required\":true}]";
 
 // Buang "key"/"answer" dari raw JSON soal bila pengunjung tak berhak.
-/* Hapus pasangan `,"key":<nilai>` / `,"answer":<nilai>` dari JSON soal.
- * Nilai bisa string ("A"), ARRAY (["A","B"] utk multiple_choice), objek,
- * atau angka — jadi penghapusan harus JSON-aware: lewati string (dengan
- * escape), lalu struktur bersarang [ ]/{ } hingga nilai lengkap terhapus.
- * Naif (hapus sampai koma pertama) merusak JSON utk key array & membocorkan
- * sisa key (["A dihapus, "B"] tertinggal). */
-std::string strip_sensitive_keys(const std::string& questions_json){
-  std::string out=questions_json;
-  for(const std::string& k: std::vector<std::string>{"key","answer"}){
-    std::string needle=",\""+k+"\":";
-    size_t p=0;
-    while((p=out.find(needle,p))!=std::string::npos){
-      size_t v=p+needle.size();
-      size_t end=v;
-      bool in_str=false, esc=false;
-      int depth=0;
-      for(; end<out.size(); ++end){
-        char c=out[end];
-        if(esc){ esc=false; continue; }
-        if(c=='\\' && in_str){ esc=true; continue; }
-        if(c=='"'){ in_str=!in_str; continue; }
-        if(in_str) continue;
-        if(c=='[' || c=='{') depth++;
-        else if(c==']' || c=='}'){ if(depth==0) break; depth--; } // tutup nilai array/objek
-        else if(depth==0 && (c==',' || c=='}')) break; // nilai primitif selesai
-      }
-      if(end>v){
-        out.erase(p, end-p);
-      } else break;
-    }
-  }
-  return out;
-}
+/* strip_sensitive_keys kini diekspor dari utils/sanitize (dipakai juga oleh
+ * exam_by_token). Versi lokal lama dihapus agar satu sumber kebenaran. */
 
 } // namespace
 

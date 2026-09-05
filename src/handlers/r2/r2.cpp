@@ -106,6 +106,22 @@ std::string presign_url(const R2Config& cfg, const std::string& key, int expires
 std::string object_key_for_exam(int exam_id, const std::string& filename){
   return "exams/" + std::to_string(exam_id) + "/" + filename;
 }
+std::string object_key_pdf_legacy(const std::string& filename){
+  return "pdfs/" + filename;
+}
+std::string resolve_existing_pdf_key(const R2Config& cfg, int exam_id, const std::string& filename){
+  // C6: objek era Go (sebelum migrasi C++) ada di pdfs/{file_path}; objek
+  // buatan C++ di exams/{id}/{file_path}. Prefer pdfs/ (layout kanonik Go),
+  // fallback ke exams/ supaya PDF lama (Go) tetap terbaca.
+  if(cfg.enabled()){
+    R2Client client{cfg};
+    std::string go_key=object_key_pdf_legacy(filename);
+    if(client.verify(go_key)) return go_key;
+    std::string cpp_key=object_key_for_exam(exam_id, filename);
+    if(client.verify(cpp_key)) return cpp_key;
+  }
+  return "";
+}
 
 std::string object_key_for_app(const std::string& version, const std::string& flavor){
   return "apps/android/" + version + "/EXAMVAN-v" + version + "-" + flavor + ".apk";

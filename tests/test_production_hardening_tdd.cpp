@@ -210,7 +210,8 @@ TEST(ProductionHardening, ExamPdf_RedirectsToPresignedUrl){
   EXPECT_EQ(res.status,302) << res.body;
   std::string loc=res.headers["Location"];
   EXPECT_NE(loc.find("https://test.r2.cloudflarestorage.com"), std::string::npos) << loc;
-  EXPECT_NE(loc.find("exams/"+id+"/soal.pdf"), std::string::npos) << loc;
+  // C6: prefer layout Go pdfs/{file_path}; fallback exams/{id}/{file_path}.
+  EXPECT_NE(loc.find("pdfs/soal.pdf"), std::string::npos) << loc;
   EXPECT_NE(loc.find("X-Amz-Signature="), std::string::npos) << loc;
   set_device_approved_hook_for_test(nullptr);
   reset_r2_flags();

@@ -840,13 +840,17 @@ Response delete_exam(const Request& req){
   // menjanjikan "File PDF juga akan dihapus permanen").
   auto cfg_r2=Config::load();
   r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
-  std::string key=r2::object_key_for_exam(id, exam->file_path);
+  // C6: hapus kedua layout — pdfs/{file_path} (era Go) dan exams/{id}/... (C++).
+  std::vector<std::string> keys={r2::object_key_pdf_legacy(exam->file_path),
+                                 r2::object_key_for_exam(id, exam->file_path)};
   if(g_upload_mock){
-    g_upload_mock(key, ""); // data kosong = penanda penghapusan (test hook)
+    for(auto& k: keys) g_upload_mock(k, ""); // data kosong = penanda penghapusan (test hook)
   } else if(rc.enabled()){
     r2::R2Client client{rc};
-    if(!client.remove(key)){
-      utils::log_error("exam_delete_r2_failed","id="+id_str+" key="+key);
+    for(auto& key: keys){
+      if(!client.remove(key)){
+        utils::log_error("exam_delete_r2_failed","id="+id_str+" key="+key);
+      }
     }
   } else {
     // Go parity: tanpa R2, PDF tidak bisa dibersihkan → tolak delete agar

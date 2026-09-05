@@ -1,6 +1,7 @@
 #include "handlers/api/exams.hpp"
 #include "middleware/version.hpp"
 #include "middleware/protobuf.hpp"
+#include "utils/sanitize.hpp"
 #include "helpers/utils.hpp"
 #include "models/exam.hpp"
 #include "store/exam_store.hpp"
@@ -608,6 +609,11 @@ Response exam_by_token(const Request& req){
 #endif
     Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"exam not started\",\"message\":\"Ujian belum dimulai\"}"); return r;
   }
+  // M9: paritas Go — exam yang sudah lewat jadwal (+grace) ditolak, bukan
+  // mengizinkan join lewat token setelah waktu habis.
+  if(exam_schedule_ended(exam)){
+    Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"Waktu ujian telah berakhir\"}"); return r;
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::ExamByTokenResponse pb;
@@ -618,8 +624,38 @@ Response exam_by_token(const Request& req){
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
+  // M9: payload lebih kaya (paritas Go ExamByToken) — Android membaca
+  // security_level/strict_mode/identity_fields/panel_color/size_mb.
   std::string esc=json_escape(token);
-  Response r; r.status=200; r.json(200,"{\"token\":\""+esc+"\",\"status\":\""+exam.status+"\",\"id\":"+std::to_string(exam.id)+",\"name\":\""+json_escape(exam.name)+"\",\"success\":true}"); return r;
+  // json_escape lokal TIDAK menambah tanda kutip — bungkus dengan \"..\".
+  auto q=[&](const std::string& s){ return "\""+json_escape(s)+"\""; };
+  std::string qj=exam.questions_json.value_or("");
+  std::string questions="[]";
+  if(!qj.empty()){
+    // Jangan bocorkan kunci jawaban: strip key/answer JSON-aware
+    // (paritas Go stripAnswerKeys) — endpoint ini publik untuk siswa.
+    std::string stripped=strip_sensitive_keys(qj);
+    questions=stripped.empty()?"[]":stripped;
+  }
+  std::string idf=exam.identity_fields.value_or("");
+  if(idf.empty()) idf="[{\"key\":\"student_name\",\"label\":\"Nama\",\"required\":true},{\"key\":\"exam_number\",\"label\":\"Nomor Ujian\",\"required\":true},{\"key\":\"student_class\",\"label\":\"Kelas\",\"required\":true}]";
+  std::string panel=exam.panel_color.value_or("#6366f1");
+  char sizemb[32]; snprintf(sizemb,sizeof(sizemb),"%.2f", double(exam.size_bytes)/(1024.0*1024.0));
+  Response r; r.status=200;
+  r.json(200,"{\"success\":true,\"exam\":{\"id\":"+std::to_string(exam.id)
+    +",\"name\":"+q(exam.name)
+    +",\"status\":"+q(exam.status)
+    +",\"security_level\":"+q(exam.security_level)
+    +",\"strict_mode\":"+(exam.is_strict()?"true":"false")
+    +",\"public_results\":"+std::to_string(exam.public_results)
+    +",\"show_answers\":"+std::to_string(exam.show_answers)
+    +",\"size_mb\":"+sizemb
+    +",\"time_limit\":null"
+    +",\"identity_fields\":"+idf
+    +",\"panel_color\":"+q(panel)
+    +",\"questions\":"+questions
+    +"}}");
+  return r;
 }
 
 Response exam_pdf(const Request& req){
@@ -672,7 +708,10 @@ Response exam_pdf(const Request& req){
   if(!rc.enabled()){
     Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
   }
-  std::string key=r2::object_key_for_exam(exam_id, exam->file_path);
+  // C6: key PDF — prefer layout Go pdfs/{file_path}, fallback exams/{id}/...
+  // (objek era Go sebelum migrasi C++). Presign key yang benar-benar ada.
+  std::string key=r2::resolve_existing_pdf_key(rc, exam_id, exam->file_path);
+  if(key.empty()) key=r2::object_key_for_exam(exam_id, exam->file_path); // fallback tanda
   std::string url=r2::presign_url(rc, key, 3600);
   if(url.empty()){
     Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrSignFailed)+"\",\"error_code\":\""+std::string(r2::kCodeSignFailed)+"\"}"); return r;
