@@ -408,9 +408,11 @@ Response create_exam(const Request& req){
         g_upload_mock(key, file_data);
       } else {
         r2::R2Client client{rc};
-        if(!client.upload(key, file_data)){
-          // Fail-closed DEFAULT: PDF gagal diupload → create BATAL (502).
-          // Ujian tanpa file = data rusak yang tidak terlihat oleh admin.
+        // Upload + verifikasi object benar-benar ada di R2 (HEAD) sebelum
+        // exam dianggap berhasil — ujian tanpa file = data rusak.
+        bool upload_ok = client.upload(key, file_data) && client.verify(key);
+        if(!upload_ok){
+          // Fail-closed DEFAULT: PDF gagal diupload/diverifikasi → create BATAL (502).
           // EXAMVAN_R2_STRICT=0 adalah opt-out eksplisit (dev) agar lanjut.
           const char* strict=getenv("EXAMVAN_R2_STRICT");
           bool non_strict = strict && std::string(strict)=="0";
@@ -418,7 +420,7 @@ Response create_exam(const Request& req){
             exams().unclaim_token(token); // Bug 7: lepaskan token yang sudah di-claim
             Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return release_and_return(r);
           }
-          fprintf(stderr,"[r2] upload failed key=%s size=%zu, continuing (EXAMVAN_R2_STRICT=0)\n",key.c_str(),file_data.size());
+          fprintf(stderr,"[r2] upload/verify failed key=%s size=%zu, continuing (EXAMVAN_R2_STRICT=0)\n",key.c_str(),file_data.size());
         }
       }
     }

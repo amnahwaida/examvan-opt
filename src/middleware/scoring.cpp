@@ -93,6 +93,13 @@ std::vector<Question> parse_questions(const std::string& json){
   return out;
 }
 
+std::optional<double> score_submission_json(const std::string& questions_json, const std::map<std::string,std::string>& answers){
+  if(questions_json.empty()) return std::nullopt;
+  auto qs=parse_questions(questions_json);
+  if(qs.empty()) return std::nullopt;
+  return score_submission(qs, answers);
+}
+
 double score_submission(const std::vector<Question>& qs, const std::map<std::string,std::string>& answers){
   double total=0, got=0;
   for(auto& q: qs){

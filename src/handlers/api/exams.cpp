@@ -14,6 +14,10 @@
 #include "redis/redis_real.hpp"
 #include <hiredis/hiredis.h>
 #endif
+#ifdef HAS_LIBPQ
+#include "db/pool.hpp"
+#include "db/pool_real.hpp"
+#endif
 #include <string>
 #include <algorithm>
 #include <cstdlib>
@@ -169,7 +173,6 @@ Response health(const Request& req){
     "\"required_app_version\":\"\","
     "\"server_time_utc\":\""+helpers::format_iso_utc(std::chrono::system_clock::now())+"\","
     "\"status\":\"healthy\","
-    "\"status\":\"ok\","
     "\"success\":true,"
     "\"version\":\"2.7.2\"}");
   return r;
@@ -537,6 +540,34 @@ Response access_log(const Request& req){
   if(!store::active_store()->get_by_id(exam_id).has_value()){
     Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
   }
+  // Persist akses ke tabel access_log (best-effort; skema dimiliki Go).
+  // Gagal insert TIDAK menggagalkan response — response tetap 200 logged.
+#ifdef HAS_LIBPQ
+  try{
+    auto cfg_db=Config::load();
+    examvan::DbPool pool(cfg_db.database_url, 10);
+    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    if(auto c=real.acquire()){
+      std::string mac=json_string_field(req.body,"mac_address");
+      std::string sname=json_string_field(req.body,"student_name");
+      std::string snum=json_string_field(req.body,"exam_number");
+      std::string sclass=json_string_field(req.body,"student_class");
+      if(mac.empty()){
+        auto form=helpers::parse_form(req.body);
+        if(form.count("mac_address")) mac=form["mac_address"];
+        if(form.count("student_name")) sname=form["student_name"];
+        if(form.count("exam_number")) snum=form["exam_number"];
+        if(form.count("student_class")) sclass=form["student_class"];
+      }
+      std::string now_txt=helpers::format_iso_utc(std::chrono::system_clock::now());
+      real.exec_params(c.get(),
+        "INSERT INTO access_log (exam_id, mac_address, student_name, exam_number, student_class, created_at)"
+        " VALUES ($1,$2,$3,$4,$5,$6)",
+        {std::to_string(exam_id), mac, sname, snum, sclass, now_txt});
+      real.release(c.release());
+    }
+  }catch(...){ /* best-effort: jangan sampai access-log mematikan handler */ }
+#endif
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::AccessLogResponse pb;

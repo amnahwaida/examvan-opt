@@ -77,7 +77,8 @@ private:
   std::atomic<bool> running_{false};
   std::vector<std::thread> workers_;
   std::thread batch_th_;
-  std::queue<SubmissionJob> batch_q_;
+  // Batch berisi (job, skor) agar skor bisa dipersist ke tabel submissions.
+  std::queue<std::pair<SubmissionJob,std::optional<double>>> batch_q_;
   mutable std::mutex mu_;
   std::condition_variable cv_;
 };

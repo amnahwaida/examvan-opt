@@ -202,7 +202,10 @@ std::optional<SubmissionJob> SubmissionJob::from_protobuf(const std::string& s){
 std::string JobResult::to_json() const {
   std::ostringstream ss;
   ss<<"{\"job_id\":\""<<job_id<<"\",\"success\":"<<(success?"true":"false")
-    <<",\"message\":\""<<message<<"\",\"processed_at\":\""<<processed_at<<"\"}";
+    <<",\"message\":\""<<message<<"\",\"processed_at\":\""<<processed_at<<"\"";
+  ss<<",\"score\":";
+  if(score.has_value()) ss<<*score; else ss<<"null";
+  ss<<"}";
   return ss.str();
 }
 
@@ -273,7 +276,7 @@ void Worker::run_worker(int id){
     if(scorer_) score=scorer_(*job);
     {
       std::lock_guard<std::mutex> g(mu_);
-      batch_q_.push(*job);
+      batch_q_.push({*job, score});
     }
     cv_.notify_one();
     JobResult r{job->job_id, true, score, "ok", helpers::format_iso_utc(std::chrono::system_clock::now())};
@@ -286,7 +289,7 @@ void Worker::run_batch(){
   while(running_){
     std::unique_lock<std::mutex> lk(mu_);
     cv_.wait_for(lk, std::chrono::seconds(5), [this]{ return !batch_q_.empty() || !running_; });
-    std::vector<SubmissionJob> batch;
+    std::vector<std::pair<SubmissionJob,std::optional<double>>> batch;
     while(!batch_q_.empty()){
       batch.push_back(batch_q_.front());
       batch_q_.pop();
@@ -298,8 +301,17 @@ void Worker::run_batch(){
       examvan::DbPool pool(cfg.database_url, 10);
       examvan::db::RealPool real(pool.sanitized_url(), 10);
       if(auto c=real.acquire()){
-        for(auto &j: batch){
-          real.exec_params(c.get(),"INSERT INTO submissions (job_id, exam_id, student_name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",{j.job_id, std::to_string(j.exam_id), j.student_name});
+        for(auto &b: batch){
+          auto& j=b.first;
+          auto& score=b.second;
+          // Best-effort: skema tabel submissions dimiliki Go; gagal insert
+          // tidak mematikan worker (hasil exec_params sengaja diabaikan).
+          std::string status = score.has_value() ? "scored" : "pending";
+          std::string score_text = score.has_value() ? std::to_string(*score) : "0";
+          real.exec_params(c.get(),
+            "INSERT INTO submissions (job_id, exam_id, student_name, exam_number, student_class, score, status, submitted_at)"
+            " VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING",
+            {j.job_id, std::to_string(j.exam_id), j.student_name, j.exam_number, j.student_class, score_text, status, j.enqueued_at});
         }
       }
 #else

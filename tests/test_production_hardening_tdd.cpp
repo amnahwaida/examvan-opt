@@ -7,6 +7,8 @@
 #include "http/router.hpp"
 #include "http/router_full.hpp"
 #include "queue/submission_queue.hpp"
+#include "jobs/jobs.hpp"
+#include "middleware/scoring.hpp"
 #include "store/exam_store.hpp"
 #include "store/exam_store_memory.hpp"
 #include <cstdlib>
@@ -128,6 +130,28 @@ TEST(ProductionHardening, R2Upload_BucketRequired){
   r2::R2Config rc{"k","s","https://test.r2.cloudflarestorage.com",""};
   r2::R2Client client{rc};
   EXPECT_FALSE(client.upload("exams/1/soal.pdf","%PDF-1.4\n%%EOF\n"));
+}
+
+TEST(ProductionHardening, R2Verify_FailsClosedUnit){
+  reset_r2_flags();
+  r2::R2Config rc{"k","s","https://wrong.example.com","examvan-pdfs"};
+  r2::R2Client client{rc};
+  EXPECT_FALSE(client.verify("exams/1/soal.pdf"));
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  EXPECT_TRUE(client.verify("exams/1/soal.pdf"));
+  reset_r2_flags();
+}
+
+TEST(ProductionHardening, R2Upload_VerifyPassesInTestMode){
+  clear_exams_for_testing();
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+  std::string boundary="----V1";
+  Request req; req.body=multipart_pdf(boundary,"soal.pdf","%PDF-1.4 fake\n%%EOF\n");
+  req.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  auto res=create_exam(req);
+  EXPECT_EQ(res.status,201) << res.body;
+  reset_r2_flags();
 }
 
 // ----------------------------------------------------------------------
@@ -401,4 +425,133 @@ TEST(ProductionHardening, RequestApproval_ValidToken200){
   auto res=request_approval(rq);
   EXPECT_EQ(res.status,200) << res.body;
   EXPECT_NE(res.body.find("\"pending\""), std::string::npos) << res.body;
+}
+
+// ----------------------------------------------------------------------
+// Health — key status tidak boleh dobel ("healthy" + "ok" duplikat)
+// ----------------------------------------------------------------------
+
+TEST(ProductionHardening, Health_SingleStatusKey){
+  Request req; req.method="GET"; req.path="/api/health";
+  auto res=health(req);
+  EXPECT_EQ(res.status,200);
+  size_t count=0, pos=0;
+  while((pos=res.body.find("\"status\":",pos))!=std::string::npos){ count++; pos+=9; }
+  EXPECT_EQ(count,1u) << "health hanya boleh punya SATU key status: " << res.body;
+  EXPECT_NE(res.body.find("\"status\":\"healthy\""), std::string::npos) << res.body;
+}
+
+// ----------------------------------------------------------------------
+// Expiry job — tombstone otomatis exam yang kedaluwarsa + purge 30 hari
+// ----------------------------------------------------------------------
+
+TEST(ProductionHardening, Expiry_TombstonesExpiredExam){
+  clear_exams_for_testing();
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+  Request cr; cr.body="name=Expired&file_path=soal.pdf&size_bytes=100";
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
+    e.status="active";
+    e.end_time="2020-01-01T00:00:00Z"; // sudah lewat
+  });
+  examvan::jobs::run_expiry_job();
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_TRUE(exam->tombstoned_at.has_value()) << "exam kedaluwarsa harus di-tombstone";
+  EXPECT_EQ(exam->status, "deleted");
+}
+
+TEST(ProductionHardening, Expiry_KeepsFutureExam){
+  clear_exams_for_testing();
+  Request cr; cr.body="name=Future&file_path=soal.pdf&size_bytes=100";
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
+    e.status="active";
+    e.end_time="2099-01-01T00:00:00Z"; // masih jauh
+  });
+  examvan::jobs::run_expiry_job();
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_FALSE(exam->tombstoned_at.has_value()) << "exam masa depan tidak boleh di-tombstone";
+  EXPECT_EQ(exam->status, "active");
+}
+
+TEST(ProductionHardening, Expiry_TombstonesByCreatedAtAge){
+  clear_exams_for_testing();
+  Request cr; cr.body="name=OldCreated&file_path=soal.pdf&size_bytes=100";
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  // Tanpa end_time: kedaluwarsa = created_at + 14 hari. Buat created_at 30 hari lalu.
+  examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
+    e.created_at="2020-01-01T00:00:00Z";
+  });
+  examvan::jobs::run_expiry_job();
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_TRUE(exam->tombstoned_at.has_value()) << "created_at terlalu tua harus di-tombstone";
+}
+
+TEST(ProductionHardening, Expiry_DoesNotReTombstoneRecent){
+  clear_exams_for_testing();
+  Request cr; cr.body="name=Tombstoned&file_path=soal.pdf&size_bytes=100";
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
+    e.status="deleted";
+    e.tombstoned_at="2026-09-01T00:00:00Z"; // baru, belum 30 hari
+  });
+  examvan::jobs::run_expiry_job();
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value()) << "tombstone <30 hari tidak boleh di-purge";
+  EXPECT_EQ(exam->tombstoned_at.value_or(""), "2026-09-01T00:00:00Z");
+}
+
+TEST(ProductionHardening, Expiry_PurgesOldTombstoned){
+  clear_exams_for_testing();
+  Request cr; cr.body="name=PurgeMe&file_path=soal.pdf&size_bytes=100";
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
+    e.status="deleted";
+    e.tombstoned_at="2020-01-01T00:00:00Z"; // >30 hari
+  });
+  examvan::jobs::run_expiry_job();
+  EXPECT_FALSE(examvan::store::active_store()->get_by_id(id).has_value())
+    << "tombstone >30 hari harus dihapus permanen";
+}
+
+// ----------------------------------------------------------------------
+// Alur siswa — scoring pakai questions_json exam yang nyata
+// ----------------------------------------------------------------------
+
+TEST(ProductionHardening, Scoring_UsesQuestionsJson){
+  std::string qjson="[{\"number\":1,\"type\":\"single_choice\",\"weight\":1.0,\"key\":\"A\"},"
+    "{\"number\":2,\"type\":\"single_choice\",\"weight\":1.0,\"key\":\"B\"}]";
+  std::map<std::string,std::string> benar{{"1","A"},{"2","B"}};
+  auto s=examvan::scoring::score_submission_json(qjson, benar);
+  ASSERT_TRUE(s.has_value());
+  EXPECT_DOUBLE_EQ(*s, 100.0);
+  std::map<std::string,std::string> salah{{"1","A"},{"2","C"}};
+  auto s2=examvan::scoring::score_submission_json(qjson, salah);
+  ASSERT_TRUE(s2.has_value());
+  EXPECT_DOUBLE_EQ(*s2, 50.0);
+  // Tanpa soal / soal kosong → nullopt (tidak bisa dinilai).
+  EXPECT_FALSE(examvan::scoring::score_submission_json("", benar).has_value());
+  EXPECT_FALSE(examvan::scoring::score_submission_json("[{\"type\":\"x\"}]", benar).has_value());
+}
+
+TEST(ProductionHardening, JobResult_ScoreSerialized){
+  queue::JobResult r; r.job_id="j1"; r.success=true; r.score=87.5; r.message="ok";
+  auto j=r.to_json();
+  EXPECT_NE(j.find("\"score\":87.5"), std::string::npos) << j;
+  queue::JobResult r2; r2.job_id="j2"; r2.success=true; r2.message="ok";
+  auto j2=r2.to_json();
+  EXPECT_NE(j2.find("\"score\":null"), std::string::npos) << j2;
 }

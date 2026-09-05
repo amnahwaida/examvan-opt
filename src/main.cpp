@@ -98,8 +98,10 @@ int main(){
   std::cout << srv.describe() << "\n";
   srv.listen({cfg.port});
   auto scorer_fn = [](const examvan::queue::SubmissionJob& job)->std::optional<double>{
-    auto qs = examvan::scoring::parse_questions("[]");
-    return examvan::scoring::score_submission(qs, job.answers);
+    // Nilai dengan soal NYATA dari exam (questions_json), bukan "[]" hardcoded.
+    auto exam = examvan::store::active_store()->get_by_id(job.exam_id);
+    if(!exam) return std::nullopt;
+    return examvan::scoring::score_submission_json(exam->questions_json.value_or(""), job.answers);
   };
 #ifdef HAS_HIREDIS
   examvan::queue::SubmissionQueue sq(

@@ -239,6 +239,41 @@ bool R2Client::upload(const std::string& key, const std::string& data, const std
 #endif
 }
 
+bool R2Client::verify(const std::string& key) const {
+  if(!enabled()) return false;
+  if(cfg.bucket.empty()) return false;
+  const char* tm=std::getenv("EXAMVAN_R2_TESTMODE");
+  if(tm && std::string(tm)=="1") return true;
+#ifndef HAS_LIBCURL
+  return false;
+#else
+  if(cfg.endpoint.find("r2.cloudflarestorage.com")==std::string::npos) return false;
+  std::string payload_hash=sha256_hex(std::string{});
+  std::string host, canonical_uri;
+  std::string url=build_url(cfg, key, host, canonical_uri);
+  std::string auth, date_full, date8;
+  curl_append_header(auth, date_full, date8, cfg, "HEAD", canonical_uri, payload_hash, host);
+  CURL* c=curl_easy_init();
+  if(!c) return false;
+  struct curl_slist* hdrs=nullptr;
+  hdrs=curl_slist_append(hdrs, ("Authorization: "+auth).c_str());
+  hdrs=curl_slist_append(hdrs, ("x-amz-date: "+date_full).c_str());
+  hdrs=curl_slist_append(hdrs, ("x-amz-content-sha256: "+payload_hash).c_str());
+  curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, "HEAD");
+  curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+  curl_easy_setopt(c, CURLOPT_TIMEOUT, 15L);
+  curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, curl_discard_cb);
+  curl_easy_setopt(c, CURLOPT_NOBODY, 0L);
+  CURLcode rc=curl_easy_perform(c);
+  long code=0; curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+  curl_slist_free_all(hdrs);
+  curl_easy_cleanup(c);
+  if(rc!=CURLE_OK) return false;
+  return code>=200 && code<300;
+#endif
+}
+
 bool R2Client::remove(const std::string& key) const {
   if(!enabled()) return false;
   if(cfg.bucket.empty()) return false;

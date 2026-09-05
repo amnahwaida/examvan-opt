@@ -29,6 +29,8 @@ struct R2Client {
   std::string signed_url(const std::string& key, int ttl=3600) const { return presign_url(cfg,key,ttl); }
   bool upload(const std::string& key, const std::string& data, const std::string& content_type="application/pdf") const;
   bool remove(const std::string& key) const;
+  // Verifikasi object benar-benar ada di R2 (HEAD request).
+  bool verify(const std::string& key) const;
 };
 
 } // namespace examvan::r2
