@@ -664,6 +664,35 @@ TEST(ProductionHardening, Queue_JobJsonRoundTrip_FullFields){
   EXPECT_EQ(j2->identity_data["nis"], "12345");
 }
 
+TEST(ProductionHardening, Queue_JobProtoRoundTrip_FullFields){
+#ifdef HAS_PROTOBUF
+  queue::SubmissionJob j;
+  j.job_id="e2e1"; j.exam_id=9; j.student_name="Budi"; j.exam_number="01";
+  j.student_class="XII-A"; j.start_time="2026-09-01T08:00:00Z";
+  j.mac_address="aa:bb"; j.enqueued_at="2026-09-01T08:05:00Z"; j.retries=1;
+  j.answers={{"1","A"},{"2","B"}};
+  j.identity_data={{"nis","12345"}};
+  auto j2=queue::SubmissionJob::from_protobuf(j.to_protobuf());
+  ASSERT_TRUE(j2.has_value()) << "from_protobuf harus bisa parse payload sendiri";
+  EXPECT_EQ(j2->job_id, "e2e1");
+  EXPECT_EQ(j2->exam_id, 9);
+  EXPECT_EQ(j2->student_name, "Budi");
+  EXPECT_EQ(j2->exam_number, "01");
+  EXPECT_EQ(j2->student_class, "XII-A");
+  EXPECT_EQ(j2->mac_address, "aa:bb");
+  EXPECT_EQ(j2->start_time, "2026-09-01T08:00:00Z");
+  EXPECT_EQ(j2->enqueued_at, "2026-09-01T08:05:00Z");
+  EXPECT_EQ(j2->retries, 1);
+  ASSERT_EQ(j2->answers.size(), 2u);
+  EXPECT_EQ(j2->answers["1"], "A");
+  EXPECT_EQ(j2->answers["2"], "B");
+  ASSERT_EQ(j2->identity_data.size(), 1u);
+  EXPECT_EQ(j2->identity_data["nis"], "12345");
+#else
+  GTEST_SKIP() << "HAS_PROTOBUF tidak aktif di build ini";
+#endif
+}
+
 // ----------------------------------------------------------------------
 // Sequence sync PG (setval) — setelah restore backup, sequence bisa
 // ketinggalan dari MAX(id) sehingga nextval mengembalikan id yang sudah

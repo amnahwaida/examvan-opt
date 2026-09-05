@@ -61,6 +61,12 @@ message SubmissionJob {
   string mac_address = 6;
   int32 retries = 7;
   string enqueued_at = 8;
+  // Field baru (9-11) untuk payload submit lengkap — start_time + jawaban +
+  // identitas siswa. Wire-compatible: protobuf backward/forward compatible
+  // untuk field tambahan dengan nomor baru.
+  string start_time = 9;
+  map<string, string> answers = 10;
+  map<string, string> identity_data = 11;
 }
 
 message HealthResponse {

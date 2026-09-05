@@ -183,8 +183,11 @@ std::string SubmissionJob::to_protobuf() const {
   pb.set_exam_number(exam_number);
   pb.set_student_class(student_class);
   pb.set_mac_address(mac_address);
+  pb.set_start_time(start_time);
   pb.set_retries(retries);
   pb.set_enqueued_at(enqueued_at);
+  for(const auto& kv: answers) (*pb.mutable_answers())[kv.first]=kv.second;
+  for(const auto& kv: identity_data) (*pb.mutable_identity_data())[kv.first]=kv.second;
   std::string out;
   pb.SerializeToString(&out);
   return out;
@@ -199,8 +202,11 @@ std::optional<SubmissionJob> SubmissionJob::from_protobuf(const std::string& s){
   j.exam_number=pb.exam_number();
   j.student_class=pb.student_class();
   j.mac_address=pb.mac_address();
+  j.start_time=pb.start_time();
   j.retries=pb.retries();
   j.enqueued_at=pb.enqueued_at();
+  for(const auto& kv: pb.answers()) j.answers[kv.first]=kv.second;
+  for(const auto& kv: pb.identity_data()) j.identity_data[kv.first]=kv.second;
   return j;
 }
 #endif
