@@ -73,6 +73,13 @@ static std::string json_field(const std::string& body, const std::string& key){
   size_t e=body.find_first_of(",}",s);
   return body.substr(s,e-s);
 }
+static std::string read_source_file(const std::string& path){
+  std::ifstream f(path);
+  std::ostringstream ss;
+  if(f) ss << f.rdbuf();
+  return ss.str();
+}
+
 // Buat exam + tandai active & started; kembalikan id.
 static int create_started_exam_id(){
   clear_exams_for_testing();
@@ -395,6 +402,64 @@ TEST(ProductionHardening, AccessLog_ValidExam200){
   EXPECT_NE(res.body.find("\"logged\":true"), std::string::npos) << res.body;
 }
 
+// ----------------------------------------------------------------------
+// Kontrak Go access_log (handlers/api/exams.go) — event & identity_data
+// ----------------------------------------------------------------------
+
+TEST(ProductionHardening, AccessLog_InvalidEvent400){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["Content-Type"]="application/json";
+  rq.body="{\"event\":\"bogus\"}";
+  auto res=access_log(rq);
+  EXPECT_EQ(res.status,400) << res.body;
+  EXPECT_NE(res.body.find("Event tidak valid"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, AccessLog_EmptyEventOk200){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.body="{\"student_name\":\"Ani\"}"; // tanpa event → default heartbeat (Go)
+  auto res=access_log(rq);
+  EXPECT_EQ(res.status,200) << res.body;
+}
+
+TEST(ProductionHardening, AccessLog_LoginLogoutEventsOk200){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  for(auto ev: {"login","logout"}){
+    Request rq; rq.params["exam_id"]=std::to_string(id);
+    rq.headers["Content-Type"]="application/json";
+    rq.body=std::string("{\"event\":\"")+ev+"\"}";
+    EXPECT_EQ(access_log(rq).status,200);
+  }
+}
+
+TEST(ProductionHardening, AccessLog_EventContractGo){
+  auto c=read_source_file("src/handlers/api/exams.cpp");
+  EXPECT_NE(c.find("if(event.empty()) event=\"heartbeat\";"), std::string::npos)
+    << "Go: event kosong → heartbeat (bukan login)";
+  EXPECT_NE(c.find("event!=\"login\" && event!=\"heartbeat\" && event!=\"logout\""), std::string::npos)
+    << "Go: hanya login/heartbeat/logout yang valid";
+  EXPECT_EQ(c.find("event=\"login\";"), std::string::npos) << "default lama 'login' harus hilang";
+}
+
+TEST(ProductionHardening, AccessLog_IdentityDataSanitizedGo){
+  auto c=read_source_file("src/handlers/api/exams.cpp");
+  EXPECT_NE(c.find("sanitize_identity_map_json"), std::string::npos)
+    << "identity_data harus di-sanitize per nilai (paritas Go sanitizeMap)";
+  EXPECT_NE(c.find("sanitize_student_input"), std::string::npos);
+}
+
+TEST(ProductionHardening, AccessLog_MacSanitizedGo){
+  auto c=read_source_file("src/handlers/api/exams.cpp");
+  EXPECT_NE(c.find("sanitize_mac_like_go"), std::string::npos)
+    << "mac harus di-sanitize (paritas Go sanitizeMAC)";
+  EXPECT_NE(c.find("\"unknown\""), std::string::npos) << "mac kosong → 'unknown'";
+}
+
 TEST(ProductionHardening, CompleteExam_MissingExam404){
   Request rq; rq.params["exam_id"]="99999";
   EXPECT_EQ(complete_exam(rq).status,404);
@@ -572,13 +637,6 @@ TEST(ProductionHardening, JobResult_ScoreSerialized){
 // log bernama student_access_logs (bukan access_log); exams.status CHECK
 // hanya mengizinkan active/inactive (bukan 'deleted').
 // ----------------------------------------------------------------------
-
-static std::string read_source_file(const std::string& path){
-  std::ifstream f(path);
-  std::ostringstream ss;
-  if(f) ss << f.rdbuf();
-  return ss.str();
-}
 
 TEST(ProductionHardening, Expiry_TombstoneUsesInactiveStatus){
   auto j = read_source_file("src/jobs/jobs.cpp");

@@ -7,6 +7,7 @@
 #include "services/examtoken/examtoken.hpp"
 #include "handlers/r2/r2.hpp"
 #include "config/config.hpp"
+#include <sstream>
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
@@ -532,6 +533,50 @@ Response exam_result(const Request& req){
   Response r; r.json(200,"{\"success\":true,\"exam_id\":"+std::to_string(exam_id)+",\"score\":null,\"has_score\":false}"); return r;
 }
 
+// Paritas Go sanitizeMAC (handlers/api/exams.go): hanya alnum + ':' '.' '-'
+// '_', cap 100, kosong → "unknown".
+static std::string sanitize_mac_like_go(const std::string& raw){
+  std::string s;
+  for(unsigned char c: raw){
+    if((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c==':'||c=='.'||c=='-'||c=='_')
+      s.push_back(char(c));
+  }
+  if(s.size()>100) s.resize(100);
+  if(s.empty()) return "unknown";
+  return s;
+}
+// Paritas Go truncate (Go by rune; kita by byte + jaga agar tidak memotong
+// UTF-8 di tengah karakter).
+static std::string truncate_bytes(const std::string& s, size_t n){
+  if(s.size()<=n) return s;
+  std::string o=s.substr(0,n);
+  while(!o.empty() && ((unsigned char)o.back()&0xC0)==0x80) o.pop_back();
+  return o;
+}
+static std::string map_to_json_compact(const std::map<std::string,std::string>& m){
+  std::ostringstream ss; ss<<"{";
+  bool first=true;
+  for(auto& kv: m){
+    if(!first) ss<<",";
+    first=false;
+    ss<<"\""<<json_escape(kv.first)<<"\":\""<<json_escape(kv.second)<<"\"";
+  }
+  ss<<"}";
+  return ss.str();
+}
+// Paritas Go sanitizeMap: tiap nilai string di-trim + cap 200, lalu JSON ulang.
+static std::string sanitize_identity_map_json(const std::string& raw){
+  if(raw.empty()) return "";
+  auto m=parse_string_map(raw);
+  std::map<std::string,std::string> out;
+  for(auto& kv: m){
+    std::string v=helpers::sanitize_student_input(kv.second);
+    if(v.size()>200) v.resize(200);
+    out[kv.first]=v;
+  }
+  return map_to_json_compact(out);
+}
+
 Response access_log(const Request& req){
   auto it=req.params.find("exam_id");
   if(it==req.params.end() || it->second.empty()){
@@ -544,7 +589,39 @@ Response access_log(const Request& req){
   if(!store::active_store()->get_by_id(exam_id).has_value()){
     Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
   }
-  // Persist akses ke tabel access_log (best-effort; skema dimiliki Go).
+  // ---- Parsing & validasi (paritas Go handlers/api/exams.go) ----
+  std::string mac=json_string_field(req.body,"mac_address");
+  std::string sname=json_string_field(req.body,"student_name");
+  std::string snum=json_string_field(req.body,"exam_number");
+  std::string sclass=json_string_field(req.body,"student_class");
+  std::string event=json_string_field(req.body,"event");
+  std::string device=json_string_field(req.body,"device_info");
+  if(mac.empty()){
+    auto form=helpers::parse_form(req.body);
+    if(form.count("mac_address")) mac=form["mac_address"];
+    if(form.count("student_name")) sname=form["student_name"];
+    if(form.count("exam_number")) snum=form["exam_number"];
+    if(form.count("student_class")) sclass=form["student_class"];
+    if(form.count("event")) event=form["event"];
+    if(form.count("device_info")) device=form["device_info"];
+  }
+  // Go: event kosong → heartbeat (bukan login); hanya login/heartbeat/logout
+  // yang valid, selain itu 400 "Event tidak valid".
+  if(event.empty()) event="heartbeat";
+  if(event!="login" && event!="heartbeat" && event!="logout"){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Event tidak valid\"}"); return r;
+  }
+  // Sanitasi (paritas Go sanitizeMAC / truncate / sanitizeMap).
+  mac=sanitize_mac_like_go(mac);
+  sname=truncate_bytes(sname,200);
+  snum=truncate_bytes(snum,100);
+  sclass=truncate_bytes(sclass,100);
+  device=truncate_bytes(device,200);
+  std::string ip=req.headers.count("X-Forwarded-For")?req.headers.at("X-Forwarded-For"):"";
+  std::string identity=json_raw_value(req.body,"identity_data");
+  if(identity.empty()){ auto form=helpers::parse_form(req.body); if(form.count("identity_data")) identity=form["identity_data"]; }
+  identity=sanitize_identity_map_json(identity);
+  // Persist akses ke student_access_logs (best-effort; skema dimiliki Go).
   // Gagal insert TIDAK menggagalkan response — response tetap 200 logged.
 #ifdef HAS_LIBPQ
   try{
@@ -552,25 +629,6 @@ Response access_log(const Request& req){
     examvan::DbPool pool(cfg_db.database_url, 10);
     examvan::db::RealPool real(pool.sanitized_url(), 10);
     if(auto c=real.acquire()){
-      std::string mac=json_string_field(req.body,"mac_address");
-      std::string sname=json_string_field(req.body,"student_name");
-      std::string snum=json_string_field(req.body,"exam_number");
-      std::string sclass=json_string_field(req.body,"student_class");
-      std::string event=json_string_field(req.body,"event");
-      std::string device=json_string_field(req.body,"device_info");
-      if(mac.empty()){
-        auto form=helpers::parse_form(req.body);
-        if(form.count("mac_address")) mac=form["mac_address"];
-        if(form.count("student_name")) sname=form["student_name"];
-        if(form.count("exam_number")) snum=form["exam_number"];
-        if(form.count("student_class")) sclass=form["student_class"];
-        if(form.count("event")) event=form["event"];
-        if(form.count("device_info")) device=form["device_info"];
-      }
-      if(event.empty()) event="login"; // Go: AccessEventLogin
-      std::string ip=req.headers.count("X-Forwarded-For")?req.headers["X-Forwarded-For"]:"";
-      std::string identity=json_raw_value(req.body,"identity_data");
-      if(identity.empty()){ auto form=helpers::parse_form(req.body); if(form.count("identity_data")) identity=form["identity_data"]; }
       // Paritas Go: heartbeat TIDAK ditulis ke DB (Redis-only, hemat IO).
       // Kolom = schema Go student_access_logs (student_identifier = mac).
       if(event!="heartbeat"){
