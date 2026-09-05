@@ -32,6 +32,11 @@ TEST(F4Download, SystemAppNeedsId) {
   auto res=download_system_app(req);
   EXPECT_EQ(res.status,302);
   EXPECT_NE(res.headers["Location"].find("42"), std::string::npos);
+  // id non-numerik ditolak (jaga object key R2 tetap bersih).
+  req.params["id"]="../etc/passwd";
+  EXPECT_EQ(download_system_app(req).status,404);
+  req.params["id"]="42abc";
+  EXPECT_EQ(download_system_app(req).status,404);
 }
 
 TEST(F4Download, R2NotConfigured) {

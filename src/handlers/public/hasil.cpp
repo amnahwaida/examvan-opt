@@ -113,7 +113,11 @@ bool is_logged_in(const Request& req){
   auto it=req.headers.find("Cookie");
   if(it==req.headers.end()) return false;
   auto cfg=Config::load();
-  return verify_session_cookie(cfg.secret_key, it->second).has_value();
+  /* Dual-key: selama rotasi EXAMVAN_SECRET, session yang ditandatangani
+   * secret lama tetap dikenali — kalau tidak, guru yang sah tiba-tiba
+   * dianggap belum login saat membuka hasil (jawaban/kunci ter-strip). */
+  if(cfg.secret_prev.empty()) return verify_session_cookie(cfg.secret_key, it->second).has_value();
+  return verify_session_cookie_dual(cfg.secret_key, cfg.secret_prev, it->second).has_value();
 }
 
 std::string shared_partial(const std::string& name){

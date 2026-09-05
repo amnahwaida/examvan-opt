@@ -34,6 +34,9 @@ Response download_apk(const Request& req){
 Response download_system_app(const Request& req){
   auto it=req.params.find("id");
   if(it==req.params.end()){ Response r; r.status=404; r.json(404,"{\"error\":\"not found\"}"); return r; }
+  // id harus numerik (id system_apps di DB) — cegah karakter aneh masuk
+  // ke object key R2 (bukan local path, tapi jaga kebersihan presign URL).
+  for(char c: it->second) if(!(c>='0'&&c<='9')){ Response r; r.status=404; r.json(404,"{\"error\":\"not found\"}"); return r; }
   auto cfg=cfg_from_env();
   if(!cfg.enabled()){
     bool is_prod=false; if(auto* e=getenv("APP_ENV")) is_prod=std::string(e)=="production";
