@@ -66,16 +66,22 @@ static std::string make_zip(const std::vector<std::pair<std::string,std::string>
   return out;
 }
 
-// Escape XML untuk sel spreadsheet (inlineStr).
+// Escape XML untuk sel spreadsheet (inlineStr). XML 1.0 hanya mengizinkan
+// \t \n \r sebagai control char — selain itu (0x00-0x08, 0x0B, 0x0C,
+// 0x0E-0x1F) ILLEGAL dan membuat .xlsx tidak bisa dibuka. Nama siswa datang
+// dari input mentah (submit_exam tidak sanitize) → buang karakter illegal.
 static std::string xml_escape(const std::string& s){
   std::string o; o.reserve(s.size()+8);
-  for(char ch: s){
+  for(unsigned char ch: s){
     switch(ch){
       case '&': o+="&amp;"; break;
       case '<': o+="&lt;"; break;
       case '>': o+="&gt;"; break;
       case '"': o+="&quot;"; break;
-      default: o+=ch;
+      case '\t': case '\n': case '\r': o+=char(ch); break; // diizinkan XML
+      default:
+        if(ch < 0x20) break; // buang control char illegal (0x00-0x08,0x0B,0x0C,0x0E-0x1F)
+        o+=char(ch);
     }
   }
   return o;
