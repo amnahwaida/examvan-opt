@@ -4,6 +4,7 @@
 #include "handlers/public/hasil.hpp"
 #include <fstream>
 #include <string>
+#include <vector>
 
 using namespace examvan;
 
@@ -36,6 +37,55 @@ TEST(Characterization, PublicHasilStructure) {
   auto res2=r.dispatch(req);
   EXPECT_EQ(res2.status,200);
   examvan::handlers::public_::clear_exams_for_test();
+}
+
+TEST(Characterization, HasilApiMultiSelectKeyNotLeakedOrCorrupted) {
+  /* Soal multiple_choice punya "key":["A","B"] (array). strip_sensitive_keys
+   * harus menghapus key utuh TANPA merusak JSON — regresi: dulu menyisakan
+   * "B"], dan membocorkan sisa kunci jawaban ke pengunjung public. */
+  Config cfg; cfg.secret_key=std::string(32,'x');
+  Router r; register_full_routes(r,cfg);
+  examvan::models::Exam e;
+  e.token="MULTI1"; e.name="Tes Multi";
+  e.questions_json=R"([{"number":1,"type":"multiple_choice","weight":4,"partial_scoring":true,"key":["A","B"],"choices":["A","B","C","D"]}])";
+  e.public_results=1; e.show_answers=0; // non-logged → key must be stripped
+  examvan::handlers::public_::set_exam_for_test("MULTI1", e);
+  Request req; req.method="GET"; req.path="/api/hasil/MULTI1"; req.params["token"]="MULTI1";
+  auto res=r.dispatch(req);
+  examvan::handlers::public_::clear_exams_for_test();
+  EXPECT_EQ(res.status,200);
+  // Ambil hanya array "questions":[...] — identity_fields memakai "key"
+  // sbg nama field yang sah, bukan kunci jawaban.
+  auto qp=res.body.find("\"questions\":[");
+  ASSERT_NE(qp, std::string::npos);
+  size_t qstart=qp+std::string("\"questions\":[").size();
+  // Cari kurung tutup array questions (luar string).
+  size_t qend=qstart; bool in_str=false, esc=false; int depth=1;
+  for(; qend<res.body.size(); ++qend){
+    char c=res.body[qend];
+    if(esc){ esc=false; continue; }
+    if(c=='\\' && in_str){ esc=true; continue; }
+    if(c=='"'){ in_str=!in_str; continue; }
+    if(in_str) continue;
+    if(c=='[') depth++;
+    else if(c==']'){ if(--depth==0){ break; } }
+  }
+  std::string q=res.body.substr(qstart, qend-qstart);
+  EXPECT_EQ(q.find("\"key\""), std::string::npos) << "answer key leaked in questions";
+  EXPECT_EQ(q.find("\"answer\""), std::string::npos) << "answer field leaked in questions";
+  // Tidak ada fragmen key yang tertinggal (dulu: "B"],) dan choices utuh.
+  EXPECT_EQ(q.find("B\"]"), std::string::npos) << "key fragment left behind";
+  EXPECT_NE(q.find("\"choices\":[\"A\",\"B\",\"C\",\"D\"]"), std::string::npos) << "choices should remain intact";
+}
+
+TEST(Characterization, CekHasilTokenQueryRedirects){
+  /* Form "Cek Hasil" submit GET /hasil?token=AB12CD34 → harus redirect ke
+   * /hasil/AB12CD34 (dulu token diabaikan, form seolah rusak). */
+  Config cfg; Router r; register_full_routes(r,cfg);
+  Request req; req.method="GET"; req.path="/hasil"; req.query="token=ab12cd34";
+  auto res=r.dispatch(req);
+  EXPECT_EQ(res.status,302);
+  EXPECT_EQ(res.headers["Location"], "/hasil/AB12CD34"); // token di-uppercase
 }
 
 TEST(Characterization, ShortUrlRedirect) {

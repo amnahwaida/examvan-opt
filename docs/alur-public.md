@@ -23,7 +23,7 @@ frozen (`EXAMVAN/webui`). Berlaku untuk versi 2.7.x.
 | GET | `/reset-password?username=` | `auth::reset_password_page` | ✅ live (ini) |
 | POST | `/reset-password?username=` | `auth::reset_password_handler` | ✅ live (ini) |
 | GET | `/download` · `/download/apk` · `/download/app/:id` | `public_::download_*` | ✅ live |
-| GET | `/hasil` | `public_::cek_hasil_page` | ✅ live |
+| GET | `/hasil` | `public_::cek_hasil_page` | ✅ live (form `?token=` → 302 `/hasil/:token`) |
 | GET | `/hasil/:token` | `public_::hasil_page` | ✅ live |
 | GET | `/:token` | 302 → `/hasil/:token` | ✅ live |
 | GET | `/api/hasil/:token` | `public_::cek_hasil_api` | ✅ live + rate limit 30/mnt |

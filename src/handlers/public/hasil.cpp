@@ -381,6 +381,12 @@ const std::string kDefaultIdentityFields =
   "{\"key\":\"student_class\",\"label\":\"Kelas\",\"required\":true}]";
 
 // Buang "key"/"answer" dari raw JSON soal bila pengunjung tak berhak.
+/* Hapus pasangan `,"key":<nilai>` / `,"answer":<nilai>` dari JSON soal.
+ * Nilai bisa string ("A"), ARRAY (["A","B"] utk multiple_choice), objek,
+ * atau angka — jadi penghapusan harus JSON-aware: lewati string (dengan
+ * escape), lalu struktur bersarang [ ]/{ } hingga nilai lengkap terhapus.
+ * Naif (hapus sampai koma pertama) merusak JSON utk key array & membocorkan
+ * sisa key (["A dihapus, "B"] tertinggal). */
 std::string strip_sensitive_keys(const std::string& questions_json){
   std::string out=questions_json;
   for(const std::string& k: std::vector<std::string>{"key","answer"}){
@@ -388,12 +394,21 @@ std::string strip_sensitive_keys(const std::string& questions_json){
     size_t p=0;
     while((p=out.find(needle,p))!=std::string::npos){
       size_t v=p+needle.size();
-      if(v<out.size() && out[v]=='"'){
-        size_t e=v+1; while(e<out.size()){ if(out[e]=='\\'){e+=2;continue;} if(out[e]=='"') break; e++; }
-        out.erase(p, e+1-p);
-      } else if(v<out.size()){
-        size_t e=v; while(e<out.size() && out[e]!=',' && out[e]!='}') e++;
-        out.erase(p, e-p);
+      size_t end=v;
+      bool in_str=false, esc=false;
+      int depth=0;
+      for(; end<out.size(); ++end){
+        char c=out[end];
+        if(esc){ esc=false; continue; }
+        if(c=='\\' && in_str){ esc=true; continue; }
+        if(c=='"'){ in_str=!in_str; continue; }
+        if(in_str) continue;
+        if(c=='[' || c=='{') depth++;
+        else if(c==']' || c=='}'){ if(depth==0) break; depth--; } // tutup nilai array/objek
+        else if(depth==0 && (c==',' || c=='}')) break; // nilai primitif selesai
+      }
+      if(end>v){
+        out.erase(p, end-p);
       } else break;
     }
   }
@@ -403,6 +418,16 @@ std::string strip_sensitive_keys(const std::string& questions_json){
 } // namespace
 
 Response cek_hasil_page(const Request& req){
+  // Form "Cek Hasil" submit GET /hasil?token=AB12CD34 → redirect ke halaman
+  // hasil token itu (sama seperti /:token). Tanpa ini token diabaikan dan
+  // form seolah rusak.
+  auto q=helpers::parse_form(req.query);
+  auto ft=q.find("token");
+  if(ft!=q.end() && !ft->second.empty()){
+    std::string t=ft->second;
+    for(char &c: t) c=(char)std::toupper((unsigned char)c);
+    Response r; r.status=302; r.headers["Location"]="/hasil/"+t; return r;
+  }
   std::string ver="2.7.2";
   auto it=req.headers.find("X-Version");
   if(it!=req.headers.end()) ver=it->second;
