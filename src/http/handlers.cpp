@@ -25,7 +25,11 @@ void register_routes(Router& r, const Config& cfg){
   r.add("GET","/", [cfg](const Request& req) mutable {
     auto it=req.headers.find("Cookie");
     if(it!=req.headers.end()){
-      auto s=verify_session_cookie(cfg.secret_key, it->second);
+      /* Dual-key: selama rotasi EXAMVAN_SECRET, session yang ditandatangani
+       * secret lama tetap dikenali (pola sama seperti route admin). */
+      std::string prev=cfg.secret_prev;
+      auto s=prev.empty()? verify_session_cookie(cfg.secret_key, it->second)
+                         : verify_session_cookie_dual(cfg.secret_key, prev, it->second);
       if(s.has_value() && s->admin_id!=0){
         Response rr; rr.status=302; rr.headers["Location"]="/admin/dashboard"; return rr;
       }

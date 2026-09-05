@@ -46,6 +46,17 @@ TEST(Characterization, ShortUrlRedirect) {
   EXPECT_EQ(res.headers["Location"], "/hasil/MYTOKEN");
 }
 
+TEST(Characterization, AdminRedirectNotShadowedByTokenCatchall) {
+  /* /admin (1 segmen) harus redirect ke dashboard, TIDAK tertangkap
+   * catch-all /:token → /hasil/admin. Router first-match. */
+  Config cfg; cfg.secret_key=std::string(32,'x');
+  Router r; register_full_routes(r,cfg);
+  Request req; req.method="GET"; req.path="/admin";
+  auto res=r.dispatch(req);
+  EXPECT_EQ(res.status,302);
+  EXPECT_EQ(res.headers["Location"], "/admin/dashboard");
+}
+
 TEST(Characterization, ApiVersionWebClientAllowed) {
   /* Semantik Go: TANPA header X-App-Version → izinkan (client web);
    * required kosong (fresh DB tanpa system_apps) → izinkan semua. */

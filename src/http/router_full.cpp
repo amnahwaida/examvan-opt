@@ -146,6 +146,10 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/download/app/:id", handlers::public_::download_system_app);
   r.add("GET","/hasil", handlers::public_::cek_hasil_page);
   r.add("GET","/hasil/:token", handlers::public_::hasil_page);
+  /* /admin redirect harus SEBELUM catch-all /:token (router first-match):
+   * tanpa ini, GET /admin (1 segmen) tertangkap /:token → 302 ke /hasil/admin
+   * alih-alih /admin/dashboard. */
+  r.add("GET","/admin", [](const Request&){ Response rr; rr.status=302; rr.headers["Location"]="/admin/dashboard"; return rr; });
   r.add("GET","/:token", [](const Request& req){
     auto it=req.params.find("token"); std::string t=it!=req.params.end()?it->second:"";
     Response res; res.status=302; res.headers["Location"]="/hasil/"+t; return res;
@@ -167,7 +171,6 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/api/hasil/:token", rl_wrap(g_hasil_api_rl, handlers::public_::cek_hasil_api));
   r.add("POST","/api/webhook", handlers::api::webhook);
 
-  r.add("GET","/admin", [](const Request&){ Response rr; rr.status=302; rr.headers["Location"]="/admin/dashboard"; return rr; });
   auto check_auth=[cfg](const std::string& cookie_hdr)->bool{
     if(cookie_hdr.empty()) return false;
     if(cfg.secret_prev.empty()) return verify_session_cookie(cfg.secret_key, cookie_hdr).has_value();
