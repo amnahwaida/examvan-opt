@@ -1339,11 +1339,10 @@ TEST(ProductionHardening, E2E_FullFlow_UploadStartSubmitScoreResult){
   w.start();
   const std::string result_key=std::string(queue::kResultKeyPrefix)+captured.job_id;
   int waited=0;
-  bool found=false;
   while(waited<200){
     {
       std::lock_guard<std::mutex> g(r_mu);
-      if(results.find(result_key)!=results.end()){ found=true; break; }
+      if(results.find(result_key)!=results.end()) break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(25)); waited++;
   }
@@ -2002,4 +2001,19 @@ TEST(ProductionHardening, LogoutCsrf_NoCookie403){
   req.headers["Cookie"]="csrf_token=test-csrf-token";
   auto ok=examvan::handlers::auth::logout_handler(req);
   EXPECT_EQ(ok.status,200);
+}
+
+// ===== E2E smoke menemukan: worker antrean mandek di produksi =====
+// 8 worker BRPOP pada SATU redisContext hiredis bersama (tidak thread-safe):
+// semua thread menunggu pada koneksi yang sama, job tidak pernah dikonsumsi
+// (llen terus bertambah). Tiap thread worker harus punya koneksi sendiri.
+TEST(ProductionHardening, QueueWorker_NoSharedRedisContext){
+  auto c=read_source_file("src/main.cpp");
+  // Harus ada koneksi thread_local untuk operasi queue (bukan redis_ctx tunggal).
+  EXPECT_NE(c.find("thread_local"), std::string::npos);
+  EXPECT_NE(c.find("queue_redis"), std::string::npos);
+  // BRPOP tidak boleh lagi memakai redis_ctx (ctx bersama antar-thread).
+  EXPECT_EQ(c.find("redisCommand(redis_ctx.get(),\"BRPOP"), std::string::npos);
+  // Hub boleh tetap pakai redis_ctx (jalur uWS single-thread), tapi queue tidak.
+  EXPECT_NE(c.find("BRPOP %s %d"), std::string::npos);
 }

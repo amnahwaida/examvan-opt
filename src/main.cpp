@@ -104,10 +104,18 @@ int main(){
     return examvan::scoring::score_submission_json(exam->questions_json.value_or(""), job.answers);
   };
 #ifdef HAS_HIREDIS
+  // redisContext hiredis TIDAK thread-safe. Worker BRPOP dengan SATU ctx
+  // bersama dari 8 thread membuat antrean mandek (semua thread menunggu pada
+  // koneksi yang sama, tidak ada yang menerima job). Setiap thread memakai
+  // koneksi thread_local miliknya sendiri untuk semua operasi queue.
+  auto queue_redis = [&]() -> examvan::redis_real::RedisPtr& {
+    static thread_local examvan::redis_real::RedisPtr own = examvan::redis_real::connect_redis(cfg.redis_url);
+    return own;
+  };
   examvan::queue::SubmissionQueue sq(
-    [&](const std::string& k,const std::string& v){ if(redis_ctx){ auto* r=(redisReply*)redisCommand(redis_ctx.get(),"LPUSH %s %b",k.c_str(),v.data(),v.size()); if(r) freeReplyObject(r); } },
-    [&](const std::string& k,int t)->std::optional<std::string>{ if(!redis_ctx) return std::nullopt; auto* r=(redisReply*)redisCommand(redis_ctx.get(),"BRPOP %s %d",k.c_str(),t); if(!r||r->type!=REDIS_REPLY_ARRAY||r->elements<2){ if(r) freeReplyObject(r); return std::nullopt; } std::string s(r->element[1]->str, r->element[1]->len); freeReplyObject(r); return s; },
-    [&](const std::string& k,const std::string& v){ if(redis_ctx) examvan::redis_real::redis_set(redis_ctx.get(), k, v, 3600); });
+    [&](const std::string& k,const std::string& v){ auto& c=queue_redis(); if(c){ auto* r=(redisReply*)redisCommand(c.get(),"LPUSH %s %b",k.c_str(),v.data(),v.size()); if(r) freeReplyObject(r); } },
+    [&](const std::string& k,int t)->std::optional<std::string>{ auto& c=queue_redis(); if(!c) return std::nullopt; auto* r=(redisReply*)redisCommand(c.get(),"BRPOP %s %d",k.c_str(),t); if(!r||r->type!=REDIS_REPLY_ARRAY||r->elements<2){ if(r) freeReplyObject(r); return std::nullopt; } std::string s(r->element[1]->str, r->element[1]->len); freeReplyObject(r); return s; },
+    [&](const std::string& k,const std::string& v){ auto& c=queue_redis(); if(c) examvan::redis_real::redis_set(c.get(), k, v, 3600); });
 #else
   examvan::queue::SubmissionQueue sq(
     [&](const std::string& k,const std::string& v){ (void)k; (void)v; },
