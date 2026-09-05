@@ -3,6 +3,7 @@
 #include "middleware/ratelimit.hpp"
 #include "middleware/cors.hpp"
 #include "middleware/body_limit.hpp"
+#include <thread>
 using namespace examvan::middleware;
 
 TEST(Middleware, VersionCompare) {
@@ -41,6 +42,21 @@ TEST(Middleware, RateLimit) {
   EXPECT_TRUE(rl.allow("ip2"));
   rl.reset();
   EXPECT_TRUE(rl.allow("ip1"));
+}
+
+TEST(Middleware, RateLimitEvictsStaleBuckets) {
+  /* Banjir key unik (X-Real-IP spoofed) tidak boleh menumbuhkan memori
+   * tanpa batas — bucket yang window-nya lewat harus disapu. Uji perilaku:
+   * setelah window singkat lewat, key lama boleh dipakai lagi (bucket di-refresh),
+   * dan banjir ribuan key unik tetap berfungsi (tidak ada state korup). */
+  RateLimiter rl(1, std::chrono::milliseconds(30));
+  // Isi banyak bucket unik melewati ambang sweep (1024).
+  for(int i=0;i<1500;i++) EXPECT_TRUE(rl.allow("bulk-"+std::to_string(i)));
+  // Key yang sudah lewat window-nya boleh dipakai lagi (bucket expired di-refresh).
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  EXPECT_TRUE(rl.allow("bulk-0")) << "expired bucket should be evicted/refreshable";
+  // Key yang masih dalam window tetap diblokir setelah refresh.
+  EXPECT_FALSE(rl.allow("bulk-0")) << "fresh bucket should enforce limit";
 }
 
 TEST(Middleware, CorsAllowAll) {
