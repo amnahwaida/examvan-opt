@@ -19,8 +19,9 @@ TEST(F4Hasil, DisabledWhenNotPublic) {
   set_exam_for_test("TOK123", e);
   examvan::Request req; req.params["token"]="TOK123";
   auto res=hasil_page(req);
-  EXPECT_EQ(res.status,200);
-  EXPECT_NE(res.body.find("Hasil belum dipublikasikan"), std::string::npos);
+  EXPECT_EQ(res.status,403); // paritas Go: Forbidden saat hasil non-publik & belum login
+  EXPECT_NE(res.body.find("Halaman Hasil Dinonaktifkan"), std::string::npos);
+  EXPECT_NE(res.body.find("const isDisabled = true"), std::string::npos);
   EXPECT_EQ(res.body.find("id=\"examTitle\""), std::string::npos);
 }
 

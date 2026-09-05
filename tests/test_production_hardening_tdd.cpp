@@ -1,6 +1,12 @@
 #include <gtest/gtest.h>
 #include "handlers/admin/exams.hpp"
 #include "handlers/admin/export.hpp"
+#include "handlers/auth/login.hpp"
+#include "handlers/public/hasil.hpp"
+#include "handlers/api/webhook.hpp"
+#include "handlers/auth/logout.hpp"
+#include "models/exam.hpp"
+#include "session/cookie.hpp"
 #include "handlers/api/exams.hpp"
 #include "handlers/r2/r2.hpp"
 #include "config/config.hpp"
@@ -1768,4 +1774,209 @@ TEST(ProductionHardening, AdminApiExecutesHandlerOnce){
     EXPECT_EQ(tail.find("h(r2)", first_h+4), std::string::npos)
       << "handler harus dipanggil SEKALI, bukan dua kali (h(r2) ganda)";
   }
+}
+
+// ===== Temuan #1: session login di-forge (admin_id=1 hardcoded) =====
+TEST(ProductionHardening, LoginSession_PayloadUsesRealAdminIdAndRole){
+  // Payload session harus dibangun dari id/role ASLI user (dari PG), bukan
+  // hardcode "admin_id=1&role=[\"guru\"]".
+  auto payload=examvan::handlers::auth::build_login_session_payload(7,"budi","[\"operator\"]");
+  auto decoded=examvan::b64_decode(payload);
+  EXPECT_NE(decoded.find("admin_id=7"), std::string::npos)
+    << "payload harus membawa admin_id asli (7), bukan 1: "<<decoded;
+  EXPECT_NE(decoded.find("username=budi"), std::string::npos);
+  EXPECT_NE(decoded.find("role=[\"operator\"]"), std::string::npos)
+    << "payload harus membawa role asli: "<<decoded;
+  // User 1 tetap valid (superadmin id=1) — nilai bukan yang di-forge.
+  auto p1=examvan::handlers::auth::build_login_session_payload(1,"admin","[\"superadmin\"]");
+  EXPECT_NE(examvan::b64_decode(p1).find("role=[\"superadmin\"]"), std::string::npos);
+}
+
+TEST(ProductionHardening, LoginSession_NoHardcodedAdminId1){
+  // Regresi: dulu login_handler membangun payload langsung
+  // b64_encode("admin_id=1&username="+username+"&role=[\"guru\"]") —
+  // setiap login jadi user 1 guru (privilege escalation, created_by salah).
+  auto c=read_source_file("src/handlers/auth/login.cpp");
+  EXPECT_EQ(c.find("admin_id=1&username="), std::string::npos)
+    << "payload session TIDAK boleh hardcode admin_id=1";
+  EXPECT_NE(c.find("build_login_session_payload"), std::string::npos)
+    << "login harus memakai builder payload bersama";
+}
+
+TEST(ProductionHardening, LoginSession_PgSelectsRealIdAndRole){
+  // Query PG saat auth sukses harus mengambil id + role asli user, bukan
+  // hanya password_hash.
+  auto c=read_source_file("src/handlers/auth/login.cpp");
+  size_t p=c.find("SELECT password_hash");
+  ASSERT_NE(p, std::string::npos) << "query PG auth tidak ditemukan";
+  std::string q=c.substr(p, 140);
+  EXPECT_NE(q.find("id"), std::string::npos)
+    << "query harus SELECT id juga (untuk session): "<<q;
+  EXPECT_NE(q.find("role"), std::string::npos)
+    << "query harus SELECT role juga (untuk session): "<<q;
+}
+
+// ===== Temuan #2: public Cek Hasil mati (g_exams test-only, api {"ok":true}) =====
+TEST(ProductionHardening, HasilPage_RendersTemplateContext){
+  // hasil_page harus render template dgn konteks asli (token, isDisabled,
+  // showAnswers, isLoggedIn, error) — bukan 404/"Ujian tidak ditemukan"
+  // untuk semua token (dulu g_exams hanya diisi set_exam_for_test).
+  examvan::handlers::public_::clear_exams_for_test();
+  examvan::models::Exam e; e.token="TOK999"; e.name="UAS Matematika"; e.public_results=1; e.show_answers=1;
+  examvan::handlers::public_::set_exam_for_test("TOK999", e);
+  examvan::Request req; req.params["token"]="TOK999";
+  auto res=examvan::handlers::public_::hasil_page(req);
+  ASSERT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("id=\"examTitle\""), std::string::npos);
+  EXPECT_NE(res.body.find("UAS Matematika"), std::string::npos);
+  EXPECT_NE(res.body.find("const EXAM_TOKEN = \"TOK999\""), std::string::npos)
+    << "JS EXAM_TOKEN harus token asli, bukan placeholder";
+  EXPECT_NE(res.body.find("const isDisabled = false"), std::string::npos);
+  EXPECT_NE(res.body.find("const showAnswersFromServer = true"), std::string::npos);
+  EXPECT_NE(res.body.find("const isLoggedIn = false"), std::string::npos);
+  EXPECT_EQ(res.body.find("{{"), std::string::npos)
+    << "sintaks Go template harus dirender, bukan dibiarkan mentah";
+  EXPECT_NE(res.headers["X-Robots-Tag"].find("noindex"), std::string::npos)
+    << "header noindex wajib (Go parity)";
+  EXPECT_NE(res.headers["Cache-Control"].find("no-store"), std::string::npos)
+    << "header no-store wajib (Go parity)";
+  examvan::handlers::public_::clear_exams_for_test();
+}
+
+TEST(ProductionHardening, HasilPage_DisabledStateRendersTemplate){
+  examvan::handlers::public_::clear_exams_for_test();
+  examvan::models::Exam e; e.token="TOK123"; e.name="UAS"; e.public_results=0;
+  examvan::handlers::public_::set_exam_for_test("TOK123", e);
+  examvan::Request req; req.params["token"]="TOK123";
+  auto res=examvan::handlers::public_::hasil_page(req);
+  ASSERT_EQ(res.status,403); // paritas Go: Forbidden saat hasil non-publik & belum login
+  EXPECT_NE(res.body.find("Halaman Hasil Dinonaktifkan"), std::string::npos);
+  EXPECT_NE(res.body.find("const isDisabled = true"), std::string::npos);
+  EXPECT_EQ(res.body.find("id=\"examTitle\""), std::string::npos)
+    << "state disabled tidak boleh menampilkan hero exam";
+  EXPECT_EQ(res.body.find("{{"), std::string::npos);
+  examvan::handlers::public_::clear_exams_for_test();
+}
+
+TEST(ProductionHardening, HasilPage_ErrorStateRendersTemplate){
+  examvan::handlers::public_::clear_exams_for_test();
+  examvan::Request req; req.params["token"]="NOTFOUND";
+  auto res=examvan::handlers::public_::hasil_page(req);
+  ASSERT_EQ(res.status,404);
+  EXPECT_NE(res.body.find("Ujian Tidak Ditemukan"), std::string::npos);
+  EXPECT_NE(res.body.find("const pageHasError = true"), std::string::npos);
+  EXPECT_NE(res.body.find("NOTFOUND"), std::string::npos)
+    << "kartu error harus menampilkan token yang dicari";
+  EXPECT_EQ(res.body.find("{{."), std::string::npos)
+    << "sisa placeholder {{.x}} harus nol";
+}
+
+TEST(ProductionHardening, HasilApi_ReturnsFullContract){
+  examvan::handlers::public_::clear_exams_for_test();
+  examvan::models::Exam e; e.token="TOK999"; e.name="UAS"; e.public_results=1; e.show_answers=1;
+  e.questions_json=std::string("[{\"number\":1,\"type\":\"single_choice\",\"weight\":2,\"key\":\"A\",\"options\":[\"A\",\"B\"]}]");
+  examvan::handlers::public_::set_exam_for_test("TOK999", e);
+  examvan::Request req; req.params["token"]="tok999"; // huruf kecil → harus di-uppercase
+  auto res=examvan::handlers::public_::cek_hasil_api(req);
+  ASSERT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
+  EXPECT_NE(res.body.find("\"exam_name\":\"UAS\""), std::string::npos);
+  EXPECT_NE(res.body.find("\"submissions\":[]"), std::string::npos);
+  EXPECT_NE(res.body.find("\"max_score\":2"), std::string::npos)
+    << "max_score harus dihitung dari bobot soal";
+  EXPECT_NE(res.body.find("\"pagination\":{"), std::string::npos);
+  EXPECT_NE(res.body.find("\"stats\":{"), std::string::npos);
+  EXPECT_NE(res.body.find("\"questions\":["), std::string::npos);
+  EXPECT_NE(res.body.find("\"identity_fields\":["), std::string::npos);
+  EXPECT_NE(res.body.find("\"show_answers\":true"), std::string::npos);
+  EXPECT_NE(res.headers["Cache-Control"].find("no-store"), std::string::npos);
+  examvan::handlers::public_::clear_exams_for_test();
+}
+
+TEST(ProductionHardening, HasilApi_Disabled403){
+  examvan::handlers::public_::clear_exams_for_test();
+  examvan::models::Exam e; e.token="TOK123"; e.public_results=0;
+  examvan::handlers::public_::set_exam_for_test("TOK123", e);
+  examvan::Request req; req.params["token"]="TOK123";
+  auto res=examvan::handlers::public_::cek_hasil_api(req);
+  ASSERT_EQ(res.status,403);
+  EXPECT_NE(res.body.find("Akses dinonaktifkan"), std::string::npos);
+  examvan::handlers::public_::clear_exams_for_test();
+}
+
+TEST(ProductionHardening, HasilApi_UnknownToken404){
+  examvan::handlers::public_::clear_exams_for_test();
+  examvan::Request req; req.params["token"]="NOTFOUND";
+  auto res=examvan::handlers::public_::cek_hasil_api(req);
+  ASSERT_EQ(res.status,404);
+  EXPECT_NE(res.body.find("Token ujian tidak valid"), std::string::npos);
+}
+
+TEST(ProductionHardening, HasilApi_PgQueriesRealSubmissions){
+  // API hasil harus query PG nyata (bukan g_exams test-only): hanya submission
+  // ber-answers yang dihitung, urut skor tertinggi dulu.
+  auto c=read_source_file("src/handlers/public/hasil.cpp");
+  EXPECT_NE(c.find("answers_json IS NOT NULL"), std::string::npos)
+    << "harus ada filter answers_json (submission yang benar-benar mengumpulkan)";
+  EXPECT_NE(c.find("ORDER BY score DESC NULLS LAST"), std::string::npos)
+    << "hasil harus diurutkan skor tertinggi dulu";
+  EXPECT_NE(c.find("AVG(score)"), std::string::npos)
+    << "stats agregat (rata-rata) harus dihitung dari PG";
+}
+
+// ===== Temuan #3: webhook cuma ack {"ok":true} tanpa verifikasi =====
+TEST(ProductionHardening, Webhook_EmptySenderOrMessage){
+  examvan::Request req; req.body="{\"sender\":\"+62812\",\"message\":\"\"}";
+  auto res=examvan::handlers::api::webhook(req);
+  EXPECT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("\"status\":false"), std::string::npos);
+  EXPECT_NE(res.body.find("Payload tidak lengkap"), std::string::npos);
+}
+
+TEST(ProductionHardening, Webhook_NotVerificationMessage){
+  examvan::Request req; req.body="{\"sender\":\"+62812\",\"message\":\"halo selamat pagi\"}";
+  auto res=examvan::handlers::api::webhook(req);
+  EXPECT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("Pesan bukan verifikasi pendaftaran"), std::string::npos);
+}
+
+TEST(ProductionHardening, Webhook_FormatMissingKode){
+  // Ada frasa verifikasi tapi format username/kode tidak lengkap.
+  examvan::Request req; req.body="{\"sender\":\"+62812\",\"message\":\"verifikasi pendaftaran username: budi\"}";
+  auto res=examvan::handlers::api::webhook(req);
+  EXPECT_EQ(res.status,200);
+  EXPECT_NE(res.body.find("Format pesan tidak sesuai template"), std::string::npos);
+}
+
+TEST(ProductionHardening, Webhook_ValidFormatWithoutDb500){
+  // Format pesan benar; tanpa PG → 500 Database error (paritas Go pool==nil).
+  examvan::Request req; req.body="{\"sender\":\"+62812345678\",\"message\":\"Verifikasi Pendaftaran username: budi kode: ABCD12\"}";
+  auto res=examvan::handlers::api::webhook(req);
+  EXPECT_EQ(res.status,500);
+  EXPECT_NE(res.body.find("Database error"), std::string::npos);
+}
+
+TEST(ProductionHardening, Webhook_PgPinsActivationSql){
+  // Aktivasi harus UPDATE nyata ke PG: status active + bersihkan otp_code,
+  // lookup by whatsapp_number + otp_code + status pending_otp.
+  auto c=read_source_file("src/handlers/api/webhook.cpp");
+  EXPECT_NE(c.find("whatsapp_number"), std::string::npos);
+  EXPECT_NE(c.find("pending_otp"), std::string::npos);
+  EXPECT_NE(c.find("status='active'"), std::string::npos);
+  EXPECT_NE(c.find("otp_code=NULL"), std::string::npos);
+}
+
+// ===== Temuan #4: logout CSRF fallback test-csrf-token bocor ke produksi =====
+TEST(ProductionHardening, LogoutCsrf_NoCookie403){
+  // Tanpa cookie csrf_token → 403 (dulu fallback "test-csrf-token" membuat
+  // token CSRF yang diketahui bisa lolos saat cookie hilang).
+  examvan::Request req; req.body="_csrf=test-csrf-token";
+  req.headers["X-CSRF-Token"]="test-csrf-token";
+  auto res=examvan::handlers::auth::logout_handler(req);
+  EXPECT_EQ(res.status,403);
+  EXPECT_NE(res.body.find("CSRF"), std::string::npos);
+  // Dengan cookie yang benar tetap boleh (regresi guard).
+  req.headers["Cookie"]="csrf_token=test-csrf-token";
+  auto ok=examvan::handlers::auth::logout_handler(req);
+  EXPECT_EQ(ok.status,200);
 }

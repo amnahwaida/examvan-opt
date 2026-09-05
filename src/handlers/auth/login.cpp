@@ -23,6 +23,11 @@ static std::unordered_map<std::string, std::string> g_users;
 static std::mutex g_mu;
 using examvan::helpers::hash_password;
 using examvan::helpers::verify_password;
+
+std::string build_login_session_payload(int admin_id, const std::string& username, const std::string& role_json){
+  return b64_encode("admin_id="+std::to_string(admin_id)+"&username="+username+"&role="+role_json);
+}
+
 void set_user_for_test(const std::string& u, const std::string& p, const std::string& r){
   (void)r; std::lock_guard<std::mutex> g(g_mu); g_users[u]=hash_password(p);
 }
@@ -151,6 +156,8 @@ Response login_handler(const Request& req, const Config& cfg){
     else { auto f2=g_users.find(uname_norm); if(f2!=g_users.end()) stored=f2->second; }
   }
   bool ok = !stored.empty() && verify_password(password, stored);
+  int sess_admin_id=1;
+  std::string sess_role_json="[\"guru\"]";
   if(!ok){
 #ifdef HAS_LIBPQ
     try{
@@ -162,12 +169,17 @@ Response login_handler(const Request& req, const Config& cfg){
         db::RealPool pool(ci, 2);
         if(pool.connect()){
           if(auto c=pool.acquire()){
-            auto res=pool.exec_params(c.get(),"SELECT password_hash FROM admin_users WHERE lower(username)=lower($1) LIMIT 1",{uname_norm});
+            // Ambil id + role ASLI (bukan hanya password_hash): session harus
+            // membawa identitas user sungguhan, bukan admin_id=1 hardcoded.
+            auto res=pool.exec_params(c.get(),"SELECT password_hash, id, COALESCE(role,'guru') FROM admin_users WHERE lower(username)=lower($1) LIMIT 1",{uname_norm});
             if(res && PQntuples(res.get())>0){
               std::string db_hash=PQgetvalue(res.get(),0,0);
               if(verify_password(password, db_hash)){
                 ok=true;
                 stored=db_hash;
+                try{ sess_admin_id=std::stoi(PQgetvalue(res.get(),0,1)); }catch(...){}
+                std::string db_role=PQgetvalue(res.get(),0,2);
+                sess_role_json="[\""+db_role+"\"]";
               }
             }
           }
@@ -180,7 +192,7 @@ Response login_handler(const Request& req, const Config& cfg){
     Response r; r.status=401; r.json(401,"{\"error\":\"invalid credentials\"}"); return r;
   }
   username=uname_norm;
-  std::string payload=b64_encode("admin_id=1&username="+username+"&role=[\"guru\"]");
+  std::string payload=build_login_session_payload(sess_admin_id, username, sess_role_json);
   std::string cookie="examvan_session="+encode_cookie_value(cfg.secret_key, payload)+"; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400";
   if(!cfg.is_development()) cookie+="; Secure";
   /* Klien API (fetch/AJAX) tetap menerima JSON {success,message} sesuai kontrak

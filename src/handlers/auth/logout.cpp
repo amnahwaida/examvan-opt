@@ -28,7 +28,11 @@ Response logout_handler(const Request& req){
   std::string sess_csrf;
   std::string ck=get_hdr_ci_lo(req,"Cookie");
   if(!ck.empty()) sess_csrf=extract_cookie(ck,"csrf_token");
-  if(sess_csrf.empty()) sess_csrf="test-csrf-token";
+  // JANGAN fallback ke "test-csrf-token" (dulu: token CSRF yang diketahui
+  // bisa lolos saat cookie hilang). Tanpa cookie → tolak, paritas login.cpp.
+  if(sess_csrf.empty()){
+    Response r; r.status=403; r.json(403,"{\"error\":\"CSRF token mismatch\"}"); return r;
+  }
   if(!verify_csrf(sess_csrf, csrf_h)){
     Response r; r.status=403; r.json(403,"{\"error\":\"CSRF token mismatch\"}"); return r;
   }

@@ -20,6 +20,10 @@
 #include "middleware/ratelimit.hpp"
 #include "middleware/body_limit.hpp"
 #include "middleware/cors.hpp"
+#ifdef HAS_LIBPQ
+#include "db/pool_real.hpp"
+#include "db/pool.hpp"
+#endif
 #include <fstream>
 #include <sstream>
 
@@ -58,6 +62,38 @@ void register_full_routes(Router& r, const Config& cfg){
       if(!ok){
         Response rr; rr.status=401; rr.json(401,"{\"success\":false,\"message\":\"unauthorized\"}"); return rr;
       }
+      // Revalidasi session terhadap PG (paritas Go auth.go): user yang sudah
+      // di-suspend/dihapus tidak boleh lanjut pakai session lama. Fail-open
+      // saat PG tidak dikonfigurasi/tak terjangkau (dev in-memory, unit test).
+#ifdef HAS_LIBPQ
+      {
+        bool pg_up=false, pg_ok=true;
+        try{
+          std::string db_url=Config::load().database_url;
+          if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+          if(!db_url.empty()){
+            std::string ci=pg_conninfo_from_url(db_url);
+            if(ci.empty()) ci=db_url;
+            examvan::db::RealPool real(ci, 1);
+            if(real.connect()){
+              if(auto c=real.acquire()){
+                pg_up=true;
+                auto res=real.exec_params(c.get(),"SELECT status FROM admin_users WHERE id=$1",{std::to_string(sess.admin_id)});
+                if(!res || PQresultStatus(res.get())!=PGRES_TUPLES_OK || PQntuples(res.get())==0){
+                  pg_ok=false; // user sudah dihapus
+                } else {
+                  std::string st=PQgetvalue(res.get(),0,0);
+                  if(st!="active") pg_ok=false; // suspended / pending_otp
+                }
+              }
+            }
+          }
+        }catch(...){}
+        if(pg_up && !pg_ok){
+          Response rr; rr.status=401; rr.json(401,"{\"success\":false,\"message\":\"unauthorized\"}"); return rr;
+        }
+      }
+#endif
       // Teruskan admin_id session ke handler via header internal (nilai dari
       // session terverifikasi, meng-overwrite apapun yang dikirim klien).
       // create_exam memakainya untuk created_by (FK exams_created_by_fkey).

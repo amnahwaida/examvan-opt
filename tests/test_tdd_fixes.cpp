@@ -24,7 +24,8 @@ TEST(TDD_XSS, HasilEscapesHtml) {
     req.params["token"]="tok123";
     auto res = handlers::public_::hasil_page(req);
     EXPECT_EQ(res.status,200);
-    EXPECT_EQ(res.body.find("<script>"), std::string::npos);
+    // Nama ujian harus di-escape (pola injeksi atribut/script tidak boleh ada).
+    EXPECT_EQ(res.body.find("\"><script>"), std::string::npos);
     EXPECT_NE(res.body.find("&lt;script&gt;"), std::string::npos);
     handlers::public_::clear_exams_for_test();
 }

@@ -773,10 +773,13 @@ TEST(ProtobufHandlers, Webhook_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, Webhook_JsonStillWorks) {
+  // Payload tanpa sender/message → 200 status:false (paritas Go), bukan
+  // {"ok":true} ack buta.
   Request req; req.method = "POST"; req.body = "p";
   auto res = handlers::api::webhook(req);
   EXPECT_EQ(res.status, 200);
-  EXPECT_NE(res.body.find("\"ok\":true"), std::string::npos);
+  EXPECT_NE(res.body.find("\"status\":false"), std::string::npos);
+  EXPECT_NE(res.body.find("Payload tidak lengkap"), std::string::npos);
 }
 
 TEST(ProtobufHandlers, Webhook_EmptyBodyReturns400) {
@@ -805,10 +808,21 @@ TEST(ProtobufHandlers, CekHasilApi_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, CekHasilApi_JsonStillWorks) {
+  // Tanpa token → 404 jujur (dulu stub balas 200 {"ok":true} tanpa data).
   Request req;
   auto res = handlers::public_::cek_hasil_api(req);
-  EXPECT_EQ(res.status, 200);
-  EXPECT_NE(res.body.find("\"ok\":true"), std::string::npos);
+  EXPECT_EQ(res.status, 404);
+  EXPECT_NE(res.body.find("success\":false"), std::string::npos);
+  // Token valid + hasil publik → kontrak lengkap (bukan {"ok":true}).
+  handlers::public_::clear_exams_for_test();
+  examvan::models::Exam e; e.token="TOKX1"; e.name="UAS"; e.public_results=1;
+  handlers::public_::set_exam_for_test("TOKX1", e);
+  req.params["token"]="TOKX1";
+  auto ok=handlers::public_::cek_hasil_api(req);
+  EXPECT_EQ(ok.status, 200);
+  EXPECT_NE(ok.body.find("\"submissions\":["), std::string::npos);
+  EXPECT_NE(ok.body.find("\"pagination\":{"), std::string::npos);
+  handlers::public_::clear_exams_for_test();
 }
 
 // ======================================================================
