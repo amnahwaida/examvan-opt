@@ -47,6 +47,34 @@ struct JobResult {
   std::string to_json() const;
 };
 
+// Payload heartbeat dari queue examvan:heartbeats:pending (paritas Go
+// heartbeatData di cmd/server/main.go drainHeartbeatsQueue).
+struct HeartbeatPayload {
+  int exam_id{0};
+  std::string mac_address, student_name, exam_number, student_class;
+  std::string device_info, ip_address, event, last_seen;
+};
+// Parse payload JSON heartbeat; nullopt bila exam_id hilang / JSON rusak.
+std::optional<HeartbeatPayload> parse_heartbeat_payload(const std::string& json);
+
+// Drain heartbeats:pending → student_access_logs (paritas Go
+// drainHeartbeatsQueue: batch 500, max 20 batch/tick, requeue saat gagal).
+// Connect Redis + PG sendiri; kembalikan total baris yang di-flush.
+int drain_heartbeats_once();
+
+// Background flusher (tick 30s, paritas Go startHeartbeatFlusher).
+class HeartbeatFlusher {
+public:
+  explicit HeartbeatFlusher(std::function<int()> drain);
+  ~HeartbeatFlusher();
+  void start();
+  void stop();
+private:
+  std::function<int()> drain_;
+  std::atomic<bool> running_{false};
+  std::thread th_;
+};
+
 std::string generate_job_id();
 
 class SubmissionQueue {

@@ -285,40 +285,228 @@ Response list_exams(const Request& req){
   return r;
 }
 
+// Rate-limit bucket key per exam+MAC (paritas Go rateLimitKeyPrefix /
+// presenceRateKeyPrefix); MAC kosong/"unknown" → fallback per exam+IP.
+std::string presence_rate_key(const std::string& prefix, int exam_id,
+                              const std::string& mac, const std::string& ip){
+  if(mac.empty() || mac=="unknown")
+    return prefix+std::to_string(exam_id)+":ip:"+ip;
+  return prefix+std::to_string(exam_id)+":"+mac;
+}
+// Bucket Redis INCR+EXPIRE 60s (paritas Go checkRateLimit); skip saat Redis
+// tidak ada. max=10 (presence & submit).
+static bool rate_limit_allowed(const std::string& prefix, int exam_id,
+                               const std::string& mac, const std::string& ip,
+                               long long max){
+#ifdef HAS_HIREDIS
+  try{
+    auto cfg=Config::load();
+    auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
+    if(!ctx) return true;
+    const std::string key=presence_rate_key(prefix, exam_id, mac, ip);
+    auto* r=(redisReply*)redisCommand(ctx.get(),"INCR %s", key.c_str());
+    long long count=(r && r->type==REDIS_REPLY_INTEGER)? r->integer : 0;
+    if(r) freeReplyObject(r);
+    if(count==1){
+      auto* e=(redisReply*)redisCommand(ctx.get(),"EXPIRE %s 60", key.c_str());
+      if(e) freeReplyObject(e);
+    }
+    return count<=max;
+  }catch(...){ return true; }
+#else
+  (void)prefix;(void)exam_id;(void)mac;(void)ip;(void)max; return true;
+#endif
+}
+// Go SubmissionGraceEnd = 60 detik setelah end_time.
+static bool exam_schedule_ended(const models::Exam& e){
+  if(!e.end_time.has_value() || e.end_time->empty()) return false;
+  auto t=helpers::parse_iso_utc(*e.end_time);
+  if(!t) return false;
+  return std::chrono::system_clock::now() > *t + std::chrono::seconds(60);
+}
+// Device sudah di-approve? (paritas Go: SELECT status FROM exam_approvals ...)
+static bool device_approved(int exam_id, const std::string& mac){
+#ifdef HAS_LIBPQ
+  try{
+    auto cfg=Config::load();
+    examvan::DbPool pool(cfg.database_url, 10);
+    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    if(auto c=real.acquire()){
+      auto res=real.exec_params(c.get(),
+        "SELECT status FROM exam_approvals WHERE exam_id=$1 AND mac_address=$2",
+        {std::to_string(exam_id), mac});
+      if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0)
+        return std::string(PQgetvalue(res.get(),0,0))=="approved";
+    }
+  }catch(...){}
+#endif
+  (void)exam_id;(void)mac; return false;
+}
+static bool device_has_approval(int exam_id, const std::string& mac){
+#ifdef HAS_LIBPQ
+  try{
+    auto cfg=Config::load();
+    examvan::DbPool pool(cfg.database_url, 10);
+    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    if(auto c=real.acquire()){
+      auto res=real.exec_params(c.get(),
+        "SELECT 1 FROM exam_approvals WHERE exam_id=$1 AND mac_address=$2 LIMIT 1",
+        {std::to_string(exam_id), mac});
+      if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0) return true;
+    }
+  }catch(...){}
+#endif
+  (void)exam_id;(void)mac; return false;
+}
+// Heartbeat presence (paritas Go setStudentHeartbeat + LPUSH): SET
+// heartbeat:{exam}:{mac} EX 300 untuk login/heartbeat; heartbeat juga
+// LPUSH examvan:heartbeats:pending (drain oleh HeartbeatFlusher).
+static void push_heartbeat_presence(int exam_id, const std::string& mac,
+  const std::string& sname, const std::string& snum, const std::string& sclass,
+  const std::string& device, const std::string& ip, const std::string& event){
+#ifdef HAS_HIREDIS
+  try{
+    auto cfg=Config::load();
+    auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
+    if(!ctx) return;
+    const std::string last_seen=helpers::format_iso_utc(std::chrono::system_clock::now());
+    std::string data="{\"student_name\":\""+json_escape(sname)+"\",\"exam_number\":\""+json_escape(snum)
+      +"\",\"student_class\":\""+json_escape(sclass)+"\",\"device_info\":\""+json_escape(device)
+      +"\",\"ip_address\":\""+json_escape(ip)+"\",\"event\":\""+event+"\",\"last_seen\":\""+last_seen+"\"}";
+    const std::string key="heartbeat:"+std::to_string(exam_id)+":"+mac;
+    auto* r=(redisReply*)redisCommand(ctx.get(),"SET %s %b EX 300", key.c_str(), data.data(), data.size());
+    if(r) freeReplyObject(r);
+    if(event=="heartbeat"){
+      // Payload queue: + exam_id + mac_address (paritas Go hub.go / exams.go).
+      const std::string qp="{\"exam_id\":"+std::to_string(exam_id)
+        +",\"mac_address\":\""+json_escape(mac)+"\","+data.substr(1);
+      auto* q=(redisReply*)redisCommand(ctx.get(),"LPUSH %s %b", queue::kHeartbeatQueueKey, qp.data(), qp.size());
+      if(q) freeReplyObject(q);
+    }
+  }catch(...){ /* best-effort */ }
+#else
+  (void)exam_id;(void)mac;(void)sname;(void)snum;(void)sclass;(void)device;(void)ip;(void)event;
+#endif
+}
+
+// Dipakai oleh request_approval & access_log; definisi lengkap di bawah
+// (sebelum access_log).
+static std::string sanitize_mac_like_go(const std::string& raw);
+static std::string truncate_bytes(const std::string& s, size_t n);
+static std::string sanitize_identity_map_json(const std::string& raw);
+
 Response request_approval(const Request& req){
   std::string token=json_string_field(req.body,"token");
   if(token.empty()){
     auto form=helpers::parse_form(req.body);
     if(form.count("token")) token=form["token"];
   }
-  if(token.empty()){
-    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"token required\"}"); return r;
+  // ---- Parse & validasi payload (paritas Go RequestApproval) ----
+  std::string exam_id_s=json_string_field(req.body,"exam_id");
+  std::string mac=json_string_field(req.body,"mac_address");
+  std::string sname=json_string_field(req.body,"student_name");
+  std::string snum=json_string_field(req.body,"exam_number");
+  std::string sclass=json_string_field(req.body,"student_class");
+  std::string reset_s=json_string_field(req.body,"reset");
+  if(exam_id_s.empty()){
+    auto form=helpers::parse_form(req.body);
+    if(form.count("exam_id")) exam_id_s=form["exam_id"];
+    if(form.count("mac_address")) mac=form["mac_address"];
+    if(form.count("student_name")) sname=form["student_name"];
+    if(form.count("exam_number")) snum=form["exam_number"];
+    if(form.count("student_class")) sclass=form["student_class"];
+    if(form.count("token")) token=form["token"];
+    if(form.count("reset")) reset_s=form["reset"];
   }
-  // Validasi: token harus milik exam yang ada (bukan sukses palsu).
-  auto snapshot=store::active_store()->list_all();
-  bool found=false;
-  for(auto& e: snapshot){ if(examtoken::matches(e, token)){ found=true; break; } }
-  if(!found){
-#ifdef HAS_PROTOBUF
-    if(middleware::is_protobuf_accept(req)){
-      examvan::v1::RequestApprovalResponse pb;
-      pb.set_success(false);
-      std::string out; pb.SerializeToString(&out);
-      Response r; r.status=404; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  int exam_id=0;
+  try{ exam_id=std::stoi(exam_id_s); }catch(...){}
+  if(exam_id<=0){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"exam id required\"}"); return r;
+  }
+  mac=sanitize_mac_like_go(mac);
+  if(mac.empty() || mac=="unknown"){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"MAC address diperlukan\"}"); return r;
+  }
+  sname=truncate_bytes(sname,200);
+  snum=truncate_bytes(snum,100);
+  sclass=truncate_bytes(sclass,100);
+  std::string identity=sanitize_identity_map_json(json_raw_value(req.body,"identity_data"));
+  const bool reset = reset_s=="true" || reset_s=="1";
+  (void)reset; // hanya dipakai di blok HAS_LIBPQ (INSERT status CASE)
+  // Exam harus ada (paritas Go: 404 sebelum cek token).
+  auto exam=store::active_store()->get_by_id(exam_id);
+  if(!exam){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Ujian tidak ditemukan\"}"); return r;
+  }
+  // Token valid ATAU device sudah punya baris approval (toleransi rotasi token).
+  if(!examtoken::matches(*exam, token) && !device_has_approval(exam_id, mac)){
+    Response r; r.status=401; r.json(401,"{\"success\":false,\"error\":\"Token tidak valid\"}"); return r;
+  }
+  // Auto-approve saat exam live + flag auto_approve (paritas Go).
+  bool auto_approve = exam->auto_approve && exam->is_active() &&
+    exam->exam_started_at.has_value() && !exam->exam_started_at->empty() &&
+    !exam_schedule_ended(*exam);
+  std::string status = auto_approve ? "approved" : "pending";
+  // ---- Persist ke exam_approvals (best-effort; paritas Go SQL) ----
+#ifdef HAS_LIBPQ
+  try{
+    auto cfg_db=Config::load();
+    examvan::DbPool pool(cfg_db.database_url, 10);
+    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    if(auto c=real.acquire()){
+      // Cap approved per exam (paritas Go: saas_settings max_approvals_per_exam,
+      // default 500) — cegah token bocor mencetak device approved tak terbatas.
+      real.exec_params(c.get(),"BEGIN",{});
+      real.exec_params(c.get(),
+        "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",{"approval-cap:"+std::to_string(exam_id)});
+      long long cap=500;
+      {
+        auto s=real.exec_params(c.get(),
+          "SELECT value FROM saas_settings WHERE key='max_approvals_per_exam'",{});
+        if(s && PQresultStatus(s.get())==PGRES_TUPLES_OK && PQntuples(s.get())>0){
+          try{ cap=std::stoll(PQgetvalue(s.get(),0,0)); }catch(...){}
+        }
+      }
+      if(cap>0 && auto_approve){
+        auto cnt=real.exec_params(c.get(),
+          "SELECT COUNT(*) FROM exam_approvals WHERE exam_id=$1 AND status='approved'",
+          {std::to_string(exam_id)});
+        if(cnt && PQresultStatus(cnt.get())==PGRES_TUPLES_OK && PQntuples(cnt.get())>0){
+          try{ if(std::stoll(PQgetvalue(cnt.get(),0,0))>=cap) auto_approve=false; }catch(...){}
+        }
+      }
+      auto ins=real.exec_params(c.get(),
+        "INSERT INTO exam_approvals (exam_id, mac_address, student_name, exam_number, student_class, identity_data, status)"
+        " VALUES ($1,$2,$3,$4,$5,$6, CASE WHEN $8::boolean THEN 'approved' ELSE 'pending' END)"
+        " ON CONFLICT (exam_id, mac_address) DO UPDATE"
+        " SET student_name=EXCLUDED.student_name, exam_number=EXCLUDED.exam_number,"
+        " student_class=EXCLUDED.student_class, identity_data=EXCLUDED.identity_data,"
+        " status=CASE"
+        "   WHEN $7::boolean THEN CASE WHEN $8::boolean THEN 'approved'"
+        "     WHEN exam_approvals.status='approved' THEN 'approved' ELSE 'pending' END"
+        "   WHEN $8::boolean AND exam_approvals.status='pending' THEN 'approved'"
+        "   ELSE exam_approvals.status END,"
+        " updated_at=CURRENT_TIMESTAMP"
+        " RETURNING status",
+        {std::to_string(exam_id), mac, sname, snum, sclass, identity,
+         reset?"true":"false", auto_approve?"true":"false"});
+      if(ins && PQresultStatus(ins.get())==PGRES_TUPLES_OK && PQntuples(ins.get())>0)
+        status=PQgetvalue(ins.get(),0,0);
+      real.exec_params(c.get(),"COMMIT",{});
+      real.release(c.release());
     }
+  }catch(...){ /* best-effort: status fallback (pending/approved) tetap dipakai */ }
 #endif
-    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"token not found\"}"); return r;
-  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::RequestApprovalResponse pb;
     pb.set_success(true);
-    pb.set_status("pending");
+    pb.set_status(status);
     std::string out; pb.SerializeToString(&out);
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.json(200,"{\"success\":true,\"status\":\"pending\"}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"status\":\""+status+"\"}"); return r;
 }
 
 Response exam_by_token(const Request& req){
@@ -452,6 +640,15 @@ Response submit_exam(const Request& req){
   // Go parity: submit hanya valid bila ujian aktif & sudah dimulai.
   if(!exam->is_active() || !exam->exam_started_at.has_value() || exam->exam_started_at->empty()){
     Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"exam not started\",\"message\":\"Ujian belum dimulai\"}"); return r;
+  }
+  // Rate limit per exam+MAC (paritas Go ratelimit:submit: 10/60s).
+  {
+    std::string rl_mac=json_string_field(req.body,"mac_address");
+    if(rl_mac.empty()){ auto form=helpers::parse_form(req.body); if(form.count("mac_address")) rl_mac=form["mac_address"]; }
+    std::string rl_ip=req.headers.count("X-Forwarded-For")?req.headers.at("X-Forwarded-For"):"";
+    if(!rate_limit_allowed("ratelimit:submit:", exam_id, rl_mac, rl_ip, 10)){
+      Response r; r.status=429; r.json(429,"{\"success\":false,\"error\":\"Terlalu banyak percobaan submit. Silakan coba lagi nanti.\"}"); return r;
+    }
   }
   // Bangun job nyata (identitas + jawaban) lalu enqueue ke queue Redis.
   queue::SubmissionJob job;
@@ -621,6 +818,23 @@ Response access_log(const Request& req){
   std::string identity=json_raw_value(req.body,"identity_data");
   if(identity.empty()){ auto form=helpers::parse_form(req.body); if(form.count("identity_data")) identity=form["identity_data"]; }
   identity=sanitize_identity_map_json(identity);
+  // --- Rate limit per exam+MAC (paritas Go: bucket Redis 10/60s) ---
+  if(!rate_limit_allowed("ratelimit:presence:", exam_id, mac, ip, 10)){
+    Response r; r.status=429; r.json(429,"{\"success\":false,\"error\":\"Terlalu banyak request. Silakan coba lagi nanti.\"}"); return r;
+  }
+  // --- Validasi token (paritas Go: X-Exam-Token / token query / approved) ---
+  std::string token=req.headers.count("X-Exam-Token")?req.headers.at("X-Exam-Token"):"";
+  if(token.empty()){ auto q=helpers::parse_form(req.query); if(q.count("token")) token=q["token"]; }
+  auto exam=store::active_store()->get_by_id(exam_id);
+  if(!exam || !exam->is_active() || !exam->exam_started_at.has_value() || exam->exam_started_at->empty()){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Ujian tidak ditemukan\"}"); return r;
+  }
+  if(exam_schedule_ended(*exam)){
+    Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"Waktu ujian telah berakhir\"}"); return r;
+  }
+  if(!examtoken::matches(*exam, token) && !device_approved(exam_id, mac)){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Ujian tidak ditemukan\"}"); return r;
+  }
   // Persist akses ke student_access_logs (best-effort; skema dimiliki Go).
   // Gagal insert TIDAK menggagalkan response — response tetap 200 logged.
 #ifdef HAS_LIBPQ
@@ -641,6 +855,11 @@ Response access_log(const Request& req){
     }
   }catch(...){ /* best-effort: jangan sampai access-log mematikan handler */ }
 #endif
+  // Heartbeat presence (paritas Go setStudentHeartbeat + LPUSH): SET
+  // heartbeat:{exam}:{mac} EX 300 utk login/heartbeat; heartbeat juga
+  // LPUSH examvan:heartbeats:pending (drain oleh HeartbeatFlusher).
+  if(event=="login" || event=="heartbeat")
+    push_heartbeat_presence(exam_id, mac, sname, snum, sclass, device, ip, event);
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::AccessLogResponse pb;

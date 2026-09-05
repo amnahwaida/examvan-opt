@@ -396,10 +396,74 @@ TEST(ProductionHardening, AccessLog_MissingExam404){
 TEST(ProductionHardening, AccessLog_ValidExam200){
   int id=create_started_exam_id();
   ASSERT_GT(id,0);
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
   Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]=exam->token;
   auto res=access_log(rq);
   EXPECT_EQ(res.status,200) << res.body;
   EXPECT_NE(res.body.find("\"logged\":true"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, AccessLog_WrongToken404){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]="WRONGTOKEN";
+  auto res=access_log(rq);
+  EXPECT_EQ(res.status,404) << res.body;
+}
+
+TEST(ProductionHardening, AccessLog_TokenViaQuery200){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.query="token="+exam->token;
+  auto res=access_log(rq);
+  EXPECT_EQ(res.status,200) << res.body;
+}
+
+TEST(ProductionHardening, AccessLog_NotStarted404){
+  clear_exams_for_testing();
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+  Request cr; cr.body="name=NotStartedLog&file_path=soal.pdf&size_bytes=100";
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]=exam->token;
+  auto res=access_log(rq);
+  EXPECT_EQ(res.status,404) << res.body; // Go: exam tidak aktif/belum start → 404
+}
+
+TEST(ProductionHardening, AccessLog_ScheduleEnded403){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
+    e.end_time="2020-01-01T00:00:00Z"; // sudah lewat + grace 60s
+  });
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]=exam->token;
+  auto res=access_log(rq);
+  EXPECT_EQ(res.status,403) << res.body;
+  EXPECT_NE(res.body.find("Waktu ujian telah berakhir"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, AccessLog_TokenValidationGo){
+  auto c=read_source_file("src/handlers/api/exams.cpp");
+  EXPECT_NE(c.find("X-Exam-Token"), std::string::npos)
+    << "token dari header X-Exam-Token (paritas Go)";
+  EXPECT_NE(c.find("exam_approvals"), std::string::npos)
+    << "device approved lookup via exam_approvals";
+  EXPECT_NE(c.find("Waktu ujian telah berakhir"), std::string::npos) << "403 schedule-ended (Go)";
+  EXPECT_NE(c.find("seconds(60)"), std::string::npos) << "grace SubmissionGraceEnd 60s";
 }
 
 // ----------------------------------------------------------------------
@@ -420,20 +484,26 @@ TEST(ProductionHardening, AccessLog_InvalidEvent400){
 TEST(ProductionHardening, AccessLog_EmptyEventOk200){
   int id=create_started_exam_id();
   ASSERT_GT(id,0);
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
   Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]=exam->token;
   rq.body="{\"student_name\":\"Ani\"}"; // tanpa event → default heartbeat (Go)
   auto res=access_log(rq);
   EXPECT_EQ(res.status,200) << res.body;
 }
 
-TEST(ProductionHardening, AccessLog_LoginLogoutEventsOk200){
+TEST(ProductionHardening, AccessLog_LoginLogoutHeartbeatEventsOk200){
   int id=create_started_exam_id();
   ASSERT_GT(id,0);
-  for(auto ev: {"login","logout"}){
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  for(auto ev: {"login","heartbeat","logout"}){
     Request rq; rq.params["exam_id"]=std::to_string(id);
+    rq.headers["X-Exam-Token"]=exam->token;
     rq.headers["Content-Type"]="application/json";
     rq.body=std::string("{\"event\":\"")+ev+"\"}";
-    EXPECT_EQ(access_log(rq).status,200);
+    EXPECT_EQ(access_log(rq).status,200) << ev;
   }
 }
 
@@ -478,13 +548,27 @@ TEST(ProductionHardening, RequestApproval_NoToken400){
   Request rq; rq.body="";
   auto res=request_approval(rq);
   EXPECT_EQ(res.status,400) << res.body;
-  EXPECT_NE(res.body.find("token"), std::string::npos) << res.body;
+  EXPECT_NE(res.body.find("exam id"), std::string::npos) << res.body;
 }
 
-TEST(ProductionHardening, RequestApproval_UnknownToken404){
-  Request rq; rq.body="token=NOTEXIST";
+TEST(ProductionHardening, RequestApproval_UnknownToken401){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request rq; rq.body="exam_id="+std::to_string(id)+"&mac_address=aa:bb:cc&token=NOTEXIST";
   auto res=request_approval(rq);
-  EXPECT_EQ(res.status,404) << res.body;
+  EXPECT_EQ(res.status,401) << res.body;
+  EXPECT_NE(res.body.find("Token tidak valid"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, RequestApproval_MissingMac400){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  Request rq; rq.body="exam_id="+std::to_string(id)+"&token="+exam->token; // tanpa mac
+  auto res=request_approval(rq);
+  EXPECT_EQ(res.status,400) << res.body;
+  EXPECT_NE(res.body.find("MAC address diperlukan"), std::string::npos) << res.body;
 }
 
 TEST(ProductionHardening, RequestApproval_ValidToken200){
@@ -492,10 +576,18 @@ TEST(ProductionHardening, RequestApproval_ValidToken200){
   ASSERT_GT(id,0);
   auto exam=examvan::store::active_store()->get_by_id(id);
   ASSERT_TRUE(exam.has_value());
-  Request rq; rq.body="token="+exam->token;
+  Request rq; rq.body="exam_id="+std::to_string(id)+"&mac_address=aa:bb:cc&student_name=Ani&token="+exam->token;
   auto res=request_approval(rq);
   EXPECT_EQ(res.status,200) << res.body;
   EXPECT_NE(res.body.find("\"pending\""), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, RequestApproval_PersistsGo){
+  auto c=read_source_file("src/handlers/api/exams.cpp");
+  EXPECT_NE(c.find("INSERT INTO exam_approvals"), std::string::npos)
+    << "request_approval harus benar-benar INSERT ke exam_approvals (bukan stub)";
+  EXPECT_NE(c.find("ON CONFLICT (exam_id, mac_address)"), std::string::npos);
+  EXPECT_NE(c.find("RETURNING status"), std::string::npos);
 }
 
 // ----------------------------------------------------------------------
@@ -842,4 +934,72 @@ TEST(ProductionHardening, E2E_FullFlow_UploadStartSubmitScoreResult){
   // Jawaban {1:A benar, 2:C salah} dari 2 soal → score 50.0.
   EXPECT_NE(it->second.find("\"score\":50"), std::string::npos) << it->second;
   reset_r2_flags();
+}
+
+// ----------------------------------------------------------------------
+// Rate limit per exam+MAC (presence bucket Redis) — paritas Go
+// ratelimit:presence: (access_log) & ratelimit:submit: (submit_exam)
+// ----------------------------------------------------------------------
+
+TEST(ProductionHardening, RateLimitKey_ExamMacVsIpFallback){
+  EXPECT_EQ(presence_rate_key("ratelimit:presence:", 7, "aa:bb", "1.2.3.4"),
+            "ratelimit:presence:7:aa:bb");
+  EXPECT_EQ(presence_rate_key("ratelimit:presence:", 7, "unknown", "1.2.3.4"),
+            "ratelimit:presence:7:ip:1.2.3.4");
+  EXPECT_EQ(presence_rate_key("ratelimit:submit:", 7, "", "1.2.3.4"),
+            "ratelimit:submit:7:ip:1.2.3.4");
+  EXPECT_EQ(presence_rate_key("ratelimit:presence:", 7, "aa:bb", ""),
+            "ratelimit:presence:7:aa:bb");
+}
+
+TEST(ProductionHardening, RateLimit_PresenceAndSubmitGo){
+  auto c=read_source_file("src/handlers/api/exams.cpp");
+  EXPECT_NE(c.find("ratelimit:presence:"), std::string::npos) << "access_log bucket";
+  EXPECT_NE(c.find("ratelimit:submit:"), std::string::npos) << "submit_exam bucket";
+  EXPECT_NE(c.find("Terlalu banyak request. Silakan coba lagi nanti."), std::string::npos) << "429 access_log";
+  EXPECT_NE(c.find("Terlalu banyak percobaan submit. Silakan coba lagi nanti."), std::string::npos) << "429 submit";
+  EXPECT_NE(c.find("INCR"), std::string::npos) << "bucket via INCR";
+  EXPECT_NE(c.find("EXPIRE"), std::string::npos) << "TTL window via EXPIRE";
+}
+
+// ----------------------------------------------------------------------
+// Heartbeat presence (paritas Go) — SET heartbeat:{exam}:{mac} EX 300 +
+// LPUSH examvan:heartbeats:pending, lalu HeartbeatFlusher drain → PG
+// ----------------------------------------------------------------------
+
+TEST(ProductionHardening, HeartbeatPayload_ParseValid){
+  auto hb=queue::parse_heartbeat_payload(
+    "{\"exam_id\":7,\"mac_address\":\"aa:bb\",\"student_name\":\"Ani\",\"exam_number\":\"02\","
+    "\"student_class\":\"XI-B\",\"device_info\":\"Xiaomi\",\"ip_address\":\"1.2.3.4\","
+    "\"event\":\"heartbeat\",\"last_seen\":\"2026-09-01T08:00:00Z\"}");
+  ASSERT_TRUE(hb.has_value());
+  EXPECT_EQ(hb->exam_id, 7);
+  EXPECT_EQ(hb->mac_address, "aa:bb");
+  EXPECT_EQ(hb->student_name, "Ani");
+  EXPECT_EQ(hb->exam_number, "02");
+  EXPECT_EQ(hb->student_class, "XI-B");
+  EXPECT_EQ(hb->device_info, "Xiaomi");
+  EXPECT_EQ(hb->ip_address, "1.2.3.4");
+  EXPECT_EQ(hb->event, "heartbeat");
+  EXPECT_EQ(hb->last_seen, "2026-09-01T08:00:00Z");
+}
+
+TEST(ProductionHardening, HeartbeatPayload_ParseInvalid){
+  EXPECT_FALSE(queue::parse_heartbeat_payload("").has_value());
+  EXPECT_FALSE(queue::parse_heartbeat_payload("not-json").has_value());
+  EXPECT_FALSE(queue::parse_heartbeat_payload("{\"foo\":1}").has_value());
+}
+
+TEST(ProductionHardening, Heartbeat_AccessLogAndFlusherGo){
+  auto c=read_source_file("src/handlers/api/exams.cpp");
+  EXPECT_NE(c.find("\"heartbeat:\""), std::string::npos) << "SET heartbeat:{exam}:{mac}";
+  EXPECT_NE(c.find("EX 300"), std::string::npos) << "TTL 5 menit (Go heartbeatTTL)";
+  EXPECT_NE(c.find("examvan:heartbeats:pending"), std::string::npos) << "LPUSH queue";
+  auto q=read_source_file("src/queue/submission_queue.cpp");
+  EXPECT_NE(q.find("RPOP"), std::string::npos) << "flusher drain via RPOP";
+  EXPECT_NE(q.find("kHeartbeatQueueKey"), std::string::npos)
+    << "flusher harus pakai konstanta queue yang sama (examvan:heartbeats:pending)";
+  EXPECT_NE(q.find("INSERT INTO student_access_logs"), std::string::npos);
+  auto m=read_source_file("src/main.cpp");
+  EXPECT_NE(m.find("HeartbeatFlusher"), std::string::npos) << "flusher harus di-start di main";
 }

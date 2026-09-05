@@ -11,6 +11,11 @@ Response exam_pdf(const Request& req);
 Response submit_exam(const Request& req);
 Response exam_result(const Request& req);
 Response access_log(const Request& req);
+
+// Rate-limit bucket key per exam+MAC (paritas Go ratelimit:presence:/
+// ratelimit:submit:); MAC kosong/"unknown" → fallback per exam+IP.
+std::string presence_rate_key(const std::string& prefix, int exam_id,
+                              const std::string& mac, const std::string& ip);
 Response complete_exam(const Request& req);
 Response health(const Request& req);
 Response time_handler(const Request& req);

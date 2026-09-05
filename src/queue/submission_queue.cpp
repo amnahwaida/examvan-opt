@@ -11,6 +11,13 @@
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
+#ifdef HAS_HIREDIS
+#include "redis/redis_real.hpp"
+#include <hiredis/hiredis.h>
+#endif
+#ifdef HAS_LIBPQ
+#include <libpq-fe.h>
+#endif
 
 namespace examvan::queue {
 
@@ -335,5 +342,143 @@ void Worker::run_batch(){
     }
   }
 }
+
+namespace {
+constexpr int kHeartbeatBatchSize = 500;  // paritas Go heartbeatFlushBatchSize
+constexpr int kHeartbeatMaxBatches = 20;  // paritas Go heartbeatFlushMaxBatches
+
+// Ekstrak satu nilai string/angka sederhana dari JSON payload heartbeat.
+std::string hb_extract(const std::string& s, const std::string& key){
+  std::string needle="\""+key+"\"";
+  auto p=s.find(needle); if(p==std::string::npos) return "";
+  auto c=s.find(':',p); if(c==std::string::npos) return "";
+  size_t q1=s.find_first_not_of(" \t",c+1);
+  if(q1==std::string::npos) return "";
+  if(s[q1]=='"'){
+    size_t q2=q1+1;
+    while(q2<s.size()){ if(s[q2]=='\\'){ q2+=2; continue; } if(s[q2]=='"') break; q2++; }
+    if(q2>=s.size()) return "";
+    return json_unescape(s.substr(q1+1,q2-q1-1));
+  }
+  size_t q2=s.find_first_of(",}",q1);
+  if(q2==std::string::npos) return "";
+  std::string v=s.substr(q1,q2-q1);
+  v.erase(std::remove(v.begin(),v.end(),' '),v.end());
+  return v;
+}
+} // namespace
+
+std::optional<HeartbeatPayload> parse_heartbeat_payload(const std::string& json){
+  if(json.empty()) return std::nullopt;
+  const std::string exam_id_s=hb_extract(json,"exam_id");
+  if(exam_id_s.empty()) return std::nullopt;
+  HeartbeatPayload hb;
+  try{ hb.exam_id=std::stoi(exam_id_s); }catch(...){ return std::nullopt; }
+  hb.mac_address=hb_extract(json,"mac_address");
+  hb.student_name=hb_extract(json,"student_name");
+  hb.exam_number=hb_extract(json,"exam_number");
+  hb.student_class=hb_extract(json,"student_class");
+  hb.device_info=hb_extract(json,"device_info");
+  hb.ip_address=hb_extract(json,"ip_address");
+  hb.event=hb_extract(json,"event");
+  hb.last_seen=hb_extract(json,"last_seen");
+  return hb;
+}
+
+#ifdef HAS_HIREDIS
+#ifdef HAS_LIBPQ
+// Pindahkan satu batch heartbeat (max 500) dari queue Redis ke PG dalam SATU
+// transaksi; gagal begin/commit → requeue seluruh batch (paritas Go
+// flushHeartbeatBatch). Payload rusak di-drop (poison-loop guard).
+static int drain_heartbeat_batch(redisContext* ctx, db::RealPool& real, PGconn* conn){
+  std::vector<std::string> payloads;
+  for(int i=0;i<kHeartbeatBatchSize;i++){
+    auto* r=(redisReply*)redisCommand(ctx,"RPOP %s", kHeartbeatQueueKey);
+    if(!r) break;
+    const bool got = r->type==REDIS_REPLY_STRING;
+    if(got) payloads.push_back(std::string(r->str, r->len));
+    freeReplyObject(r);
+    if(!got) break; // list kosong / error sementara
+  }
+  if(payloads.empty()) return 0;
+  auto requeue=[&]{
+    for(auto& p: payloads){
+      auto* r=(redisReply*)redisCommand(ctx,"LPUSH %s %b", kHeartbeatQueueKey, p.data(), p.size());
+      if(r) freeReplyObject(r);
+    }
+  };
+  real.exec_params(conn,"BEGIN",{});
+  for(auto& p: payloads){
+    auto hb=parse_heartbeat_payload(p);
+    if(!hb) continue; // malformed → drop
+    const std::string now_txt=helpers::format_iso_utc(std::chrono::system_clock::now());
+    real.exec_params(conn,
+      "INSERT INTO student_access_logs (exam_id, student_identifier, student_name, exam_number, student_class, event, ip_address, device_info, created_at)"
+      " VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      {std::to_string(hb->exam_id), hb->mac_address, hb->student_name, hb->exam_number,
+       hb->student_class, hb->event.empty()?"heartbeat":hb->event, hb->ip_address, hb->device_info,
+       hb->last_seen.empty()?now_txt:hb->last_seen});
+    // Monitoring row (paritas Go): student harus muncul di "Monitoring Perangkat".
+    auto latest=real.exec_params(conn,
+      "SELECT answers_json FROM submissions WHERE exam_id=$1 AND mac_address=$2 ORDER BY created_at DESC LIMIT 1",
+      {std::to_string(hb->exam_id), hb->mac_address});
+    bool need_empty=true;
+    if(latest && PQresultStatus(latest.get())==PGRES_TUPLES_OK && PQntuples(latest.get())>0){
+      const std::string answers=PQgetisnull(latest.get(),0,0)? "": std::string(PQgetvalue(latest.get(),0,0));
+      if(answers.empty()) need_empty=false; // placeholder row sudah ada (belum submit)
+    }
+    if(need_empty){
+      real.exec_params(conn,
+        "INSERT INTO submissions (exam_id, student_name, exam_number, student_class, mac_address, start_time, created_at, identity_data)"
+        " VALUES ($1,$2,$3,$4,$5,$6,$7,'{}')",
+        {std::to_string(hb->exam_id), hb->student_name, hb->exam_number, hb->student_class,
+         hb->mac_address, hb->last_seen.empty()?now_txt:hb->last_seen, now_txt});
+    }
+  }
+  auto commit=real.exec_params(conn,"COMMIT",{});
+  if(!commit || PQresultStatus(commit.get())!=PGRES_COMMAND_OK){ requeue(); return (int)payloads.size(); }
+  return (int)payloads.size();
+}
+#endif
+#endif
+
+int drain_heartbeats_once(){
+#ifdef HAS_HIREDIS
+#ifdef HAS_LIBPQ
+  auto cfg=Config::load();
+  auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
+  if(!ctx) return 0;
+  DbPool pool(cfg.database_url,60);
+  db::RealPool real(pool.sanitized_url(),60);
+  auto c=real.acquire();
+  if(!c) return 0;
+  int total=0;
+  for(int batch=0; batch<kHeartbeatMaxBatches; ++batch){
+    int n=drain_heartbeat_batch(ctx.get(), real, c.get());
+    if(n==0) break;                 // antrean kosong
+    total+=n;
+    if(n<kHeartbeatBatchSize) break; // batch parsial = antrean habis
+  }
+  return total;
+#else
+  return 0;
+#endif
+#else
+  return 0;
+#endif
+}
+
+HeartbeatFlusher::HeartbeatFlusher(std::function<int()> drain): drain_(std::move(drain)) {}
+HeartbeatFlusher::~HeartbeatFlusher(){ stop(); }
+void HeartbeatFlusher::start(){
+  running_=true;
+  th_=std::thread([this]{
+    while(running_){
+      std::this_thread::sleep_for(std::chrono::seconds(30)); // paritas Go tick 30s
+      if(running_ && drain_) drain_();
+    }
+  });
+}
+void HeartbeatFlusher::stop(){ running_=false; if(th_.joinable()) th_.join(); }
 
 } // namespace examvan::queue

@@ -566,11 +566,13 @@ TEST(ProtobufHandlers, ExamByToken_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, RequestApproval_ValidProtobufResponse) {
-  std::string token=prepare_started_exam_for_api();
-  ASSERT_FALSE(token.empty());
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
+  auto exam=store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
   auto req = pb_accept();
   req.method = "POST";
-  req.body="token="+token;
+  req.body="exam_id="+std::to_string(eid)+"&mac_address=aa:bb:cc&token="+exam->token;
   auto res = handlers::api::request_approval(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -582,9 +584,12 @@ TEST(ProtobufHandlers, RequestApproval_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, RequestApproval_JsonStillWorks) {
-  std::string token=prepare_started_exam_for_api();
-  ASSERT_FALSE(token.empty());
-  Request req; req.method = "POST"; req.body="token="+token;
+  int eid=prepare_started_exam_id_for_api();
+  ASSERT_GT(eid,0);
+  auto exam=store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
+  Request req; req.method = "POST";
+  req.body="exam_id="+std::to_string(eid)+"&mac_address=aa:bb:cc&token="+exam->token;
   auto res = handlers::api::request_approval(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"pending\""), std::string::npos);
@@ -655,9 +660,12 @@ TEST(ProtobufHandlers, ExamResult_JsonStillWorks) {
 TEST(ProtobufHandlers, AccessLog_ValidProtobufResponse) {
   int eid=prepare_started_exam_id_for_api();
   ASSERT_GT(eid,0);
+  auto exam=store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
   auto req = pb_accept();
   req.method = "POST";
   req.params["exam_id"] = std::to_string(eid);
+  req.headers["X-Exam-Token"] = exam->token;
   auto res = handlers::api::access_log(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -671,7 +679,10 @@ TEST(ProtobufHandlers, AccessLog_ValidProtobufResponse) {
 TEST(ProtobufHandlers, AccessLog_JsonStillWorks) {
   int eid=prepare_started_exam_id_for_api();
   ASSERT_GT(eid,0);
+  auto exam=store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
   Request req; req.method = "POST"; req.params["exam_id"] = std::to_string(eid);
+  req.headers["X-Exam-Token"] = exam->token;
   auto res = handlers::api::access_log(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"logged\":true"), std::string::npos);

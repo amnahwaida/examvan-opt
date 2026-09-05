@@ -116,6 +116,12 @@ int main(){
 #endif
   examvan::queue::Worker w(&sq, scorer_fn);
   if(redis.ping()) w.start();
+#if defined(HAS_HIREDIS) && defined(HAS_LIBPQ)
+  // Heartbeat presence → student_access_logs (paritas Go startHeartbeatFlusher:
+  // tick 30s, RPOP batch → INSERT transaksional; requeue saat gagal).
+  examvan::queue::HeartbeatFlusher hb_flusher([](){ return examvan::queue::drain_heartbeats_once(); });
+  if(redis_ok && db.ping()) hb_flusher.start();
+#endif
   examvan::jobs::JobRunner expiry(examvan::jobs::run_expiry_job, std::chrono::seconds(3600));
   examvan::jobs::JobRunner cleanup(examvan::jobs::run_approval_cleanup, std::chrono::seconds(1800));
   examvan::jobs::JobRunner retention(examvan::jobs::run_access_log_retention, std::chrono::seconds(86400));
