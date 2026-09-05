@@ -306,6 +306,86 @@ TEST(ProductionHardening, Questions_SaveThenGet_RoundTrip){
   EXPECT_NE(res.body.find("\"questions\":["), std::string::npos) << res.body;
 }
 
+TEST(ProductionHardening, Questions_StrictModeBooleanRoundTrip){
+  // Frontend mengirim strict_mode sebagai BOOLEAN JSON (true/false) karena
+  // diturunkan dari security_level high. json_int_field (stoi) tidak bisa
+  // parse boolean → strict_mode pernah ter-save (bug review menu edit soal).
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":[],\"security_level\":\"high\",\"strict_mode\":true}";
+  auto saved=save_exam_questions(sq);
+  EXPECT_EQ(saved.status,200) << saved.body;
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->strict_mode,1) << "strict_mode:true harus tersimpan (1)";
+  Request gq; gq.params["exam_id"]=std::to_string(id);
+  auto res=get_exam_questions(gq);
+  EXPECT_NE(res.body.find("\"strict_mode\":true"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, Questions_StrictModeFalseParsed){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":[],\"strict_mode\":false}";
+  auto saved=save_exam_questions(sq);
+  EXPECT_EQ(saved.status,200) << saved.body;
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->strict_mode,0) << "strict_mode:false harus tersimpan (0)";
+}
+
+TEST(ProductionHardening, Questions_PengawasAssignmentGo){
+  // Review menu edit soal: bagian "Atur Pengawas" adalah no-op di C++ —
+  // get_exam_questions mengembalikan assigned_pengawas/available_pengawas
+  // hardcoded [], dan save_exam_questions membuang pengawas_ids diam-diam.
+  // Go memakai tabel exam_pengawas (junction) + admin_users.role ILIKE.
+  auto c=read_source_file("src/handlers/admin/exams.cpp");
+  EXPECT_NE(c.find("exam_pengawas"), std::string::npos)
+    << "save/get questions harus menyentuh tabel exam_pengawas";
+  EXPECT_NE(c.find("DELETE FROM exam_pengawas"), std::string::npos)
+    << "save harus replace assignment (hapus lama lalu insert)";
+  EXPECT_NE(c.find("INSERT INTO exam_pengawas"), std::string::npos);
+  EXPECT_NE(c.find("pengawas_ids"), std::string::npos)
+    << "save harus mem-parse pengawas_ids dari body";
+  EXPECT_NE(c.find("JOIN admin_users"), std::string::npos)
+    << "get harus list pengawas ter-assign dengan detail user";
+  EXPECT_NE(c.find("ILIKE"), std::string::npos)
+    << "available pengawas = admin_users dengan role pengawas (ILIKE)";
+  EXPECT_NE(c.find("available_pengawas"), std::string::npos)
+    << "get harus mengembalikan available pengawas (bukan hardcoded [])";
+}
+
+TEST(ProductionHardening, Questions_PengawasIdsAccepted){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":[{\"number\":1,\"type\":\"single_choice\",\"key\":\"A\"}],\"pengawas_ids\":[3,7]}";
+  auto saved=save_exam_questions(sq);
+  EXPECT_EQ(saved.status,200) << saved.body;
+  Request gq; gq.params["exam_id"]=std::to_string(id);
+  auto res=get_exam_questions(gq);
+  EXPECT_EQ(res.status,200) << res.body;
+  // tanpa PG: assigned/available fallback [] tetapi kunci wajib ada.
+  EXPECT_NE(res.body.find("\"assigned_pengawas\":"), std::string::npos) << res.body;
+  EXPECT_NE(res.body.find("\"available_pengawas\":"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, Questions_PengawasIdsInvalid400){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":[],\"pengawas_ids\":\"bukan-array\"}";
+  auto res=save_exam_questions(sq);
+  EXPECT_EQ(res.status,400) << res.body;
+  EXPECT_NE(res.body.find("pengawas_ids"), std::string::npos) << res.body;
+}
+
 TEST(ProductionHardening, Questions_MissingExam404){
   Request gq; gq.params["exam_id"]="99999";
   EXPECT_EQ(get_exam_questions(gq).status,404);

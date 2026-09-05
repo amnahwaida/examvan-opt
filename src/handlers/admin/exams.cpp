@@ -6,6 +6,11 @@
 #include "utils/log.hpp"
 #include "store/exam_store.hpp"
 #include "services/examtoken/examtoken.hpp"
+#ifdef HAS_LIBPQ
+#include "db/pool.hpp"
+#include "db/pool_real.hpp"
+#include <libpq-fe.h>
+#endif
 #include <chrono>
 #include <cstdio>
 #ifdef HAS_PROTOBUF
@@ -532,6 +537,21 @@ static std::optional<int> json_int_field(const std::string& body, const std::str
   catch(...) { return std::nullopt; }
 }
 
+// Parse boolean JSON (true/false/1/0) — json_int_field (stoi) GAGAL untuk
+// true/false, padahal frontend mengirim strict_mode sebagai boolean.
+static std::optional<bool> json_bool_field(const std::string& body, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t p=body.find(needle);
+  if(p==std::string::npos) return std::nullopt;
+  size_t colon=body.find(':',p+needle.size());
+  if(colon==std::string::npos) return std::nullopt;
+  size_t s=body.find_first_not_of(" \t\r\n",colon+1);
+  if(s==std::string::npos) return std::nullopt;
+  if(body.compare(s,4,"true")==0 || (body[s]=='1')) return true;
+  if(body.compare(s,5,"false")==0 || body[s]=='0') return false;
+  return std::nullopt;
+}
+
 // Ambil nilai JSON mentah (string ber-quote / angka / {objek} / [array]) untuk sebuah key.
 static std::string json_raw_value(const std::string& body, const std::string& key){
   std::string needle="\""+key+"\"";
@@ -806,6 +826,57 @@ Response export_xlsx(const Request&){
   // konten XLSX palsu (user mendapat file corrupt). Jelas 501 + pesan.
   Response r; r.status=501; r.json(501,"{\"error\":\"XLSX export not implemented\",\"error_code\":\"NOT_IMPLEMENTED\"}"); return r;
 }
+// Parse JSON array angka, mis. pengawas_ids: [3,7] → {3,7}. Return false
+// bila elemen non-numerik ditemukan (validasi).
+static bool parse_int_array(const std::string& raw, std::vector<int>& out){
+  out.clear();
+  size_t i=0;
+  while(i<raw.size() && (raw[i]==' '||raw[i]=='\t'||raw[i]=='\r'||raw[i]=='\n')) i++;
+  if(i>=raw.size()||raw[i]!='[') return false;
+  i++;
+  while(i<raw.size()){
+    while(i<raw.size() && (raw[i]==' '||raw[i]=='\t'||raw[i]=='\r'||raw[i]=='\n'||raw[i]==',')) i++;
+    if(i>=raw.size()||raw[i]==']') break;
+    if(!isdigit((unsigned char)raw[i])) return false;
+    size_t s=i; while(i<raw.size() && isdigit((unsigned char)raw[i])) i++;
+    try{ out.push_back(std::stoi(raw.substr(s,i-s))); }catch(...){ return false; }
+  }
+  return true;
+}
+
+// List pengawas (assigned per exam / available) dari PG — paritas Go
+// exam_pengawas junction + admin_users.role ILIKE '%"pengawas"%'.
+static std::string query_pengawas_json(int exam_id, bool assigned_only){
+  std::string result="[]";
+#ifdef HAS_LIBPQ
+  try{
+    auto cfg_db=Config::load();
+    examvan::DbPool pool(cfg_db.database_url, 10);
+    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    if(auto c=real.acquire()){
+      const char* sql=assigned_only
+        ? "SELECT ep.user_id,u.username,COALESCE(u.name,''),COALESCE(u.instansi,'') FROM exam_pengawas ep JOIN admin_users u ON ep.user_id=u.id WHERE ep.exam_id=$1 ORDER BY u.username"
+        : "SELECT id,username,COALESCE(name,''),COALESCE(instansi,'') FROM admin_users WHERE role ILIKE '%\"pengawas\"%' AND status='active' ORDER BY username";
+      auto r=real.exec_params(c.get(),sql,assigned_only?std::vector<std::string>{std::to_string(exam_id)}:std::vector<std::string>{});
+      if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
+        std::string arr="[";
+        for(int i=0;i<PQntuples(r.get());i++){
+          if(i>0) arr+=",";
+          arr+="{\"id\":"+std::string(PQgetvalue(r.get(),i,0))
+            +",\"username\":\""+json_escape(PQgetvalue(r.get(),i,1))+"\""
+            +",\"name\":\""+json_escape(PQgetvalue(r.get(),i,2))+"\""
+            +",\"instansi\":\""+json_escape(PQgetvalue(r.get(),i,3))+"\"}";
+        }
+        arr+="]";
+        result=arr;
+      }
+      real.release(c.release());
+    }
+  }catch(...){ /* best-effort: tanpa PG, [] (paritas perilaku sebelum-sebelumnya) */ }
+#endif
+  return result;
+}
+
 Response get_exam_questions(const Request& req){
   auto id_str=get_exam_id(req);
   if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
@@ -830,7 +901,8 @@ Response get_exam_questions(const Request& req){
     +",\"congrats_message\":"+(exam->congrats_message?("\""+json_escape(*exam->congrats_message)+"\""):"null")
     +",\"questions\":"+questions
     +",\"identity_fields\":"+identity
-    +",\"assigned_pengawas\":[],\"available_pengawas\":[]}";
+    +",\"assigned_pengawas\":"+query_pengawas_json(id,true)
+    +",\"available_pengawas\":"+query_pengawas_json(id,false)+"}";
   Response r; r.json(200, json); return r;
 }
 Response save_exam_questions(const Request& req){
@@ -846,7 +918,15 @@ Response save_exam_questions(const Request& req){
   std::string st=json_string_field(req.body,"start_time");
   std::string et=json_string_field(req.body,"end_time");
   std::string congrats=json_string_field(req.body,"congrats_message");
-  auto strict=json_int_field(req.body,"strict_mode");
+  // strict_mode dikirim frontend sebagai BOOLEAN (true/false) — json_int_field
+  // (stoi) tidak bisa parse → gunakan json_bool_field.
+  auto strict=json_bool_field(req.body,"strict_mode");
+  // Pengawas assignment (paritas Go exam_pengawas junction).
+  std::string pengawas_raw=json_raw_value(req.body,"pengawas_ids");
+  std::vector<int> pengawas_ids;
+  if(!pengawas_raw.empty() && !parse_int_array(pengawas_raw,pengawas_ids)){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"pengawas_ids must be an array of numbers\"}"); return r;
+  }
   // Validasi: questions/identity_fields wajib array bila dikirim (bukan string).
   if(!questions.empty() && questions.front()!='['){
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"questions must be an array\"}"); return r;
@@ -868,6 +948,26 @@ Response save_exam_questions(const Request& req){
     if(!congrats.empty()) e.congrats_message=congrats; else e.congrats_message.reset();
   });
   if(!updated){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  // Simpan assignment pengawas: replace semua baris exam_pengawas dalam satu
+  // transaksi (paritas Go). Best-effort: gagal PG tidak menggagalkan simpan soal.
+  if(!pengawas_raw.empty()){
+#ifdef HAS_LIBPQ
+    try{
+      auto cfg_db=Config::load();
+      examvan::DbPool pool(cfg_db.database_url, 10);
+      examvan::db::RealPool real(pool.sanitized_url(), 10);
+      if(auto c=real.acquire()){
+        real.exec_params(c.get(),"BEGIN",{});
+        real.exec_params(c.get(),"DELETE FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
+        for(int uid: pengawas_ids){
+          real.exec_params(c.get(),"INSERT INTO exam_pengawas (exam_id,user_id) VALUES ($1,$2)",{std::to_string(id),std::to_string(uid)});
+        }
+        real.exec_params(c.get(),"COMMIT",{});
+        real.release(c.release());
+      }
+    }catch(...){ utils::log_error("exam_pengawas_save_failed","id="+id_str); }
+#endif
+  }
   utils::log_info("exam_questions_saved","id="+id_str);
   Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Konfigurasi soal berhasil disimpan\"}"); return r;
 }
