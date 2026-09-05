@@ -79,3 +79,19 @@ TEST(ScoringDetail, ParseQuestions_CapturesKeyRawAndPartial) {
   EXPECT_FALSE(qs[1].partial);
   EXPECT_NE(qs[1].key_raw.find("\"1\":\"A\""), std::string::npos);
 }
+TEST(ScoringDetail, StoredScoreMatchesDetailPartial) {
+  // Skor TERSIMPAN (score_submission, dipakai worker → submissions.score)
+  // harus konsisten dengan detail per-soal (evaluate_question_detail).
+  // Dulu dua path berbeda utk partial multi-select: worker hit/total tanpa
+  // penalti, detail max(0,benar-salah)/total dengan penalti.
+  std::string j=R"([{"number":1,"type":"multiple_choice","weight":6,"partial_scoring":true,"key":["A","B","C"],"choices":["A","B","C","D"]}])";
+  auto qs=parse_questions(j);
+  ASSERT_EQ(qs.size(), 1u);
+  // Pilih A,C (benar) + D (salah): detail portion=(2-1)/3=1/3 → earned 2.
+  std::map<std::string,std::string> ans{{"1","[\"A\",\"C\",\"D\"]"}};
+  double stored=score_submission(qs, ans);           // 100 * 2/6
+  auto detail=evaluate_question_detail(qs[0], ans["1"]);
+  EXPECT_NEAR(stored, 100.0*detail.earned/qs[0].weight, 1e-9)
+    << "stored score must match detail earned fraction";
+  EXPECT_NEAR(stored, 100.0*2.0/6.0, 1e-9);
+}
