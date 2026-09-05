@@ -212,6 +212,7 @@ add_executable(examvan-tests
   tests/test_export.cpp
   tests/test_characterization.cpp
   tests/test_scoring.cpp
+  tests/test_scoring_partial_tdd.cpp
   tests/test_server_live.cpp
   tests/test_f4_hasil.cpp
   tests/test_f4_download.cpp

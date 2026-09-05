@@ -326,9 +326,25 @@ std::map<std::string,std::string> parse_answers(const std::string& json){
     while(v<n && (json[v]==' '||json[v]=='\t'||json[v]=='\n'||json[v]=='\r')) v++;
     std::string val;
     if(v<n && json[v]=='"'){
+      // nilai string: unquote, biarkan escape apa adanya (dipakai apa adanya).
       size_t v2=v+1; while(v2<n){ if(json[v2]=='\\'){v2+=2;continue;} if(json[v2]=='"') break; v2++; }
       val=json.substr(v+1, v2-(v+1));
       i=v2+1;
+    } else if(v<n && (json[v]=='[' || json[v]=='{')){
+      // nilai array/objek: salin JSON mentah seimbang (jawaban PG kompleks).
+      int depth=0; bool in=false, esc=false;
+      size_t j=v;
+      for(; j<n; ++j){
+        char cj=json[j];
+        if(esc){esc=false;continue;}
+        if(cj=='\\'&&in){esc=true;continue;}
+        if(cj=='"'){in=!in;continue;}
+        if(in) continue;
+        if(cj=='['||cj=='{') depth++;
+        else if(cj==']'||cj=='}'){ depth--; if(depth==0){ j++; break; } }
+      }
+      val=json.substr(v, j-v);
+      i=j;
     } else {
       size_t e=v; while(e<n && json[e]!=',' && json[e]!='}') e++;
       val=json.substr(v,e-v);
@@ -339,33 +355,20 @@ std::map<std::string,std::string> parse_answers(const std::string& json){
   return out;
 }
 
-std::string norm(const std::string& s){
-  std::string o; o.reserve(s.size());
-  for(char c: s) if(!std::isspace((unsigned char)c)) o.push_back((char)std::tolower((unsigned char)c));
-  return o;
-}
-
 // evaluated_answers: {"1":{"earned":2,"statusText":"correct","statusClass":"correct"}, ...}
+// Delegasi ke scoring::evaluate_question_detail (paritas Go): multiple_choice /
+// matching ber-partial_scoring dinilai proporsional, bukan string utuh.
 std::string build_evaluated_answers(const std::map<std::string,std::string>& answers, const std::vector<scoring::Question>& qs){
   std::string out="{";
   bool first=true;
   for(const auto& q: qs){
     std::string qn=std::to_string(q.number);
     auto it=answers.find(qn);
-    std::string status, statusText;
-    double earned=0;
-    if(it==answers.end() || it->second.empty()){
-      status=statusText="unanswered";
-    } else if(norm(it->second)==norm(q.key)){
-      status=statusText="correct";
-      earned=q.weight>0?q.weight:1.0;
-    } else {
-      status=statusText="incorrect";
-    }
+    auto detail=scoring::evaluate_question_detail(q, it==answers.end()?"":it->second);
     if(!first) out+=",";
     first=false;
-    out+="\""+qn+"\":{\"earned\":"+fmt_num(earned)
-      +",\"statusText\":\""+statusText+"\",\"statusClass\":\""+status+"\"}";
+    out+="\""+qn+"\":{\"earned\":"+fmt_num(detail.earned)
+      +",\"statusText\":\""+detail.status+"\",\"statusClass\":\""+detail.status+"\"}";
   }
   out+="}";
   return out;

@@ -1,6 +1,7 @@
 #include "middleware/scoring.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 
 namespace examvan::scoring {
 
@@ -58,6 +59,48 @@ static double extract_double(const std::string& obj, const std::string& key, dou
 static int extract_int(const std::string& obj, const std::string& key, int def){
   return (int)extract_double(obj,key,def);
 }
+// Nilai JSON mentah sebuah kolom (string ber-quote, array, objek, atau skalar).
+static std::string extract_raw_value(const std::string& obj, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t p=obj.find(needle);
+  if(p==std::string::npos) return "";
+  size_t c=obj.find(':', p+needle.size());
+  if(c==std::string::npos) return "";
+  size_t i=c+1;
+  while(i<obj.size() && (obj[i]==' '||obj[i]=='\t'||obj[i]=='\n'||obj[i]=='\r')) i++;
+  if(i>=obj.size()) return "";
+  char ch=obj[i];
+  if(ch=='"'){
+    size_t e=i+1; while(e<obj.size()){ if(obj[e]=='\\'){e+=2;continue;} if(obj[e]=='"') break; e++; }
+    if(e<obj.size()) return obj.substr(i, e-i+1);
+    return "";
+  }
+  if(ch=='[' || ch=='{'){
+    int depth=0; bool in=false, esc=false;
+    for(size_t j=i;j<obj.size();++j){
+      char cj=obj[j];
+      if(esc){esc=false;continue;}
+      if(cj=='\\'&&in){esc=true;continue;}
+      if(cj=='"'){in=!in;continue;}
+      if(in) continue;
+      if(cj=='['||cj=='{') depth++;
+      else if(cj==']'||cj=='}'){ depth--; if(depth==0) return obj.substr(i, j-i+1); }
+    }
+    return "";
+  }
+  size_t e=i; while(e<obj.size() && obj[e]!=',' && obj[e]!='}' && obj[e]!=']') e++;
+  return obj.substr(i, e-i);
+}
+
+static bool json_bool_field(const std::string& obj, const std::string& key){
+  std::string needle="\""+key+"\"";
+  size_t p=obj.find(needle);
+  if(p==std::string::npos) return false;
+  size_t c=obj.find(':', p);
+  if(c==std::string::npos) return false;
+  return obj.compare(c+1, 4, "true")==0;
+}
+
 std::vector<Question> parse_questions(const std::string& json){
   std::vector<Question> out;
   size_t pos=0;
@@ -86,6 +129,11 @@ std::vector<Question> parse_questions(const std::string& json){
       q.weight=extract_double(obj,"weight",1);
       q.key=extract_str(obj,"key");
       if(q.key.empty()) q.key=extract_str(obj,"answer");
+      // partial_scoring (Go) / partial (legacy) / tipe "partial" (legacy).
+      q.partial=json_bool_field(obj,"partial_scoring") || json_bool_field(obj,"partial") || q.type=="partial";
+      q.key_raw=extract_raw_value(obj,"key");
+      if(q.key_raw.empty()) q.key_raw=extract_raw_value(obj,"answer");
+      if(q.key_raw.empty() && !q.key.empty()) q.key_raw="\""+q.key+"\"";
       out.push_back(q);
     }
     pos=b+1;
@@ -131,6 +179,148 @@ double score_submission(const std::vector<Question>& qs, const std::map<std::str
   }
   if(total==0) return 0;
   return (got/total)*100.0;
+}
+
+// ===== Evaluasi detail per-soal (paritas Go evaluateSingleQuestion) =====
+namespace {
+
+// Go: strings.ToUpper(strings.Join(strings.Fields(s), " "))
+std::string norm_ans(const std::string& s){
+  std::string out;
+  bool space=false;
+  for(char c: s){
+    if(std::isspace((unsigned char)c)){ space=true; }
+    else { if(space && !out.empty()) out.push_back(' '); out.push_back((char)std::toupper((unsigned char)c)); space=false; }
+  }
+  return out;
+}
+
+// Token dari raw JSON array (["A","C"]) atau string "A,C;D" / "A".
+std::vector<std::string> parse_set_tokens(const std::string& raw){
+  std::vector<std::string> out;
+  size_t a=raw.find('['), b=raw.rfind(']');
+  std::string inner=(a!=std::string::npos && b!=std::string::npos && b>a) ? raw.substr(a+1, b-a-1) : raw;
+  size_t i=0;
+  while(i<inner.size()){
+    while(i<inner.size() && (inner[i]==' '||inner[i]=='\t'||inner[i]==','||inner[i]==';'||inner[i]=='\n'||inner[i]=='\r')) i++;
+    if(i>=inner.size()) break;
+    std::string tok;
+    if(inner[i]=='"'){
+      i++;
+      while(i<inner.size()){ if(inner[i]=='\\'){ i+=2; continue; } if(inner[i]=='"'){ i++; break; } tok+=inner[i++]; }
+    } else {
+      while(i<inner.size() && inner[i]!=',' && inner[i]!=';' && inner[i]!=']' && inner[i]!='\t' && inner[i]!='\n' && inner[i]!='\r') tok+=inner[i++];
+    }
+    if(!tok.empty()) out.push_back(norm_ans(tok));
+  }
+  return out;
+}
+
+struct KV { std::string k, v; };
+// Pasangan key→value dari raw JSON objek ({"1":"A"}) atau string "1:A,2:B".
+std::vector<KV> parse_object_pairs(const std::string& raw){
+  std::vector<KV> out;
+  size_t a=raw.find('{'), b=raw.rfind('}');
+  std::string in=(a!=std::string::npos && b!=std::string::npos && b>a) ? raw.substr(a+1, b-a-1) : raw;
+  size_t i=0;
+  while(i<in.size()){
+    while(i<in.size() && (in[i]==' '||in[i]=='\t'||in[i]==','||in[i]=='\n'||in[i]=='\r')) i++;
+    if(i>=in.size()) break;
+    std::string k;
+    if(in[i]=='"'){ i++; while(i<in.size()){ if(in[i]=='\\'){i+=2;continue;} if(in[i]=='"'){i++;break;} k+=in[i++]; } }
+    else { while(i<in.size() && in[i]!=':' && in[i]!=',') k+=in[i++]; }
+    while(i<in.size() && in[i]!=':') i++;
+    if(i<in.size()) i++;
+    while(i<in.size() && (in[i]==' '||in[i]=='\t'||in[i]=='\n'||in[i]=='\r')) i++;
+    std::string v;
+    if(i<in.size() && in[i]=='"'){ i++; while(i<in.size()){ if(in[i]=='\\'){i+=2;continue;} if(in[i]=='"'){i++;break;} v+=in[i++]; } }
+    else { while(i<in.size() && in[i]!=',' && in[i]!='}') v+=in[i++]; }
+    if(!k.empty()) out.push_back({norm_ans(k), norm_ans(v)});
+  }
+  return out;
+}
+
+bool sets_equal(const std::vector<std::string>& a, const std::vector<std::string>& b){
+  if(a.size()!=b.size()) return false;
+  std::vector<std::string> x=a, y=b;
+  std::sort(x.begin(), x.end());
+  std::sort(y.begin(), y.end());
+  return x==y;
+}
+
+bool sets_equal_obj(const std::vector<KV>& a, const std::vector<KV>& b){
+  if(a.size()!=b.size()) return false;
+  for(const auto& x: a){
+    bool found=false;
+    for(const auto& y: b) if(y.k==x.k && y.v==x.v){ found=true; break; }
+    if(!found) return false;
+  }
+  return true;
+}
+
+std::string single_key_token(const Question& q){
+  auto toks=parse_set_tokens(q.key_raw);
+  if(toks.empty()) return norm_ans(q.key);
+  return toks.front();
+}
+
+} // namespace
+
+EvalDetail evaluate_question_detail(const Question& q, const std::string& answer_raw){
+  EvalDetail d;
+  std::string ans=answer_raw;
+  {
+    size_t a0=ans.find_first_not_of(" \t\r\n");
+    if(a0==std::string::npos) ans=""; else ans=ans.substr(a0);
+  }
+  if(ans.empty() || ans=="[]" || ans=="{}"){
+    d.earned=0; d.status="unanswered"; return d;
+  }
+  std::string type=q.type;
+  if(type=="multiple_choice" || type=="multiple_answer" || type=="partial"){
+    auto correct=parse_set_tokens(q.key_raw);
+    auto student=parse_set_tokens(ans);
+    if(q.partial){
+      if(correct.empty()){ d.status="incorrect"; return d; }
+      int corr=0, wrong=0;
+      for(const auto& s: student)
+        if(std::find(correct.begin(), correct.end(), s)!=correct.end()) corr++; else wrong++;
+      double portion=std::max(0.0, double(corr-wrong))/double(correct.size());
+      d.earned=portion*q.weight;
+      if(portion>=1.0-1e-9) d.status="correct";
+      else if(portion>1e-9) d.status="partial";
+      else d.status="incorrect";
+    } else {
+      if(sets_equal(student, correct)){ d.earned=q.weight; d.status="correct"; }
+      else { d.earned=0; d.status="incorrect"; }
+    }
+    return d;
+  }
+  if(type=="matching"){
+    auto correct=parse_object_pairs(q.key_raw);
+    auto student=parse_object_pairs(ans);
+    if(q.partial){
+      if(correct.empty()){ d.status="incorrect"; return d; }
+      int hit=0;
+      for(const auto& c: correct)
+        for(const auto& s: student)
+          if(s.k==c.k && s.v==c.v){ hit++; break; }
+      double portion=double(hit)/double(correct.size());
+      d.earned=portion*q.weight;
+      if(portion>=1.0-1e-9) d.status="correct";
+      else if(portion>1e-9) d.status="partial";
+      else d.status="incorrect";
+    } else {
+      if(sets_equal_obj(correct, student)){ d.earned=q.weight; d.status="correct"; }
+      else { d.earned=0; d.status="incorrect"; }
+    }
+    return d;
+  }
+  // single_choice / true_false / short_answer / lainnya: exact.
+  std::string cNorm=single_key_token(q);
+  if(norm_ans(ans)==cNorm){ d.earned=q.weight; d.status="correct"; }
+  else { d.earned=0; d.status="incorrect"; }
+  return d;
 }
 
 } // namespace examvan::scoring

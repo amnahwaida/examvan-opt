@@ -385,12 +385,21 @@ bool Server::listen(const ServerOpts& opts) {
       std::string xreq(std::string_view(req->getHeader("x-requested-with")));
       std::string ctype(std::string_view(req->getHeader("content-type")));
       std::string idem(std::string_view(req->getHeader("idempotency-key")));
+      /* Header siswa/kontrol yang HARUS diteruskan: dulu allowlist di bawah
+       * membuang X-Exam-Token/X-Forwarded-For/X-Real-IP/X-User/X-Version —
+       * di produksi (uWS) submit/access_log selalu 401 "Token tidak
+       * disertakan" dan rate-limit per-IP mati. (Jalur posix parse semua.) */
+      std::string xexam(std::string_view(req->getHeader("x-exam-token")));
+      std::string xff(std::string_view(req->getHeader("x-forwarded-for")));
+      std::string xrealip(std::string_view(req->getHeader("x-real-ip")));
+      std::string xuser(std::string_view(req->getHeader("x-user")));
+      std::string xvers(std::string_view(req->getHeader("x-version")));
       res->onAborted([res](){
         g_uWS_body.clear();
         res->writeStatus("500");
         res->end();
       });
-      res->onData([router_ptr, res, method, path, cookie, xver, origin, xcsrf, accept, xreq, ctype, idem](std::string_view chunk, bool last){
+      res->onData([router_ptr, res, method, path, cookie, xver, origin, xcsrf, accept, xreq, ctype, idem, xexam, xff, xrealip, xuser, xvers](std::string_view chunk, bool last){
         g_uWS_body.append(chunk);
         if(!last) return;
         examvan::Request r; r.method=method; r.path=path; r.body=g_uWS_body;
@@ -402,6 +411,11 @@ bool Server::listen(const ServerOpts& opts) {
         if(!xreq.empty()) r.headers["X-Requested-With"]=xreq;
         if(!ctype.empty()) r.headers["Content-Type"]=ctype;
         if(!idem.empty()) r.headers["Idempotency-Key"]=idem;
+        if(!xexam.empty()) r.headers["X-Exam-Token"]=xexam;
+        if(!xff.empty()) r.headers["X-Forwarded-For"]=xff;
+        if(!xrealip.empty()) r.headers["X-Real-IP"]=xrealip;
+        if(!xuser.empty()) r.headers["X-User"]=xuser;
+        if(!xvers.empty()) r.headers["X-Version"]=xvers;
         g_uWS_body.clear();
         auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
         if(resp.status==0) resp.status=404;

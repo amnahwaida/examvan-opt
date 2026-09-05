@@ -1578,7 +1578,8 @@ TEST(ProductionHardening, PgConnectionsNeverUseSanitizedUrl){
   // membuat SEMUA query ad-hoc gagal auth (ditemukan smoke test: FATAL
   // password authentication failed). Koneksi harus pakai conninfo_from_url_or_raw.
   for(auto f: {"src/handlers/admin/users.cpp","src/handlers/admin/exams.cpp",
-               "src/handlers/api/exams.cpp","src/jobs/jobs.cpp"}){
+               "src/handlers/api/exams.cpp","src/jobs/jobs.cpp",
+               "src/handlers/admin/export.cpp","src/queue/submission_queue.cpp"}){
     auto c=read_source_file(f);
     EXPECT_EQ(c.find("pool.sanitized_url(),"), std::string::npos)
       << f << " harus konek via conninfo_from_url_or_raw, bukan sanitized_url (password ***)";
@@ -1801,6 +1802,28 @@ TEST(ProductionHardening, LoginSession_NoHardcodedAdminId1){
     << "payload session TIDAK boleh hardcode admin_id=1";
   EXPECT_NE(c.find("build_login_session_payload"), std::string::npos)
     << "login harus memakai builder payload bersama";
+}
+
+TEST(ProductionHardening, UwsPath_ForwardsStudentHeaders){
+  // Bug produksi (ditemukan smoke E2E): jalur uWS (WITH_UWEBSOCKETS=ON,
+  // dipakai docker produksi) hanya meneruskan allowlist header hardcoded —
+  // X-Exam-Token/X-Forwarded-For/X-Real-IP/X-User/X-Version DIBUANG.
+  // Di produksi: submit_exam selalu 401 "Token tidak disertakan", access_log
+  // & complete_exam gagal validasi token, rate-limit per-IP mati.
+  // (Jalur posix src/server/server.cpp:314 parse semua header.)
+  auto c=read_source_file("src/server/server.cpp");
+  size_t p=c.find("x-exam-token");
+  ASSERT_NE(p, std::string::npos) << "uWS path harus baca x-exam-token via getHeader";
+  size_t h=c.find("X-Exam-Token\"]=xexam", p);
+  ASSERT_NE(h, std::string::npos) << "header x-exam-token harus diteruskan ke Request.headers";
+  EXPECT_NE(c.find("getHeader(\"x-forwarded-for\")"), std::string::npos)
+    << "X-Forwarded-For wajib diteruskan (rate limit per-IP)";
+  EXPECT_NE(c.find("getHeader(\"x-real-ip\")"), std::string::npos)
+    << "X-Real-IP wajib diteruskan";
+  EXPECT_NE(c.find("getHeader(\"x-user\")"), std::string::npos)
+    << "X-User wajib diteruskan (dashboard)";
+  EXPECT_NE(c.find("getHeader(\"x-version\")"), std::string::npos)
+    << "X-Version wajib diteruskan (cek_hasil_page)";
 }
 
 TEST(ProductionHardening, LoginSession_PgSelectsRealIdAndRole){

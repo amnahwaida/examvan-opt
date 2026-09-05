@@ -317,7 +317,8 @@ void Worker::run_batch(){
 #ifdef HAS_LIBPQ
       auto cfg = examvan::Config::load();
       examvan::DbPool pool(cfg.database_url, 10);
-      examvan::db::RealPool real(pool.sanitized_url(), 10);
+      // conninfo_from_url_or_raw (BUKAN sanitized_url — password "***" gagal auth).
+      examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
       if(auto c=real.acquire()){
         for(auto &b: batch){
           auto& j=b.first;
@@ -449,7 +450,7 @@ int drain_heartbeats_once(){
   auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
   if(!ctx) return 0;
   DbPool pool(cfg.database_url,60);
-  db::RealPool real(pool.sanitized_url(),60);
+  db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),60);
   auto c=real.acquire();
   if(!c) return 0;
   int total=0;

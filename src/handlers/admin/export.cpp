@@ -148,7 +148,8 @@ Response export_submissions_xlsx(const Request& req){
   try{
     auto cfg_db=Config::load();
     examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    // conninfo_from_url_or_raw (BUKAN sanitized_url — password "***" gagal auth).
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
     if(auto c=real.acquire()){
       const char* sql="SELECT s.id,COALESCE(e.name,''),COALESCE(s.student_name,''),COALESCE(s.exam_number,''),"
         "COALESCE(s.student_class,''),COALESCE(s.score::text,''),COALESCE(s.created_at::text,''),COALESCE(s.mac_address,'')"
