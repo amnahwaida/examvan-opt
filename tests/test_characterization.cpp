@@ -57,6 +57,28 @@ TEST(Characterization, AdminRedirectNotShadowedByTokenCatchall) {
   EXPECT_EQ(res.headers["Location"], "/admin/dashboard");
 }
 
+TEST(Characterization, LoginRateLimitedPerIp) {
+  /* POST /login di-rate-limit 10/mnt per-IP di lapisan C++ (bukan hanya
+   * nginx). IP unik agar tidak mengganggu test lain (limiter statis). */
+  Config cfg; cfg.secret_key=std::string(32,'x');
+  Router r; register_full_routes(r,cfg);
+  std::string ip="203.0.113.77";
+  int ok_401=0, got_429=0;
+  for(int i=0;i<12;i++){
+    Request req; req.method="POST"; req.path="/login";
+    req.headers["X-Real-IP"]=ip;
+    req.headers["Cookie"]="csrf_token=test-token";
+    req.headers["X-CSRF-Token"]="test-token";
+    req.headers["Accept"]="application/json";
+    req.body="username=nobody&password=wrong&_csrf=test-token";
+    auto res=r.dispatch(req);
+    if(res.status==429) got_429++;
+    else if(res.status==401) ok_401++;
+  }
+  EXPECT_EQ(ok_401,10) << "first 10 invalid logins should be 401 (got "<<ok_401<<")";
+  EXPECT_EQ(got_429,2) << "11th-12th login from same IP should be rate-limited (got "<<got_429<<" 429s)";
+}
+
 TEST(Characterization, ApiVersionWebClientAllowed) {
   /* Semantik Go: TANPA header X-App-Version → izinkan (client web);
    * required kosong (fresh DB tanpa system_apps) → izinkan semua. */

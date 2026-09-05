@@ -106,17 +106,12 @@ void register_full_routes(Router& r, const Config& cfg){
     };
   };
 
-  r.add("GET","/login", [cfg](const Request& req){ return handlers::auth::login_page(req); });
-  r.add("POST","/login", [cfg](const Request& req){ return handlers::auth::login_handler(req, cfg); });
-  /* Alias /admin/login: template login & admin-core.js memakai path ini.
-   * Tanpa alias, submit form login → fallback 404 JSON {"error":"not found"}. */
-  r.add("GET","/admin/login", [cfg](const Request& req){ return handlers::auth::login_page(req); });
-  r.add("POST","/admin/login", [cfg](const Request& req){ return handlers::auth::login_handler(req, cfg); });
-  r.add("POST","/logout", [](const Request& req){ return handlers::auth::logout_handler(req); });
-  r.add("GET","/logout", [](const Request& req){ return handlers::auth::logout_page(req); });
-  r.add("GET","/register", handlers::auth::register_page);
-  /* Mutasi public di-rate-limit per-IP (5/menit per alur) — paritas Go
-   * middleware rate limit. RateLimiter statis per alur. */
+  /* Mutasi public auth di-rate-limit per-IP di LAPISAN C++ (bukan hanya
+   * nginx) — login 10/mnt, register/confirm/resend/forgot/reset 5/mnt,
+   * /api/hasil 30/mnt (paritas Go; lihat doc alur-public). RateLimiter
+   * statis per alur. client_ip() baca X-Real-IP/X-Forwarded-For yang di-set
+   * nginx (meng-overwrite nilai klien) — aman di belakang proxy. */
+  static middleware::RateLimiter g_auth_login_rl(10, std::chrono::minutes(1));
   static middleware::RateLimiter g_auth_register_rl(5, std::chrono::minutes(1));
   static middleware::RateLimiter g_auth_confirm_rl(5, std::chrono::minutes(1));
   static middleware::RateLimiter g_auth_resend_rl(5, std::chrono::minutes(1));
@@ -133,6 +128,16 @@ void register_full_routes(Router& r, const Config& cfg){
       return h(req);
     };
   };
+
+  r.add("GET","/login", [cfg](const Request& req){ return handlers::auth::login_page(req); });
+  r.add("POST","/login", rl_wrap(g_auth_login_rl, [cfg](const Request& req){ return handlers::auth::login_handler(req, cfg); }));
+  /* Alias /admin/login: template login & admin-core.js memakai path ini.
+   * Tanpa alias, submit form login → fallback 404 JSON {"error":"not found"}. */
+  r.add("GET","/admin/login", [cfg](const Request& req){ return handlers::auth::login_page(req); });
+  r.add("POST","/admin/login", rl_wrap(g_auth_login_rl, [cfg](const Request& req){ return handlers::auth::login_handler(req, cfg); }));
+  r.add("POST","/logout", [](const Request& req){ return handlers::auth::logout_handler(req); });
+  r.add("GET","/logout", [](const Request& req){ return handlers::auth::logout_page(req); });
+  r.add("GET","/register", handlers::auth::register_page);
   r.add("POST","/register", rl_wrap(g_auth_register_rl, [cfg](const Request& req){ return handlers::auth::register_handler(req, cfg); }));
   r.add("GET","/register/confirm", handlers::auth::register_confirm_page);
   r.add("POST","/register/confirm", rl_wrap(g_auth_confirm_rl, [cfg](const Request& req){ return handlers::auth::register_confirm_handler(req, cfg); }));
