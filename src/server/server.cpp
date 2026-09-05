@@ -162,12 +162,16 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
       }
       if(opcode==0x0){
         if(!frag_in) continue;
+        // Batas fragmen kumulatif — tanpa ini, stream fragmen kontinuasi
+        // (masing-masing ≤5MB, jumlah tak terbatas) menumbuhkan frag_buf
+        // tanpa batas → DoS memori. Sama dgn batas frame tunggal.
+        if(frag_buf.size()+payload.size() > 5*1024*1024){ close(cfd); return; }
         frag_buf+=payload;
         if(fin){ std::string complete=frag_buf; frag_buf.clear(); frag_in=false; if(hub) hub->handle_message(client, complete); flush_queue(); }
         continue;
       }
       if(opcode==0x1 || opcode==0x2){
-        if(!fin){ frag_in=true; frag_op=opcode; frag_buf=payload; continue; }
+        if(!fin){ frag_in=true; frag_op=opcode; frag_buf=payload; if(frag_buf.size()>5*1024*1024){ close(cfd); return; } continue; }
         if(hub) hub->handle_message(client, payload);
         flush_queue();
         continue;
@@ -425,6 +429,12 @@ bool Server::listen(const ServerOpts& opts) {
       });
     });
     g_app->ws<WsData>("/ws/:room_id", {
+      /* Batas payload WS eksplisit (heartbeat/exam_completed kecil) — cegah
+       * frame raksasa & jaga memori; uWS default 16KB tapi eksplisit lebih
+       * aman terhadap perubahan default. */
+      .maxPayloadLength = 64*1024,
+      .idleTimeout = 120,
+      .maxBackpressure = 1024*1024,
       .upgrade = [hub_ptr, cfg_ptr](auto *res, auto *req, auto *context){
         std::string cookie(req->getHeader("cookie"));
         auto sess = cfg_ptr->secret_prev.empty() ? examvan::verify_session_cookie(cfg_ptr->secret_key, cookie) : examvan::verify_session_cookie_dual(cfg_ptr->secret_key, cfg_ptr->secret_prev, cookie);
