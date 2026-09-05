@@ -4,7 +4,7 @@
 static std::string r13(const std::string& p){ std::ifstream f(p); if(!f) return ""; return std::string((std::istreambuf_iterator<char>(f)), {}); }
 
 TEST(P13_Security, BcryptRealFormat) {
-  auto c = r13("src/handlers/auth/login.cpp");
+  auto c = r13("src/helpers/password.cpp");
   EXPECT_NE(c.find("$2b$"), std::string::npos) << "should use real bcrypt $2b$ format, not SHA256";
   EXPECT_NE(c.find("crypt"), std::string::npos);
 }

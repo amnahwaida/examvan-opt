@@ -12,7 +12,7 @@ TEST(P12_Security, BcryptSaltedHash) {
   examvan::handlers::auth::set_user_for_test("u1","samepass","guru");
   examvan::handlers::auth::set_user_for_test("u2","samepass","guru");
   // cannot directly read hash, but we can test login still works and that file contains salt logic
-  auto c = r12("src/handlers/auth/login.cpp");
+  auto c = r12("src/helpers/password.cpp");
   EXPECT_NE(c.find("RAND_bytes"), std::string::npos) << "bcrypt should use salt/RAND_bytes";
   EXPECT_NE(c.find("gensalt"), std::string::npos) << "should use gensalt or salt generation";
   examvan::handlers::auth::clear_users_for_test();

@@ -27,4 +27,9 @@ struct DbTx {
 
 std::string pg_conninfo_from_url(const std::string& url);
 
+/* conninfo siap-koneksi dari DATABASE_URL: pg_conninfo_from_url saat parse
+ * berhasil, fallback URL mentah (yang mengandung password asli). JANGAN pakai
+ * sanitized_url() untuk koneksi — password-nya diganti "***" → auth gagal. */
+std::string conninfo_from_url_or_raw(const std::string& url);
+
 }  // namespace examvan

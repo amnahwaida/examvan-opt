@@ -10,9 +10,11 @@ static std::string read_file2(const std::string& p){
 }
 
 TEST(P4_Security, PasswordUsesBcryptNotSha256) {
-  auto c = read_file2("src/handlers/auth/login.cpp");
+  auto c = read_file2("src/helpers/password.cpp");
   EXPECT_NE(c.find("bcrypt"), std::string::npos) << "should use bcrypt/argon2, not plain SHA256";
   EXPECT_NE(c.find("hash_password"), std::string::npos);
+  auto l = read_file2("src/handlers/auth/login.cpp");
+  EXPECT_NE(l.find("verify_password"), std::string::npos) << "login should verify via shared helper";
 }
 
 TEST(P4_Security, TurnstileUsesLibCurlPost) {

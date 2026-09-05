@@ -84,4 +84,9 @@ std::string pg_conninfo_from_url(const std::string& u){
   return ci;
 }
 
+std::string conninfo_from_url_or_raw(const std::string& url){
+  std::string ci=pg_conninfo_from_url(url);
+  return ci.empty()? url : ci;
+}
+
 }  // namespace examvan

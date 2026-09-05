@@ -1452,9 +1452,7 @@ TEST(ProductionHardening, CreateExam_CreatedByDefaultsZeroWithoutHeader){
   auto saved=examvan::store::active_store()->get_by_id(id);
   ASSERT_TRUE(saved.has_value());
   EXPECT_EQ(saved->created_by,0);
-}
-
-TEST(ProductionHardening, AdminApiWrapper_InjectsSessionAdminId){
+}TEST(ProductionHardening, AdminApiWrapper_InjectsSessionAdminId){
   auto c=read_source_file("src/http/router_full.cpp");
   EXPECT_NE(c.find("X-Internal-Admin-Id"), std::string::npos)
     << "admin_api harus menginjeksi admin_id session ke handler";
@@ -1468,4 +1466,306 @@ TEST(ProductionHardening, AdminApiWrapper_InjectsSessionAdminId){
     << "create_exam harus membaca header internal admin id";
   EXPECT_NE(e.find("created_by"), std::string::npos)
     << "create_exam harus mengisi exam.created_by";
+}
+
+// ======================================================================
+// Menu: Kelola User — handlers & route masih stub (users:[] / 201 palsu /
+// {ok:true} tanpa efek). Route yang dipanggil frontend (users/:id/edit,
+// /delete, /toggle-status, /verify, /deactivate-package, change-password)
+// bahkan TIDAK TERDAFTAR → 404. Deret berikut mem-pin perbaikan.
+// ======================================================================
+
+TEST(ProductionHardening, Users_ActionRoutesRegistered){
+  auto c=read_source_file("src/http/router_full.cpp");
+  EXPECT_NE(c.find("users/:id/edit"), std::string::npos)
+    << "route POST /admin/api/users/:id/edit harus terdaftar (frontend submitEditUser)";
+  EXPECT_NE(c.find("users/:id/delete"), std::string::npos)
+    << "route POST /admin/api/users/:id/delete harus terdaftar (frontend deleteUser)";
+  EXPECT_NE(c.find("users/:id/toggle-status"), std::string::npos)
+    << "route POST /admin/api/users/:id/toggle-status harus terdaftar";
+  EXPECT_NE(c.find("users/:id/verify"), std::string::npos)
+    << "route POST /admin/api/users/:id/verify harus terdaftar (verifikasi manual pending_otp)";
+  EXPECT_NE(c.find("users/:id/deactivate-package"), std::string::npos)
+    << "route POST /admin/api/users/:id/deactivate-package harus terdaftar";
+  EXPECT_NE(c.find("user_detail"), std::string::npos)
+    << "GET /admin/api/users/:id harus memanggil handler detail, bukan list_users";
+  // change-password tidak boleh lagi inline {ok:true} — harus handler nyata.
+  EXPECT_NE(c.find("change_password"), std::string::npos)
+    << "POST /admin/api/change-password harus handler change_password (bukan lambda {ok:true})";
+}
+
+TEST(ProductionHardening, Users_ListQueriesPostgres){
+  auto c=read_source_file("src/handlers/admin/users.cpp");
+  EXPECT_NE(c.find("FROM admin_users"), std::string::npos)
+    << "list_users harus SELECT dari admin_users (bukan users:[])";
+  EXPECT_NE(c.find("LIMIT"), std::string::npos) << "pagination LIMIT wajib";
+  EXPECT_NE(c.find("OFFSET"), std::string::npos) << "pagination OFFSET wajib";
+  EXPECT_NE(c.find("ILIKE"), std::string::npos) << "pencarian search wajib ILIKE";
+  EXPECT_NE(c.find("exam_count"), std::string::npos)
+    << "list harus menyertakan jumlah ujian per user (popup detail kuota)";
+  EXPECT_NE(c.find("total_pages"), std::string::npos)
+    << "respons harus menyertakan pagination total_pages (frontend renderUsersPagination)";
+}
+
+TEST(ProductionHardening, Users_CreateInsertsPostgres){
+  auto c=read_source_file("src/handlers/admin/users.cpp");
+  EXPECT_NE(c.find("INSERT INTO admin_users"), std::string::npos)
+    << "create_user harus INSERT ke admin_users (bukan 201 palsu id=1)";
+  EXPECT_NE(c.find("password_hash"), std::string::npos)
+    << "password harus di-hash (bcrypt) sebelum INSERT";
+  EXPECT_NE(c.find("RETURNING id"), std::string::npos)
+    << "INSERT harus mengembalikan id asli dari DB";
+  EXPECT_NE(c.find("hash_password"), std::string::npos)
+    << "create_user harus memakai hash_password (bukan plaintext)";
+}
+
+TEST(ProductionHardening, Users_EditUpdatesPostgres){
+  auto c=read_source_file("src/handlers/admin/users.cpp");
+  EXPECT_NE(c.find("UPDATE admin_users"), std::string::npos)
+    << "edit_user harus UPDATE admin_users (bukan {ok:true} tanpa efek)";
+  EXPECT_NE(c.find("max_exams"), std::string::npos) << "limit ujian harus dapat diubah";
+  EXPECT_NE(c.find("max_pdf_size"), std::string::npos) << "limit PDF harus dapat diubah";
+  EXPECT_NE(c.find("expires_at"), std::string::npos) << "masa aktif harus dapat diubah";
+}
+
+TEST(ProductionHardening, Users_DeleteRemovesRow){
+  auto c=read_source_file("src/handlers/admin/users.cpp");
+  EXPECT_NE(c.find("DELETE FROM admin_users"), std::string::npos)
+    << "delete_user harus DELETE dari admin_users";
+}
+
+TEST(ProductionHardening, Users_StatusToggleAndVerifyUpdate){
+  auto c=read_source_file("src/handlers/admin/users.cpp");
+  EXPECT_NE(c.find("SET status="), std::string::npos)
+    << "toggle-status harus UPDATE status";
+  EXPECT_NE(c.find("pending_otp"), std::string::npos)
+    << "verify harus mengubah status pending_otp -> active";
+  EXPECT_NE(c.find("deactivate-package"), std::string::npos)
+    << "deactivate-package handler harus ada (paket -> free)";
+}
+
+TEST(ProductionHardening, Users_ChangePasswordVerifiesCurrent){
+  auto c=read_source_file("src/handlers/admin/users.cpp");
+  EXPECT_NE(c.find("current_password"), std::string::npos)
+    << "change-password harus menerima current_password";
+  EXPECT_NE(c.find("verify_password"), std::string::npos)
+    << "change-password harus memverifikasi password lama dengan verify_password";
+  EXPECT_NE(c.find("UPDATE admin_users SET password_hash"), std::string::npos)
+    << "change-password harus UPDATE password_hash";
+}
+
+TEST(ProductionHardening, Users_DetailReturnsSingleUser){
+  auto c=read_source_file("src/handlers/admin/users.cpp");
+  EXPECT_NE(c.find("WHERE u.id=$1"), std::string::npos)
+    << "user_detail harus SELECT WHERE id (satu user)";
+  EXPECT_NE(c.find("\\\"user\\\":"), std::string::npos)
+    << "respons detail harus berisi objek user (frontend openEditUserModal)";
+  // Field yang dirender frontend (renderUserRow / openEditUserModal):
+  for(auto f: {"max_concurrent_exams","max_storage_size","operator_created",
+               "has_active_package","base_roles","package_roles","expires_at"}){
+    EXPECT_NE(c.find(f), std::string::npos) << "detail/list harus menyertakan field " << f;
+  }
+}
+
+TEST(ProductionHardening, PgConnectionsNeverUseSanitizedUrl){
+  // sanitized_url() mengganti password dengan "***" → dipakai sebagai conninfo
+  // membuat SEMUA query ad-hoc gagal auth (ditemukan smoke test: FATAL
+  // password authentication failed). Koneksi harus pakai conninfo_from_url_or_raw.
+  for(auto f: {"src/handlers/admin/users.cpp","src/handlers/admin/exams.cpp",
+               "src/handlers/api/exams.cpp","src/jobs/jobs.cpp"}){
+    auto c=read_source_file(f);
+    EXPECT_EQ(c.find("pool.sanitized_url(),"), std::string::npos)
+      << f << " harus konek via conninfo_from_url_or_raw, bukan sanitized_url (password ***)";
+    EXPECT_NE(c.find("conninfo_from_url_or_raw"), std::string::npos)
+      << f << " harus memakai helper conninfo_from_url_or_raw";
+  }
+  auto p=read_source_file("src/db/pool.cpp");
+  EXPECT_NE(p.find("conninfo_from_url_or_raw"), std::string::npos)
+    << "db/pool.cpp harus menyediakan conninfo_from_url_or_raw";
+  EXPECT_NE(p.find("password="), std::string::npos)
+    << "pg_conninfo_from_url harus mempertahankan password asli";
+}
+
+// ======================================================================
+// Menu: Pengaturan (saas-settings) — update_settings masih {success:true}
+// tanpa menyimpan; GET hanya default hardcoded. Harus UPSERT ke PG + baca
+// dari PG, dengan partial-update (hanya field yang hadir) seperti Go.
+// ======================================================================
+
+// ======================================================================
+// Menu: Submissions — list/detail/queue-status masih stub ([] / null / 0),
+// padahal data ada di PG (submissions) & Redis (queue keys).
+// ======================================================================
+
+TEST(ProductionHardening, Submissions_ListQueriesPostgres){
+  auto c=read_source_file("src/handlers/admin/submissions.cpp");
+  EXPECT_NE(c.find("FROM submissions"), std::string::npos)
+    << "list_submissions harus SELECT dari tabel submissions";
+  EXPECT_NE(c.find("JOIN exams"), std::string::npos)
+    << "list harus JOIN exams untuk nama ujian";
+  EXPECT_NE(c.find("LIMIT"), std::string::npos) << "pagination wajib";
+  EXPECT_NE(c.find("total_pages"), std::string::npos)
+    << "respons harus pagination total_pages";
+}
+
+TEST(ProductionHardening, Submissions_DetailAndDeleteById){
+  auto c=read_source_file("src/handlers/admin/submissions.cpp");
+  EXPECT_NE(c.find("s.id=$1"), std::string::npos)
+    << "submission_detail harus SELECT WHERE s.id=$1";
+  EXPECT_NE(c.find("DELETE FROM submissions"), std::string::npos)
+    << "delete_submission harus DELETE nyata";
+}
+
+TEST(ProductionHardening, Submissions_QueueStatusFromRedis){
+  auto c=read_source_file("src/handlers/admin/submissions.cpp");
+  EXPECT_NE(c.find("examvan:submissions:pending"), std::string::npos)
+    << "queue_status harus membaca antrean Redis pending (Go parity)";
+  EXPECT_NE(c.find("redis_llen"), std::string::npos)
+    << "dibutuhkan helper redis_llen";
+  auto rr=read_source_file("src/redis/redis_real.cpp");
+  EXPECT_NE(rr.find("redis_llen"), std::string::npos)
+    << "redis_real harus menyediakan redis_llen (LLEN)";
+}
+
+// ======================================================================
+// Menu: Pengawas — pengawas_exams/submissions masih [] kosong; approvals
+// dan auto-approve tidak dipersist.
+// ======================================================================
+
+TEST(ProductionHardening, Pengawas_ExamsQueriesPostgres){
+  auto c=read_source_file("src/handlers/admin/pengawas.cpp");
+  EXPECT_NE(c.find("exam_pengawas"), std::string::npos)
+    << "pengawas_exams harus JOIN exam_pengawas (ujian yang diampu)";
+  EXPECT_NE(c.find("FROM exams"), std::string::npos);
+  EXPECT_NE(c.find("total_exams"), std::string::npos)
+    << "stats harus menyertakan total_exams";
+}
+
+TEST(ProductionHardening, Pengawas_SubmissionsByExam){
+  auto c=read_source_file("src/handlers/admin/pengawas.cpp");
+  EXPECT_NE(c.find("FROM submissions"), std::string::npos)
+    << "pengawas_submissions harus membaca tabel submissions";
+  EXPECT_NE(c.find("exam_id"), std::string::npos);
+}
+
+TEST(ProductionHardening, Pengawas_ApprovalsAndAutoApprovePersist){
+  auto c=read_source_file("src/handlers/admin/pengawas.cpp");
+  EXPECT_NE(c.find("exam_approvals"), std::string::npos)
+    << "pending_approvals harus membaca exam_approvals (bukan [] kosong)";
+  EXPECT_NE(c.find("set_approval"), std::string::npos);
+  EXPECT_NE(c.find("UPDATE exam_approvals"), std::string::npos)
+    << "set_approval harus UPDATE exam_approvals";
+  EXPECT_NE(c.find("auto_approve"), std::string::npos)
+    << "auto-approve setting harus dipersist";
+}
+
+TEST(ProductionHardening, Settings_PersistsToPostgres){
+  auto c=read_source_file("src/handlers/admin/settings.cpp");
+  EXPECT_NE(c.find("INSERT INTO saas_settings"), std::string::npos)
+    << "update_settings harus UPSERT ke saas_settings (bukan {success:true} kosong)";
+  EXPECT_NE(c.find("ON CONFLICT"), std::string::npos)
+    << "UPSERT wajib pakai ON CONFLICT (key unique)";
+  EXPECT_NE(c.find("SELECT key,value FROM saas_settings"), std::string::npos)
+    << "settings_page harus membaca setting dari PG, bukan default hardcoded";
+  EXPECT_NE(c.find("conninfo_from_url_or_raw"), std::string::npos)
+    << "koneksi PG harus via conninfo_from_url_or_raw (bukan sanitized_url)";
+}
+
+TEST(ProductionHardening, Settings_PartialUpdateOnlyPresentKeys){
+  auto c=read_source_file("src/handlers/admin/settings.cpp");
+  EXPECT_NE(c.find("json_has_key"), std::string::npos)
+    << "partial update: hanya key yang HADIR di body JSON yang ditulis (paritas Go pointer)";
+  // Menyimpan satu seksi (mis. Turnstile) tidak boleh mereset seksi lain:
+  // nilai default TIDAK boleh menimpa key yang tidak dikirim.
+  EXPECT_NE(c.find("only present"), std::string::npos)
+    << "komentar harus menjelaskan perilaku partial-update";
+}
+
+// ======================================================================
+// Menu: Voucher — list/redeem/activate masih stub ([] / {ok:true} palsu);
+// route create/batch/toggle/delete/redemptions bahkan tidak terdaftar.
+// ======================================================================
+
+TEST(ProductionHardening, Vouchers_PersistsToPostgres){
+  auto c=read_source_file("src/handlers/admin/vouchers.cpp");
+  EXPECT_NE(c.find("INSERT INTO vouchers"), std::string::npos)
+    << "create voucher harus INSERT ke tabel vouchers";
+  EXPECT_NE(c.find("SELECT "), std::string::npos) << "list harus SELECT dari vouchers";
+  EXPECT_NE(c.find("FROM vouchers"), std::string::npos);
+  EXPECT_NE(c.find("conninfo_from_url_or_raw"), std::string::npos)
+    << "koneksi PG via conninfo_from_url_or_raw";
+}
+
+TEST(ProductionHardening, Vouchers_RoutesRegistered){
+  auto c=read_source_file("src/http/router_full.cpp");
+  for(auto r: {"vouchers/batch","vouchers/:id/toggle","vouchers/:id/delete",
+               "vouchers/:id/redemptions","vouchers/audit-logs",
+               "vouchers/mine","vouchers/redeem","vouchers/activate"}){
+    EXPECT_NE(c.find(r), std::string::npos) << "route " << r << " harus terdaftar";
+  }
+  // POST /vouchers (buat) harus handler nyata, bukan list_vouchers.
+  EXPECT_NE(c.find("create_voucher"), std::string::npos);
+  EXPECT_NE(c.find("voucher_redemptions"), std::string::npos)
+    << "route redemptions per voucher harus ada";
+}
+
+TEST(ProductionHardening, Vouchers_RedeemRealFlow){
+  auto c=read_source_file("src/handlers/admin/vouchers.cpp");
+  EXPECT_NE(c.find("UPPER(TRIM(code))"), std::string::npos)
+    << "lookup voucher case-insensitive + trim (paritas Go)";
+  EXPECT_NE(c.find("used_count"), std::string::npos)
+    << "redeem harus menambah used_count voucher";
+  EXPECT_NE(c.find("INSERT INTO voucher_redemptions"), std::string::npos)
+    << "redeem harus mencatat riwayat redemptions";
+  EXPECT_NE(c.find("UPDATE admin_users"), std::string::npos)
+    << "redeem harus menerapkan entitlement ke admin_users (package/limits/expires_at)";
+  EXPECT_NE(c.find("duration_days"), std::string::npos)
+    << "masa aktif dihitung dari duration_type (bulanan=30, semester=180, tahunan=365)";
+  EXPECT_NE(c.find("bulanan"), std::string::npos);
+  EXPECT_NE(c.find("30"), std::string::npos);
+  auto m=read_source_file("src/store/exam_store_postgres.cpp");
+  EXPECT_NE(m.find("voucher_redemptions"), std::string::npos)
+    << "migrate harus sync sequence voucher_redemptions setelah restore";
+  EXPECT_NE(m.find("setval"), std::string::npos);
+}
+
+TEST(ProductionHardening, Vouchers_AuditLogsJoinUsers){
+  auto c=read_source_file("src/handlers/admin/vouchers.cpp");
+  EXPECT_NE(c.find("JOIN admin_users"), std::string::npos)
+    << "audit-logs harus JOIN admin_users untuk username pemakai";
+  EXPECT_NE(c.find("voucher_redemptions"), std::string::npos);
+}
+
+TEST(ProductionHardening, Settings_MasksSecretsOnRead){
+  auto c=read_source_file("src/handlers/admin/settings.cpp");
+  EXPECT_NE(c.find("mask_token"), std::string::npos)
+    << "smtp_password & turnstile_secret_key harus dimask saat GET (paritas Go maskTokenSetting)";
+  EXPECT_NE(c.find("turnstile_secret_key"), std::string::npos);
+  EXPECT_NE(c.find("smtp_password"), std::string::npos);
+}
+
+TEST(ProductionHardening, AdminApiExecutesHandlerOnce){
+  // Ditemukan smoke test: admin_api memanggil body_limit(req,...,h) — yang
+  // mengeksekusi `h` — LALU `h(r2)` lagi → SETIAP mutasi admin (create user,
+  // create exam, edit, delete, dst) dieksekusi DUA KALI. Run pertama tanpa
+  // X-Internal-Admin-Id: INSERT dibuat (created_by=0 → FK violation) lalu
+  // respons dibuang; klien menerima respons run kedua (mis. 400 "Username
+  // sudah digunakan" padahal user barusan berhasil dibuat).
+  auto c=read_source_file("src/http/router_full.cpp");
+  EXPECT_EQ(c.find("middleware::body_limit"), std::string::npos)
+    << "admin_api TIDAK boleh memakai body_limit(next) — next=h mengeksekusi handler";
+  // Ukuran body tetap dicek, tapi tanpa menjalankan handler:
+  size_t p=c.find("5*1024*1024");
+  ASSERT_NE(p, std::string::npos);
+  // Handler harus dipanggil PERSIS sekali — via return h(r2) (dengan admin id).
+  size_t inj=c.find("X-Internal-Admin-Id");
+  ASSERT_NE(inj, std::string::npos);
+  std::string tail=c.substr(inj);
+  size_t first_h=tail.find("h(r2)");
+  EXPECT_NE(first_h, std::string::npos)
+    << "handler harus dipanggil lewat return h(r2) setelah injeksi header";
+  if(first_h!=std::string::npos){
+    EXPECT_EQ(tail.find("h(r2)", first_h+4), std::string::npos)
+      << "handler harus dipanggil SEKALI, bukan dua kali (h(r2) ganda)";
+  }
 }

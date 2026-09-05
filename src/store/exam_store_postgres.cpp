@@ -167,7 +167,9 @@ bool ExamStorePostgres::migrate(){
     // setval(seq, MAX(id), is_called): is_called=false saat tabel kosong agar
     // nextval berikutnya = 1; is_called=true saat ada data agar nextval =
     // MAX(id)+1. Tabel yang belum ada (pg_get_serial_sequence → NULL) dilewati.
-    for(const char* t: {"exams","submissions","student_access_logs"}){
+    for(const char* t: {"exams","submissions","student_access_logs",
+                        "admin_users","vouchers","voucher_redemptions",
+                        "exam_approvals"}){
       exec_command(
         "SELECT setval(pg_get_serial_sequence('"+std::string(t)+"','id'),"
         " COALESCE((SELECT MAX(id) FROM "+std::string(t)+"),1),"

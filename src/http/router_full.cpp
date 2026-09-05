@@ -40,8 +40,11 @@ void register_full_routes(Router& r, const Config& cfg){
       auto it_ip=req.headers.find("X-Real-IP");
       if(it_ip!=req.headers.end()) ip=it_ip->second;
       if(!g_admin_rl.allow(ip)){ Response rr; rr.status=429; rr.json(429,"{\"error\":\"rate limit exceeded\"}"); return rr; }
-      auto _bl = middleware::body_limit(req, 5*1024*1024, [&](const Request& r){ return h(r); });
-      if(_bl.status==413) return _bl;
+      /* Cek ukuran body TANPA mengeksekusi handler: body_limit(next)
+       * memanggil next saat body lolos, dan handler dipanggil sekali lagi
+       * di bawah (dengan header internal) — memakai body_limit di sini
+       * membuat SETIAP mutasi admin dieksekusi DUA KALI (INSERT ganda,
+       * created_by=0 di run pertama yang dibuang, dst). */
       std::string key=cfg.secret_key;
       std::string prev=cfg.secret_prev;
       auto it=req.headers.find("Cookie");
@@ -180,18 +183,29 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/admin/api/saas-settings", admin_api(handlers::admin::settings_page));
   r.add("POST","/admin/api/saas-settings", admin_api(handlers::admin::update_settings));
   r.add("GET","/admin/api/users", admin_api(handlers::admin::list_users));
-  r.add("GET","/admin/api/users/:id", admin_api(handlers::admin::list_users));
+  r.add("GET","/admin/api/users/:id", admin_api(handlers::admin::user_detail));
   r.add("POST","/admin/api/users", admin_api(handlers::admin::create_user));
   r.add("PUT","/admin/api/users/:id", admin_api(handlers::admin::edit_user));
+  r.add("POST","/admin/api/users/:id/edit", admin_api(handlers::admin::edit_user));
   r.add("DELETE","/admin/api/users/:id", admin_api(handlers::admin::delete_user));
+  r.add("POST","/admin/api/users/:id/delete", admin_api(handlers::admin::delete_user));
+  r.add("POST","/admin/api/users/:id/toggle-status", admin_api(handlers::admin::user_toggle_status));
+  r.add("POST","/admin/api/users/:id/verify", admin_api(handlers::admin::user_verify));
+  r.add("POST","/admin/api/users/:id/deactivate-package", admin_api(handlers::admin::user_deactivate_package));
   r.add("POST","/admin/api/instansi/update", admin_api(handlers::admin::instansi_update));
-  r.add("POST","/admin/api/change-password", admin_api([](const Request&){ Response rr; rr.json(200,"{\"ok\":true}"); return rr; }));
+  r.add("POST","/admin/api/change-password", admin_api(handlers::admin::change_password));
   r.add("GET","/admin/api/vouchers", admin_api(handlers::admin::list_vouchers));
-  r.add("GET","/admin/api/vouchers/mine", admin_api(handlers::admin::list_vouchers));
+  r.add("POST","/admin/api/vouchers", admin_api(handlers::admin::create_voucher));
+  r.add("POST","/admin/api/vouchers/batch", admin_api(handlers::admin::create_vouchers_batch));
+  r.add("GET","/admin/api/vouchers/mine", admin_api(handlers::admin::vouchers_mine));
   r.add("POST","/admin/api/vouchers/redeem", admin_api(handlers::admin::redeem_voucher));
   r.add("POST","/admin/api/vouchers/activate", admin_api(handlers::admin::activate_voucher));
-  r.add("GET","/admin/api/vouchers/audit-logs", admin_api(handlers::admin::list_vouchers));
-  r.add("GET","/admin/api/packages", admin_api(handlers::admin::list_vouchers));
+  r.add("GET","/admin/api/vouchers/audit-logs", admin_api(handlers::admin::list_audit_logs));
+  r.add("POST","/admin/api/vouchers/:id/toggle", admin_api(handlers::admin::toggle_voucher));
+  r.add("POST","/admin/api/vouchers/:id/delete", admin_api(handlers::admin::delete_voucher));
+  r.add("GET","/admin/api/vouchers/:id/redemptions", admin_api(handlers::admin::voucher_redemptions));
+  r.add("GET","/admin/api/packages", admin_api(handlers::admin::list_packages));
+  r.add("POST","/admin/api/packages", admin_api(handlers::admin::save_packages));
   r.add("GET","/admin/api/exams", admin_api(handlers::admin::list_admin_exams));
   r.add("POST","/admin/api/exams", admin_api(handlers::admin::create_exam));
   r.add("POST","/admin/api/upload", admin_api(handlers::admin::create_exam));

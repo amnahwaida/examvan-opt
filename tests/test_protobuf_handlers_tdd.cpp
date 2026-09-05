@@ -143,9 +143,12 @@ TEST(ProtobufHandlers, CreateUser_JsonMutationStillWorks) {
 }
 
 TEST(ProtobufHandlers, CreateUser_EditUser_DeleteUser_StubStillWorks) {
-  auto res_edit = handlers::admin::edit_user(Request{});
+  // handlers bukan stub lagi: butuh id (path /users/:id/...).
+  Request e; e.path="/admin/api/users/1/edit"; e.params["id"]="1";
+  auto res_edit = handlers::admin::edit_user(e);
   EXPECT_EQ(res_edit.status, 200);
-  auto res_del = handlers::admin::delete_user(Request{});
+  Request d; d.path="/admin/api/users/1/delete"; d.params["id"]="1";
+  auto res_del = handlers::admin::delete_user(d);
   EXPECT_EQ(res_del.status, 200);
 }
 
@@ -254,17 +257,21 @@ TEST(ProtobufHandlers, ListVouchers_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, RedeemVoucher_JsonStillWorks) {
+  // handler bukan stub: redeem butuh DB nyata. Tanpa DATABASE_URL → 503
+  // jujur (sukses palsu 200 dihapus); alur sukses diverifikasi smoke test PG.
+  unsetenv("DATABASE_URL");
   Request req; req.method = "POST"; req.body = "code=ABC123";
+  req.headers["X-Internal-Admin-Id"]="2"; // session valid; tanpa DB → 503 jujur
   auto res = handlers::admin::redeem_voucher(req);
-  EXPECT_EQ(res.status, 200);
-  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
+  EXPECT_EQ(res.status, 503);
+  EXPECT_NE(res.body.find("Database tidak tersedia"), std::string::npos);
 }
 
 TEST(ProtobufHandlers, RedeemVoucher_MissingCodeReturns400) {
   Request req; req.method = "POST"; req.body = "";
   auto res = handlers::admin::redeem_voucher(req);
   EXPECT_EQ(res.status, 400);
-  EXPECT_NE(res.body.find("code required"), std::string::npos);
+  EXPECT_NE(res.body.find("Silakan masukkan kode voucher"), std::string::npos);
 }
 
 // ======================================================================
@@ -303,9 +310,14 @@ TEST(ProtobufHandlers, SettingsPage_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, UpdateSettings_JsonStillWorks) {
-  auto res = handlers::admin::update_settings(Request{});
+  // handler bukan stub lagi: partial update butuh minimal satu key yang hadir
+  // (paritas Go pointer fields — body kosong → 400).
+  Request req; req.body="{\"smtp_host\":\"smtp.test.local\"}";
+  auto res = handlers::admin::update_settings(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
+  auto empty = handlers::admin::update_settings(Request{});
+  EXPECT_EQ(empty.status, 400);
 }
 
 // ======================================================================
@@ -343,7 +355,7 @@ TEST(ProtobufHandlers, PengawasSubmissions_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, PengawasSubmissions_JsonStillWorks) {
-  Request req; req.method = "GET";
+  Request req; req.method = "GET"; req.params["exam_id"]="1";
   auto res = handlers::admin::pengawas_submissions(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
@@ -362,26 +374,29 @@ TEST(ProtobufHandlers, PendingApprovals_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, PendingApprovals_JsonStillWorks) {
-  Request req; req.method = "GET";
+  Request req; req.method = "GET"; req.params["exam_id"]="1";
   auto res = handlers::admin::pending_approvals(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
 }
 
 TEST(ProtobufHandlers, SetApproval_JsonStillWorks) {
-  auto res = handlers::admin::set_approval(Request{});
+  Request req; req.params["exam_id"]="1"; req.params["mac_address"]="AA:BB:CC"; req.body="status=approved";
+  auto res = handlers::admin::set_approval(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
 }
 
 TEST(ProtobufHandlers, GetAutoApprove_JsonStillWorks) {
-  auto res = handlers::admin::get_auto_approve(Request{});
+  Request req; req.params["exam_id"]="1";
+  auto res = handlers::admin::get_auto_approve(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
 }
 
 TEST(ProtobufHandlers, SetAutoApprove_JsonStillWorks) {
-  auto res = handlers::admin::set_auto_approve(Request{});
+  Request req; req.params["exam_id"]="1"; req.body="enabled=true";
+  auto res = handlers::admin::set_auto_approve(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
 }
@@ -421,10 +436,11 @@ TEST(ProtobufHandlers, SubmissionDetail_ValidProtobufResponse) {
 }
 
 TEST(ProtobufHandlers, SubmissionDetail_JsonStillWorks) {
-  Request req; req.method = "GET";
+  Request req; req.method = "GET"; req.params["id"]="1";
   auto res = handlers::admin::submission_detail(req);
-  EXPECT_EQ(res.status, 200);
-  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
+  // tanpa DB → jujur 404; dengan PG mengembalikan detail
+  EXPECT_TRUE(res.status==200 || res.status==404);
+  if(res.status==200) EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
 }
 
 TEST(ProtobufHandlers, QueueStatus_ValidProtobufResponse) {
@@ -448,7 +464,8 @@ TEST(ProtobufHandlers, QueueStatus_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, DeleteSubmission_JsonStillWorks) {
-  auto res = handlers::admin::delete_submission(Request{});
+  Request req; req.params["id"]="1";
+  auto res = handlers::admin::delete_submission(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
 }

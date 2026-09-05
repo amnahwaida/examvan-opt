@@ -146,7 +146,7 @@ TEST(Review_Server, StaticTraversalEncoded){
 }
 
 TEST(Review_Login, NoRandFallback){
-  auto c=read_file("src/handlers/auth/login.cpp");
+  auto c=read_file("src/helpers/password.cpp");
   EXPECT_EQ(c.find("rand()"), std::string::npos) << "gensalt must not use rand() fallback";
   EXPECT_NE(c.find("RAND_bytes"), std::string::npos);
 }

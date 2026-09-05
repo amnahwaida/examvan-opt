@@ -330,7 +330,7 @@ static bool device_approved(int exam_id, const std::string& mac){
   try{
     auto cfg=Config::load();
     examvan::DbPool pool(cfg.database_url, 10);
-    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
     if(auto c=real.acquire()){
       auto res=real.exec_params(c.get(),
         "SELECT status FROM exam_approvals WHERE exam_id=$1 AND mac_address=$2",
@@ -347,7 +347,7 @@ static bool device_has_approval(int exam_id, const std::string& mac){
   try{
     auto cfg=Config::load();
     examvan::DbPool pool(cfg.database_url, 10);
-    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
     if(auto c=real.acquire()){
       auto res=real.exec_params(c.get(),
         "SELECT 1 FROM exam_approvals WHERE exam_id=$1 AND mac_address=$2 LIMIT 1",
@@ -457,7 +457,7 @@ Response request_approval(const Request& req){
   try{
     auto cfg_db=Config::load();
     examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
     if(auto c=real.acquire()){
       // Cap approved per exam (paritas Go: saas_settings max_approvals_per_exam,
       // default 500) — cegah token bocor mencetak device approved tak terbatas.
@@ -861,7 +861,7 @@ Response access_log(const Request& req){
   try{
     auto cfg_db=Config::load();
     examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
     if(auto c=real.acquire()){
       // Paritas Go: heartbeat TIDAK ditulis ke DB (Redis-only, hemat IO).
       // Kolom = schema Go student_access_logs (student_identifier = mac).

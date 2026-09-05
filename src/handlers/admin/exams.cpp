@@ -990,7 +990,7 @@ static std::string query_pengawas_json(int exam_id, bool assigned_only){
   try{
     auto cfg_db=Config::load();
     examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
     if(auto c=real.acquire()){
       const char* sql=assigned_only
         ? "SELECT ep.user_id,u.username,COALESCE(u.name,''),COALESCE(u.instansi,'') FROM exam_pengawas ep JOIN admin_users u ON ep.user_id=u.id WHERE ep.exam_id=$1 ORDER BY u.username"
@@ -1115,7 +1115,7 @@ Response save_exam_questions(const Request& req){
     try{
       auto cfg_db=Config::load();
       examvan::DbPool pool(cfg_db.database_url, 10);
-      examvan::db::RealPool real(pool.sanitized_url(), 10);
+      examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
       if(auto c=real.acquire()){
         real.exec_params(c.get(),"BEGIN",{});
         real.exec_params(c.get(),"DELETE FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
@@ -1214,7 +1214,7 @@ Response delegate_data(const Request& req){
   try{
     auto cfg_db=Config::load();
     examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
     if(auto c=real.acquire()){
       auto ui=real.exec_params(c.get(),"SELECT instansi FROM admin_users WHERE id=$1",{std::to_string(uid)});
       if(ui && PQresultStatus(ui.get())==PGRES_TUPLES_OK && PQntuples(ui.get())>0){
@@ -1299,7 +1299,7 @@ Response delegate_exam(const Request& req){
   try{
     auto cfg_db=Config::load();
     examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
     if(auto c=real.acquire()){
       // validasi target guru: instansi sama, active, role guru (paritas Go)
       if(new_owner.has_value()){

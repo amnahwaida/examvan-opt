@@ -58,7 +58,7 @@ void run_approval_cleanup(){
   if(!redis.try_acquire_job("approval_cleanup",1800)) return;
   DbPool pool(cfg.database_url,60);
 #ifdef HAS_LIBPQ
-  db::RealPool real(pool.sanitized_url(),60);
+  db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),60);
   if(auto c=real.acquire()){
     // Paritas Go models.PurgeStaleExamApprovals — tabel = exam_approvals
     // (bukan approvals; tidak ada kolom expires_at di schema Go). Rejected
@@ -83,7 +83,7 @@ void run_access_log_retention(){
   if(!redis.try_acquire_job("access_log_retention",86400)) return;
   DbPool pool(cfg.database_url,60);
 #ifdef HAS_LIBPQ
-  db::RealPool real(pool.sanitized_url(),60);
+  db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),60);
   if(auto c=real.acquire()){
     // Paritas Go PurgeOldStudentAccessLogs — tabel = student_access_logs
     // (bukan access_log). Transaksional via libpq: BEGIN → DELETE → COMMIT.
