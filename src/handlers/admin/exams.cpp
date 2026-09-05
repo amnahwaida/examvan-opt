@@ -826,6 +826,99 @@ Response export_xlsx(const Request&){
   // konten XLSX palsu (user mendapat file corrupt). Jelas 501 + pesan.
   Response r; r.status=501; r.json(501,"{\"error\":\"XLSX export not implemented\",\"error_code\":\"NOT_IMPLEMENTED\"}"); return r;
 }
+// ---- Konversi jadwal WIB → UTC ISO (paritas Go SaveQuestions) ----
+// Go menerima "YYYY-MM-DD HH:MM" (Asia/Jakarta, UTC+7 tanpa DST) lalu
+// menyimpan UTC ISO "YYYY-MM-DDTHH:MM:SSZ". C++ sebelumnya menyimpan
+// mentah format lokal → jadwal tidak kompatibel dengan exam buatan Go.
+static int days_from_civil(int y, unsigned m, unsigned d){
+  y -= (int)(m <= 2);
+  const int era = (y >= 0 ? y : y-399) / 400;
+  const unsigned yoe = (unsigned)(y - era * 400);
+  const unsigned doy = (153u*(m + (m > 2 ? -3 : 9)) + 2u)/5u + d - 1u;
+  const unsigned doe = yoe * 365u + yoe/4u - yoe/100u + doy;
+  return era * 146097 + (int)doe - 719468;
+}
+static void civil_from_days(int z, int& y, unsigned& m, unsigned& d){
+  z += 719468;
+  const int era = (z >= 0 ? z : z - 146096) / 146097;
+  const unsigned doe = (unsigned)(z - era * 146097);
+  const unsigned yoe = (doe - doe/1460u + doe/36524u - doe/146096u) / 365u;
+  const int y2 = (int)yoe + era * 400;
+  const unsigned doy = doe - (365u*yoe + yoe/4u - yoe/100u);
+  const unsigned mp = (5u*doy + 2u)/153u;
+  const unsigned d2 = doy - (153u*mp + 2u)/5u + 1u;
+  const unsigned m2 = mp < 10u ? mp + 3u : mp - 9u;
+  y = y2 + (int)(m2 <= 2u); m = m2; d = d2;
+}
+// "YYYY-MM-DD HH:MM" (WIB) → "YYYY-MM-DDTHH:MM:SSZ" (UTC). nullopt bila format invalid.
+static std::optional<std::string> wib_to_utc_iso(const std::string& s){
+  if(s.size()<16) return std::nullopt;
+  int y=0,mo=0,d=0,h=0,mi=0;
+  if(std::sscanf(s.c_str(),"%d-%d-%d %d:%d",&y,&mo,&d,&h,&mi)!=5) return std::nullopt;
+  if(y<2000||y>2100||mo<1||mo>12||d<1||d>31||h<0||h>23||mi<0||mi>59) return std::nullopt;
+  long long total=days_from_civil(y,(unsigned)mo,(unsigned)d)*1440LL + h*60LL + mi - 7LL*60;
+  long long days=total/1440; long long rem=total%1440;
+  if(rem<0){ rem+=1440; days-=1; }
+  int y2; unsigned m2,d2;
+  civil_from_days((int)days,y2,m2,d2);
+  int hh=(int)(rem/60), mm=(int)(rem%60);
+  char buf[64];
+  snprintf(buf,sizeof(buf),"%04d-%02u-%02uT%02d:%02d:00Z",y2,m2,d2,hh,mm);
+  return std::string(buf);
+}
+
+// Validasi struktur array soal: tipe whitelist + field wajib per tipe.
+// Go tidak memvalidasi, tetapi frontend hanya bisa menghasilkan struktur ini
+// — menolak lebih awal mencegah soal rusak tersimpan lalu membuat scoring
+// pekerja / app Android gagal saat ujian berlangsung.
+static bool validate_questions_array(const std::string& raw){
+  if(raw.empty()) return true;
+  if(raw.front()!='[') return false;
+  std::vector<std::string> objs;
+  size_t i=0;
+  while(i<raw.size()){
+    while(i<raw.size() && (raw[i]==' '||raw[i]=='\t'||raw[i]=='\r'||raw[i]=='\n'||raw[i]==','||raw[i]=='['||raw[i]==']')) i++;
+    if(i>=raw.size()) break;
+    if(raw[i]=='{'){
+      int depth=0; size_t s=i; bool in=false,esc=false;
+      for(;i<raw.size();++i){
+        char c=raw[i];
+        if(esc){esc=false;continue;}
+        if(c=='\\'&&in){esc=true;continue;}
+        if(c=='"'){in=!in;continue;}
+        if(in) continue;
+        if(c=='{')depth++;
+        else if(c=='}'){depth--; if(depth==0){i++; objs.push_back(raw.substr(s,i-s)); break;}}
+      }
+    } else return false;
+  }
+  if(objs.empty()) return true; // [] valid
+  static const char* kTypes[]={"single_choice","multiple_choice","true_false","matching","short_answer"};
+  for(auto& o: objs){
+    std::string type=json_string_field(o,"type");
+    bool known=false;
+    for(auto* t:kTypes){ if(type==t){known=true;break;} }
+    if(!known) return false;
+    if(!json_int_field(o,"number").has_value()) return false;
+    std::string key=json_raw_value(o,"key");
+    std::string choices=json_raw_value(o,"choices");
+    std::string left=json_raw_value(o,"left_items");
+    std::string right=json_raw_value(o,"right_items");
+    if(type=="matching"){
+      if(key.empty()||key.front()!='{') return false;
+      if(left.empty()||left=="[]"||right.empty()||right=="[]") return false;
+    } else if(type=="multiple_choice"){
+      if(key.empty()||key.front()!='['||key=="[]") return false;
+      if(choices.empty()||choices=="[]") return false;
+    } else if(type=="single_choice"||type=="true_false"){
+      if(json_string_field(o,"key").empty()) return false;
+      if(type=="single_choice" && (choices.empty()||choices=="[]")) return false;
+    }
+    // short_answer: key boleh kosong (frontend menghasilkan '')
+  }
+  return true;
+}
+
 // Parse JSON array angka, mis. pengawas_ids: [3,7] → {3,7}. Return false
 // bila elemen non-numerik ditemukan (validasi).
 static bool parse_int_array(const std::string& raw, std::vector<int>& out){
@@ -937,14 +1030,36 @@ Response save_exam_questions(const Request& req){
   if(!sec.empty() && sec!="low" && sec!="medium" && sec!="high"){
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"invalid security_level\"}"); return r;
   }
+  // Validasi struktur tiap soal (tipe whitelist + field wajib per tipe).
+  if(!questions.empty() && !validate_questions_array(questions)){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"questions structure invalid\"}"); return r;
+  }
+  // Jadwal: input WIB "YYYY-MM-DD HH:MM" → simpan UTC ISO (paritas Go).
+  // Format selain itu ditolak 400 — jangan telan input tak valid diam-diam.
+  std::optional<std::string> st_iso=wib_to_utc_iso(st);
+  std::optional<std::string> et_iso=wib_to_utc_iso(et);
+  if(!st.empty() && !st_iso){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Format jadwal mulai tidak valid — gunakan format: YYYY-MM-DD HH:MM\"}"); return r;
+  }
+  if(!et.empty() && !et_iso){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Format jadwal selesai tidak valid — gunakan format: YYYY-MM-DD HH:MM\"}"); return r;
+  }
+  // Panel color (paritas Go): wajib diawali #, maks 7 karakter.
+  if(!color.empty() && color[0]!='#') color="";
+  if(color.size()>7) color=color.substr(0,7);
+  // strict_mode diturunkan server-side dari security_level (paritas Go):
+  // high → 1, selain itu → 0. Nilai klien diabaikan bila level dikirim.
+  int strict_derived=0;
+  if(!sec.empty()) strict_derived=(sec=="high")?1:0;
   bool updated=exams().update(id,[&](models::Exam& e){
     if(!questions.empty()) e.questions_json=questions;
     if(!identity.empty()) e.identity_fields=identity;
     if(!sec.empty()) e.security_level=sec;
-    if(strict.has_value()) e.strict_mode=*strict;
+    if(!sec.empty()) e.strict_mode=strict_derived;
+    else if(strict.has_value()) e.strict_mode=*strict;
     if(!color.empty()) e.panel_color=color; else e.panel_color.reset();
-    if(!st.empty()) e.start_time=st; else e.start_time.reset();
-    if(!et.empty()) e.end_time=et; else e.end_time.reset();
+    if(!st.empty() && st_iso) e.start_time=*st_iso; else e.start_time.reset();
+    if(!et.empty() && et_iso) e.end_time=*et_iso; else e.end_time.reset();
     if(!congrats.empty()) e.congrats_message=congrats; else e.congrats_message.reset();
   });
   if(!updated){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }

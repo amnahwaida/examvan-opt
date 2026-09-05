@@ -445,3 +445,79 @@ test('S4: tombol "Set All Bobot" → "Terapkan ke Semua Bobot"', () => {
     assert.ok(!html.includes('Set All Bobot'), 'label EN tombol bobot hilang');
     assert.match(html, /Terapkan ke Semua Bobot/, 'label ID tombol bobot ada');
 });
+
+// ---------------------------------------------------------------------------
+// Review edit-soal: format jadwal UTC ISO (Go) + modal tertutup saat gagal fetch
+// ---------------------------------------------------------------------------
+
+test('Jadwal: parseScheduleValue menampilkan ISO UTC Go sebagai WIB (+7)', () => {
+    const src = adminJs();
+    const fn = extractFunction(src, 'parseScheduleValue');
+    assert.ok(fn, 'parseScheduleValue harus fungsi top-level (bisa diuji)');
+    const sandbox = { document: {} };
+    vm.createContext(sandbox);
+    vm.runInContext(fn, sandbox, { filename: 'admin.js#parseScheduleValue' });
+
+    // ISO Go "2026-09-01T01:00:00Z" (UTC) → 08:00 WIB, tanggal tetap.
+    let dateEl = { value: '' }, timeEl = { value: '' };
+    sandbox.parseScheduleValue('2026-09-01T01:00:00Z', dateEl, timeEl);
+    assert.equal(dateEl.value, '2026-09-01', 'tanggal ISO UTC dipertahankan');
+    assert.equal(timeEl.value, '08:00', 'jam dikonversi UTC→WIB (+7)');
+
+    // ISO lintas hari: 2026-09-01T20:30:00Z → 2026-09-02 03:30 WIB.
+    dateEl = { value: '' }; timeEl = { value: '' };
+    sandbox.parseScheduleValue('2026-09-01T20:30:00Z', dateEl, timeEl);
+    assert.equal(dateEl.value, '2026-09-02', 'tanggal bergeser ke hari berikutnya');
+    assert.equal(timeEl.value, '03:30', 'jam WIB setelah tengah malam');
+
+    // ISO tanpa detik "YYYY-MM-DDTHH:MMZ" juga diterima.
+    dateEl = { value: '' }; timeEl = { value: '' };
+    sandbox.parseScheduleValue('2026-09-01T00:15:00Z', dateEl, timeEl);
+    assert.equal(timeEl.value, '07:15', 'ISO tanpa detik tetap dikonversi');
+});
+
+test('Jadwal: parseScheduleValue legacy "YYYY-MM-DD HH:MM" & "HH:MM" & kosong', () => {
+    const src = adminJs();
+    const fn = extractFunction(src, 'parseScheduleValue');
+    assert.ok(fn);
+    const sandbox = { document: {} };
+    vm.createContext(sandbox);
+    vm.runInContext(fn, sandbox, { filename: 'admin.js#parseScheduleValue-legacy' });
+
+    // Legacy C++ lokal (tanpa konversi).
+    let dateEl = { value: '' }, timeEl = { value: '' };
+    sandbox.parseScheduleValue('2026-09-01 08:00', dateEl, timeEl);
+    assert.equal(dateEl.value, '2026-09-01');
+    assert.equal(timeEl.value, '08:00');
+
+    // Legacy "HH:MM" tanpa tanggal.
+    dateEl = { value: '2026-09-01' }; timeEl = { value: '' };
+    sandbox.parseScheduleValue('08:00', dateEl, timeEl);
+    assert.equal(timeEl.value, '08:00');
+    assert.equal(dateEl.value, '', 'format HH:MM menghapus tanggal');
+
+    // Kosong → bersihkan keduanya.
+    dateEl = { value: '2026-09-01' }; timeEl = { value: '08:00' };
+    sandbox.parseScheduleValue('', dateEl, timeEl);
+    assert.equal(dateEl.value, '');
+    assert.equal(timeEl.value, '');
+});
+
+test('Jadwal: openQuestionsModal memakai parseScheduleValue (bukan parseSchedule inline)', () => {
+    const src = adminJs();
+    const open = extractFunction(src, 'openQuestionsModal');
+    assert.ok(open);
+    assert.match(open, /parseScheduleValue\(res\.start_time/, 'start_time diparse lewat parseScheduleValue');
+    assert.ok(!/function parseSchedule\(/.test(open), 'parseSchedule inline harus dihapus (diganti top-level)');
+});
+
+test('Jadwal: gagal fetch soal → modal TERTUTUP (bukan menggantung)', () => {
+    const src = adminJs();
+    const open = extractFunction(src, 'openQuestionsModal');
+    assert.ok(open);
+    const idxElse = open.indexOf('} else {');
+    assert.ok(idxElse !== -1, 'cabang res.success=false ada');
+    const elseBranch = open.slice(idxElse, open.indexOf('.catch', idxElse));
+    assert.match(elseBranch, /closeQuestionsModal\(true\)/, 'success=false → modal ditutup');
+    assert.match(open, /\.catch\([\s\S]*closeQuestionsModal\(true\)/, 'catch → modal ditutup');
+});

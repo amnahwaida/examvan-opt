@@ -364,7 +364,7 @@ TEST(ProductionHardening, Questions_PengawasIdsAccepted){
   ASSERT_GT(id,0);
   Request sq; sq.params["exam_id"]=std::to_string(id);
   sq.headers["Content-Type"]="application/json";
-  sq.body="{\"questions\":[{\"number\":1,\"type\":\"single_choice\",\"key\":\"A\"}],\"pengawas_ids\":[3,7]}";
+  sq.body="{\"questions\":[{\"number\":1,\"type\":\"single_choice\",\"key\":\"A\",\"choices\":[\"A\",\"B\"]}],\"pengawas_ids\":[3,7]}";
   auto saved=save_exam_questions(sq);
   EXPECT_EQ(saved.status,200) << saved.body;
   Request gq; gq.params["exam_id"]=std::to_string(id);
@@ -384,6 +384,66 @@ TEST(ProductionHardening, Questions_PengawasIdsInvalid400){
   auto res=save_exam_questions(sq);
   EXPECT_EQ(res.status,400) << res.body;
   EXPECT_NE(res.body.find("pengawas_ids"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, Questions_ScheduleStoredAsUtcIso){
+  // Go menyimpan jadwal sebagai UTC ISO — konversi dari input WIB
+  // "YYYY-MM-DD HH:MM" (Asia/Jakarta = UTC+7). C++ sebelumnya menyimpan
+  // mentah "YYYY-MM-DD HH:MM" → tidak kompatibel dengan exam buatan Go.
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":[],\"start_time\":\"2026-09-01 08:00\",\"end_time\":\"2026-09-01 09:30\"}";
+  auto saved=save_exam_questions(sq);
+  EXPECT_EQ(saved.status,200) << saved.body;
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->start_time.value_or(""),"2026-09-01T01:00:00Z") << exam->start_time.value_or("");
+  EXPECT_EQ(exam->end_time.value_or(""),"2026-09-01T02:30:00Z") << exam->end_time.value_or("");
+}
+
+TEST(ProductionHardening, Questions_InvalidScheduleFormat400){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":[],\"start_time\":\"09-01-2026 08:00\"}";
+  auto res=save_exam_questions(sq);
+  EXPECT_EQ(res.status,400) << res.body;
+  EXPECT_NE(res.body.find("Format jadwal"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, Questions_InvalidQuestionType400){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":[{\"number\":1,\"type\":\"bogus\",\"key\":\"A\"}]}";
+  auto res=save_exam_questions(sq);
+  EXPECT_EQ(res.status,400) << res.body;
+}
+
+TEST(ProductionHardening, Questions_MatchingRequiresItems400){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":[{\"number\":1,\"type\":\"matching\",\"key\":{\"1\":\"A\"}}]}";
+  auto res=save_exam_questions(sq);
+  EXPECT_EQ(res.status,400) << res.body;
+}
+
+TEST(ProductionHardening, Questions_ValidStructureAccepted){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":["
+    "{\"number\":1,\"type\":\"single_choice\",\"key\":\"A\",\"choices\":[\"A\",\"B\"]},"
+    "{\"number\":2,\"type\":\"short_answer\",\"key\":\"jakarta\"}]}";
+  auto res=save_exam_questions(sq);
+  EXPECT_EQ(res.status,200) << res.body;
 }
 
 TEST(ProductionHardening, Questions_MissingExam404){
@@ -1100,8 +1160,8 @@ TEST(ProductionHardening, E2E_FullFlow_UploadStartSubmitScoreResult){
   // 2) Simpan soal — questions_json dipersist & dipakai scorer worker.
   Request sq; sq.params["exam_id"]=std::to_string(id);
   sq.headers["Content-Type"]="application/json";
-  sq.body="{\"questions\":[{\"number\":1,\"type\":\"single_choice\",\"weight\":1.0,\"key\":\"A\"},"
-          "{\"number\":2,\"type\":\"single_choice\",\"weight\":1.0,\"key\":\"B\"}]}";
+  sq.body="{\"questions\":[{\"number\":1,\"type\":\"single_choice\",\"weight\":1.0,\"key\":\"A\",\"choices\":[\"A\",\"B\",\"C\"]},"
+          "{\"number\":2,\"type\":\"single_choice\",\"weight\":1.0,\"key\":\"B\",\"choices\":[\"A\",\"B\",\"C\"]}]";
   ASSERT_EQ(save_exam_questions(sq).status,200);
 
   // 3) Start ujian.

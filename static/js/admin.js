@@ -452,6 +452,34 @@ function resetQuestionsConfigDirty() {
     questionsConfigDirty = false;
 }
 
+// Isi field jadwal (date/time) dari nilai server. Mendukung:
+//   - UTC ISO "YYYY-MM-DDTHH:MM:SSZ" (format Go) → ditampilkan WIB (UTC+7)
+//   - "YYYY-MM-DD HH:MM" (C++ lama / input user)
+//   - "HH:MM" (legacy tanpa tanggal)
+//   - kosong → bersihkan kedua field
+function parseScheduleValue(val, dateEl, timeEl) {
+    if (!val) { if (dateEl) dateEl.value = ''; if (timeEl) timeEl.value = ''; return; }
+    if (val.length === 5) {
+        if (timeEl) timeEl.value = val;
+        if (dateEl) dateEl.value = '';
+        return;
+    }
+    var isoMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?Z$/.exec(val);
+    if (isoMatch) {
+        var wib = new Date(Date.UTC(+isoMatch[1], +isoMatch[2]-1, +isoMatch[3], +isoMatch[4], +isoMatch[5]));
+        wib.setMinutes(wib.getUTCMinutes() + 7 * 60); // UTC → WIB
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        if (dateEl) dateEl.value = wib.getUTCFullYear() + '-' + pad(wib.getUTCMonth() + 1) + '-' + pad(wib.getUTCDate());
+        if (timeEl) timeEl.value = pad(wib.getUTCHours()) + ':' + pad(wib.getUTCMinutes());
+        return;
+    }
+    var parts = val.split(' ');
+    if (parts.length === 2) {
+        if (dateEl) dateEl.value = parts[0];
+        if (timeEl) timeEl.value = parts[1];
+    }
+}
+
 function openQuestionsModal(examId, examName) {
     activeExamName = examName;
     // Modal dibuka dengan data segar dari server — mulai dari state bersih.
@@ -489,26 +517,14 @@ function openQuestionsModal(examId, examName) {
                 const hexInput = document.getElementById('panelColorHex');
                 if (colorInput) colorInput.value = colorVal;
                 if (hexInput) hexInput.value = colorVal;
-                // Exam schedule times (support "YYYY-MM-DD HH:MM" and legacy "HH:MM")
+                // Exam schedule times — mendukung UTC ISO (Go), legacy
+                // "YYYY-MM-DD HH:MM" (C++ lama), dan "HH:MM" (legacy).
                 const startInput = document.getElementById('examStartTime');
                 const endInput = document.getElementById('examEndTime');
                 const startDateInput = document.getElementById('examStartDate');
                 const endDateInput = document.getElementById('examEndDate');
-                function parseSchedule(val, dateEl, timeEl) {
-                    if (!val) { if (dateEl) dateEl.value = ''; if (timeEl) timeEl.value = ''; return; }
-                    if (val.length === 5) {
-                        if (timeEl) timeEl.value = val;
-                        if (dateEl) dateEl.value = '';
-                    } else {
-                        var parts = val.split(' ');
-                        if (parts.length === 2) {
-                            if (dateEl) dateEl.value = parts[0];
-                            if (timeEl) timeEl.value = parts[1];
-                        }
-                    }
-                }
-                parseSchedule(res.start_time, startDateInput, startInput);
-                parseSchedule(res.end_time, endDateInput, endInput);
+                parseScheduleValue(res.start_time, startDateInput, startInput);
+                parseScheduleValue(res.end_time, endDateInput, endInput);
                 // Congratulations message (nullable — empty when unset)
                 const congratsEl = document.getElementById('examCongratsMessage');
                 if (congratsEl) congratsEl.value = res.congrats_message || '';
@@ -520,11 +536,14 @@ function openQuestionsModal(examId, examName) {
                 }
             } else {
                 showToast(res.message || 'Gagal memuat soal', 'error');
+                // Jangan biarkan modal menggantung dengan teks "Memuat data soal...".
+                closeQuestionsModal(true);
             }
         })
         .catch(err => {
             if (fetchId !== pendingFetchId) return; // Stale response
             showToast('Gagal memuat data soal', 'error');
+            closeQuestionsModal(true);
         });
 }
 
