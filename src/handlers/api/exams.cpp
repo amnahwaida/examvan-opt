@@ -454,6 +454,10 @@ Response submit_exam(const Request& req){
   }
   // Bangun job nyata (identitas + jawaban) lalu enqueue ke queue Redis.
   queue::SubmissionJob job;
+  // job_id WAJIB diisi di sini (bukan hanya di SubmissionQueue::enqueue):
+  // hook test & jalur Redis LPUSH memakai to_json() langsung, dan result
+  // worker di-key per job_id. Tanpa id, semua result menimpa key yang sama.
+  job.job_id=queue::generate_job_id();
   job.exam_id=exam_id;
   job.student_name=json_string_field(req.body,"student_name");
   job.exam_number=json_string_field(req.body,"exam_number");
@@ -552,18 +556,29 @@ Response access_log(const Request& req){
       std::string sname=json_string_field(req.body,"student_name");
       std::string snum=json_string_field(req.body,"exam_number");
       std::string sclass=json_string_field(req.body,"student_class");
+      std::string event=json_string_field(req.body,"event");
+      std::string device=json_string_field(req.body,"device_info");
       if(mac.empty()){
         auto form=helpers::parse_form(req.body);
         if(form.count("mac_address")) mac=form["mac_address"];
         if(form.count("student_name")) sname=form["student_name"];
         if(form.count("exam_number")) snum=form["exam_number"];
         if(form.count("student_class")) sclass=form["student_class"];
+        if(form.count("event")) event=form["event"];
+        if(form.count("device_info")) device=form["device_info"];
       }
-      std::string now_txt=helpers::format_iso_utc(std::chrono::system_clock::now());
-      real.exec_params(c.get(),
-        "INSERT INTO access_log (exam_id, mac_address, student_name, exam_number, student_class, created_at)"
-        " VALUES ($1,$2,$3,$4,$5,$6)",
-        {std::to_string(exam_id), mac, sname, snum, sclass, now_txt});
+      if(event.empty()) event="login"; // Go: AccessEventLogin
+      std::string ip=req.headers.count("X-Forwarded-For")?req.headers["X-Forwarded-For"]:"";
+      std::string identity=json_raw_value(req.body,"identity_data");
+      if(identity.empty()){ auto form=helpers::parse_form(req.body); if(form.count("identity_data")) identity=form["identity_data"]; }
+      // Paritas Go: heartbeat TIDAK ditulis ke DB (Redis-only, hemat IO).
+      // Kolom = schema Go student_access_logs (student_identifier = mac).
+      if(event!="heartbeat"){
+        real.exec_params(c.get(),
+          "INSERT INTO student_access_logs (exam_id, student_identifier, student_name, exam_number, student_class, event, ip_address, device_info, identity_data)"
+          " VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          {std::to_string(exam_id), mac, sname, snum, sclass, event, ip, device, identity});
+      }
       real.release(c.release());
     }
   }catch(...){ /* best-effort: jangan sampai access-log mematikan handler */ }

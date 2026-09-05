@@ -154,6 +154,19 @@ bool ExamStorePostgres::migrate(){
     exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS owner_id TEXT");
     exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS updated_at TEXT");
     exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS finalized_at TEXT");
+    // Sync sequence PG setelah restore backup: restore hanya memulihkan data
+    // (MAX(id)), bukan posisi sequence. Kalau sequence ketinggalan, nextval
+    // mengembalikan id yang sudah dipakai → INSERT gagal (PK violation / 409).
+    // setval(seq, MAX(id), is_called): is_called=false saat tabel kosong agar
+    // nextval berikutnya = 1; is_called=true saat ada data agar nextval =
+    // MAX(id)+1. Tabel yang belum ada (pg_get_serial_sequence → NULL) dilewati.
+    for(const char* t: {"exams","submissions","student_access_logs"}){
+      exec_command(
+        "SELECT setval(pg_get_serial_sequence('"+std::string(t)+"','id'),"
+        " COALESCE((SELECT MAX(id) FROM "+std::string(t)+"),1),"
+        " EXISTS (SELECT 1 FROM "+std::string(t)+"))"
+        " WHERE pg_get_serial_sequence('"+std::string(t)+"','id') IS NOT NULL");
+    }
   }
   return ready_;
 }

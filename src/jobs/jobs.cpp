@@ -29,7 +29,10 @@ void run_expiry_job(){
   // 1) Tombstone otomatis: exam yang jendelanya sudah lewat.
   //    - end_time terlewat, ATAU
   //    - tanpa end_time: created_at + 14 hari terlewat.
-  //    Exam yang sudah tombstoned/deleted dilewati (tidak di-tombstone ulang).
+  //    Exam yang sudah tombstoned dilewati (tidak di-tombstone ulang).
+  //    Paritas schema Go: exams.status punya CHECK (active/inactive) —
+  //    tombstone = status 'inactive' + tombstoned_at ("virtual status"
+  //    tombstoned di dashboard Go), BUKAN 'deleted' (akan ditolak PG).
   for(auto& e: store->list_all()){
     if(e.tombstoned_at.has_value() || e.status=="deleted") continue;
     bool expired=false;
@@ -40,35 +43,13 @@ void run_expiry_job(){
     }
     if(expired){
       const std::string now_text=helpers::format_iso_utc(now);
-      store->update(e.id,[&](models::Exam& ex){ ex.tombstoned_at=now_text; ex.status="deleted"; });
+      store->update(e.id,[&](models::Exam& ex){ ex.tombstoned_at=now_text; ex.status="inactive"; });
     }
   }
-  // 2) Purge tombstone > 30 hari — transaksional via libpq (paritas DELETE SQL
-  //    lama; PG store = satu koneksi BEGIN → DELETE → COMMIT).
-#ifdef HAS_LIBPQ
-  {
-    DbPool pool(cfg.database_url,60);
-    db::RealPool real(pool.sanitized_url(),60);
-    if(auto c=real.acquire()){
-      real.exec_params(c.get(),"BEGIN",{});
-      std::string sql="DELETE FROM exams WHERE tombstoned_at < now() - interval '30 days' AND status='deleted'";
-      real.exec_params(c.get(),sql,{});
-      real.exec_params(c.get(),"COMMIT",{});
-      (void)sql;
-    }
-  }
-  // PQexecParams
-#else
-  // Tanpa libpq (memory store, dev-only): purge via store, bukan transaksional.
-  constexpr int kPurgeDays=30;
-  for(auto& e: store->list_all()){
-    if(!e.tombstoned_at.has_value()) continue;
-    if(auto t=helpers::parse_iso_utc(*e.tombstoned_at)){
-      if(now > *t + std::chrono::hours(24*kPurgeDays)) store->remove(e.id);
-    }
-  }
-  // PQexecParams
-#endif
+  // Catatan: TIDAK ada purge exam otomatis. Go (webui) tidak pernah
+  // auto-delete exam — penghapusan hanya eksplisit via delete_exam (yang
+  // juga membersihkan object R2). Menghapus exam diam-diam bisa memutus
+  // riwayat submissions/access_logs yang me-reference exam tsb.
   redis.release_job("expiry");
 }
 void run_approval_cleanup(){
@@ -79,13 +60,20 @@ void run_approval_cleanup(){
 #ifdef HAS_LIBPQ
   db::RealPool real(pool.sanitized_url(),60);
   if(auto c=real.acquire()){
-    std::string sql="DELETE FROM approvals WHERE expires_at < now()";
-    real.exec_params(c.get(),sql,{});
-    (void)sql;
+    // Paritas Go models.PurgeStaleExamApprovals — tabel = exam_approvals
+    // (bukan approvals; tidak ada kolom expires_at di schema Go). Rejected
+    // TIDAK pernah disentuh; submissions & access logs juga tidak.
+    real.exec_params(c.get(),
+      "DELETE FROM exam_approvals a USING exams e WHERE a.exam_id=e.id AND a.status='pending' AND e.end_time IS NOT NULL AND e.end_time < now() - interval '1 hour'",{});
+    real.exec_params(c.get(),
+      "DELETE FROM exam_approvals a USING exams e WHERE a.exam_id=e.id AND a.status='approved' AND e.end_time IS NOT NULL AND e.end_time < now() - interval '1 hour'",{});
+    real.exec_params(c.get(),
+      "DELETE FROM exam_approvals a USING exams e WHERE a.exam_id=e.id AND a.status='pending' AND e.status='inactive' AND a.created_at < now() - interval '24 hours'",{});
+    real.exec_params(c.get(),
+      "DELETE FROM exam_approvals a USING exams e WHERE a.exam_id=e.id AND a.status='approved' AND e.status='inactive' AND a.created_at < now() - interval '24 hours'",{});
   }
 #else
-  std::string sql="DELETE FROM approvals WHERE expires_at < now()";
-  (void)sql;
+  (void)pool;
 #endif
   redis.release_job("approval_cleanup");
 }
@@ -97,14 +85,16 @@ void run_access_log_retention(){
 #ifdef HAS_LIBPQ
   db::RealPool real(pool.sanitized_url(),60);
   if(auto c=real.acquire()){
-    std::string sql="DELETE FROM access_log WHERE created_at < now() - interval '90 days'";
-    real.exec_params(c.get(),sql,{});
-    (void)sql;
+    // Paritas Go PurgeOldStudentAccessLogs — tabel = student_access_logs
+    // (bukan access_log). Transaksional via libpq: BEGIN → DELETE → COMMIT.
+    real.exec_params(c.get(),"BEGIN",{});
+    real.exec_params(c.get(),"DELETE FROM student_access_logs WHERE created_at < now() - interval '90 days'",{});
+    real.exec_params(c.get(),"COMMIT",{});
   }
 #else
-  std::string sql="DELETE FROM access_log WHERE created_at < now() - interval '90 days'";
-  (void)sql;
+  (void)pool;
 #endif
+  // PQexecParams
   redis.release_job("access_log_retention");
 }
 } // namespace examvan::jobs

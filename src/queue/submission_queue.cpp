@@ -127,7 +127,7 @@ std::string SubmissionJob::to_json() const {
   std::ostringstream ss;
   ss<<"{\"job_id\":\""<<json_escape(job_id)<<"\",\"exam_id\":"<<exam_id
     <<",\"student_name\":\""<<json_escape(student_name)<<"\",\"exam_number\":\""<<json_escape(exam_number)
-    <<"\",\"student_class\":\""<<json_escape(student_class)<<"\",\"mac_address\":\""<<json_escape(mac_address)
+    <<"\",\"student_class\":\""<<json_escape(student_class)<<"\",\"mac_address\":\""<<json_escape(mac_address)<<"\",\"start_time\":\""<<json_escape(start_time)
     <<"\",\"retries\":"<<retries<<",\"enqueued_at\":\""<<json_escape(enqueued_at)<<"\""
     <<",\"answers\":"<<map_to_json(answers)
     <<",\"identity_data\":"<<map_to_json(identity_data)
@@ -163,7 +163,12 @@ std::optional<SubmissionJob> SubmissionJob::from_json(const std::string& s){
   if(j.job_id.empty()) return std::nullopt;
   try{j.exam_id=std::stoi(extract("exam_id"));}catch(...){}
   j.student_name=extract("student_name");
+  j.exam_number=extract("exam_number");
+  j.student_class=extract("student_class");
+  j.start_time=extract("start_time");
   j.mac_address=extract("mac_address");
+  j.enqueued_at=extract("enqueued_at");
+  try{j.retries=std::stoi(extract("retries"));}catch(...){}
   j.answers=parse_map_from_json(s,"answers");
   j.identity_data=parse_map_from_json(s,"identity_data");
   return j;
@@ -304,14 +309,18 @@ void Worker::run_batch(){
         for(auto &b: batch){
           auto& j=b.first;
           auto& score=b.second;
-          // Best-effort: skema tabel submissions dimiliki Go; gagal insert
-          // tidak mematikan worker (hasil exec_params sengaja diabaikan).
-          std::string status = score.has_value() ? "scored" : "pending";
-          std::string score_text = score.has_value() ? std::to_string(*score) : "0";
+          // Best-effort: gagal insert tidak mematikan worker (hasil exec_params
+          // sengaja diabaikan). Kolom = schema Go webui/internal/database/
+          // schema.sql: submissions(exam_id, student_name, exam_number,
+          // student_class, answers_json, score, start_time, mac_address,
+          // identity_data). TIDAK ada kolom job_id/status/submitted_at —
+          // INSERT lama pasti gagal (undefined column) di produksi.
+          std::string score_text = score.has_value() ? std::to_string(*score) : "";
           real.exec_params(c.get(),
-            "INSERT INTO submissions (job_id, exam_id, student_name, exam_number, student_class, score, status, submitted_at)"
-            " VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING",
-            {j.job_id, std::to_string(j.exam_id), j.student_name, j.exam_number, j.student_class, score_text, status, j.enqueued_at});
+            "INSERT INTO submissions (exam_id, student_name, exam_number, student_class, answers_json, score, start_time, mac_address, identity_data)"
+            " VALUES ($1,$2,$3,$4,$5,NULLIF($6,'')::double precision,$7,$8,$9) ON CONFLICT DO NOTHING",
+            {std::to_string(j.exam_id), j.student_name, j.exam_number, j.student_class,
+             map_to_json(j.answers), score_text, j.start_time, j.mac_address, map_to_json(j.identity_data)});
         }
       }
 #else

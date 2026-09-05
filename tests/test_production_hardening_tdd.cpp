@@ -14,6 +14,12 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <map>
+#include <deque>
+#include <fstream>
+#include <sstream>
+#include <thread>
+#include <chrono>
 using namespace examvan;
 using namespace examvan::handlers::admin;
 using namespace examvan::handlers::api;
@@ -460,7 +466,9 @@ TEST(ProductionHardening, Expiry_TombstonesExpiredExam){
   auto exam=examvan::store::active_store()->get_by_id(id);
   ASSERT_TRUE(exam.has_value());
   EXPECT_TRUE(exam->tombstoned_at.has_value()) << "exam kedaluwarsa harus di-tombstone";
-  EXPECT_EQ(exam->status, "deleted");
+  // Paritas Go: tombstone = status 'inactive' + tombstoned_at (CHECK constraint
+  // exams.status hanya mengizinkan active/inactive — 'deleted' akan ditolak PG).
+  EXPECT_EQ(exam->status, "inactive");
 }
 
 TEST(ProductionHardening, Expiry_KeepsFutureExam){
@@ -503,7 +511,7 @@ TEST(ProductionHardening, Expiry_DoesNotReTombstoneRecent){
   ASSERT_EQ(created.status,201) << created.body;
   int id=std::stoi(json_field(created.body,"id"));
   examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
-    e.status="deleted";
+    e.status="inactive";
     e.tombstoned_at="2026-09-01T00:00:00Z"; // baru, belum 30 hari
   });
   examvan::jobs::run_expiry_job();
@@ -512,19 +520,20 @@ TEST(ProductionHardening, Expiry_DoesNotReTombstoneRecent){
   EXPECT_EQ(exam->tombstoned_at.value_or(""), "2026-09-01T00:00:00Z");
 }
 
-TEST(ProductionHardening, Expiry_PurgesOldTombstoned){
+TEST(ProductionHardening, Expiry_KeepsOldTombstoned){
   clear_exams_for_testing();
-  Request cr; cr.body="name=PurgeMe&file_path=soal.pdf&size_bytes=100";
+  Request cr; cr.body="name=KeepMe&file_path=soal.pdf&size_bytes=100";
   auto created=create_exam(cr);
   ASSERT_EQ(created.status,201) << created.body;
   int id=std::stoi(json_field(created.body,"id"));
   examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
-    e.status="deleted";
+    e.status="inactive";
     e.tombstoned_at="2020-01-01T00:00:00Z"; // >30 hari
   });
   examvan::jobs::run_expiry_job();
-  EXPECT_FALSE(examvan::store::active_store()->get_by_id(id).has_value())
-    << "tombstone >30 hari harus dihapus permanen";
+  EXPECT_TRUE(examvan::store::active_store()->get_by_id(id).has_value())
+    << "Go TIDAK pernah auto-delete exam (delete hanya eksplisit via delete_exam "
+       "yang juga membersihkan R2) — tombstone lama tetap disimpan";
 }
 
 // ----------------------------------------------------------------------
@@ -554,4 +563,196 @@ TEST(ProductionHardening, JobResult_ScoreSerialized){
   queue::JobResult r2; r2.job_id="j2"; r2.success=true; r2.message="ok";
   auto j2=r2.to_json();
   EXPECT_NE(j2.find("\"score\":null"), std::string::npos) << j2;
+}
+
+// ----------------------------------------------------------------------
+// Verifikasi schema Go (webui/internal/database/schema.sql) — nama tabel,
+// kolom & status harus cocok dengan produksi (CHECK constraint dll).
+// Temuan: submissions TIDAK punya job_id/status/submitted_at; tabel access
+// log bernama student_access_logs (bukan access_log); exams.status CHECK
+// hanya mengizinkan active/inactive (bukan 'deleted').
+// ----------------------------------------------------------------------
+
+static std::string read_source_file(const std::string& path){
+  std::ifstream f(path);
+  std::ostringstream ss;
+  if(f) ss << f.rdbuf();
+  return ss.str();
+}
+
+TEST(ProductionHardening, Expiry_TombstoneUsesInactiveStatus){
+  auto j = read_source_file("src/jobs/jobs.cpp");
+  EXPECT_NE(j.find("ex.status=\"inactive\""), std::string::npos)
+    << "tombstone harus status='inactive' (CHECK Go: active/inactive)";
+  EXPECT_EQ(j.find("ex.status=\"deleted\""), std::string::npos) << j;
+}
+
+TEST(ProductionHardening, Expiry_NoAutoPurgeOfExams){
+  auto j = read_source_file("src/jobs/jobs.cpp");
+  EXPECT_EQ(j.find("DELETE FROM exams"), std::string::npos)
+    << "Go tidak pernah auto-delete exam (delete hanya eksplisit via delete_exam)";
+}
+
+TEST(ProductionHardening, ApprovalCleanup_UsesExamApprovalsTable){
+  auto j = read_source_file("src/jobs/jobs.cpp");
+  EXPECT_NE(j.find("exam_approvals"), std::string::npos)
+    << "tabel Go bernama exam_approvals, bukan approvals";
+  EXPECT_EQ(j.find("DELETE FROM approvals"), std::string::npos) << j;
+}
+
+TEST(ProductionHardening, AccessLogRetention_UsesStudentAccessLogsTable){
+  auto j = read_source_file("src/jobs/jobs.cpp");
+  EXPECT_NE(j.find("student_access_logs"), std::string::npos)
+    << "tabel Go bernama student_access_logs, bukan access_log";
+  EXPECT_EQ(j.find("DELETE FROM access_log"), std::string::npos) << j;
+}
+
+TEST(ProductionHardening, SubmissionsInsert_MatchesGoSchema){
+  auto c = read_source_file("src/queue/submission_queue.cpp");
+  size_t p = c.find("INSERT INTO submissions");
+  ASSERT_NE(p, std::string::npos);
+  size_t e = c.find(";", p);
+  std::string insert = (e==std::string::npos) ? c.substr(p) : c.substr(p, e-p);
+  // Kolom yang ADA di schema Go: exam_id, student_name, exam_number,
+  // student_class, answers_json, score, start_time, mac_address, identity_data.
+  EXPECT_NE(insert.find("answers_json"), std::string::npos) << insert;
+  EXPECT_NE(insert.find("score"), std::string::npos) << insert;
+  EXPECT_NE(insert.find("mac_address"), std::string::npos) << insert;
+  EXPECT_NE(insert.find("identity_data"), std::string::npos) << insert;
+  EXPECT_NE(insert.find("start_time"), std::string::npos) << insert;
+  // Kolom yang TIDAK ADA di schema Go (INSERT lama pasti gagal di produksi):
+  EXPECT_EQ(insert.find("job_id"), std::string::npos) << insert;
+  EXPECT_EQ(insert.find("submitted_at"), std::string::npos) << insert;
+  EXPECT_EQ(insert.find("status"), std::string::npos) << insert;
+}
+
+TEST(ProductionHardening, AccessLogInsert_MatchesGoSchema){
+  auto c = read_source_file("src/handlers/api/exams.cpp");
+  size_t p = c.find("INSERT INTO student_access_logs");
+  ASSERT_NE(p, std::string::npos) << "harus INSERT ke student_access_logs";
+  size_t e = c.find(";", p);
+  std::string insert = (e==std::string::npos) ? c.substr(p) : c.substr(p, e-p);
+  EXPECT_NE(insert.find("student_identifier"), std::string::npos) << insert;
+  EXPECT_NE(insert.find("event"), std::string::npos) << insert;
+  EXPECT_NE(insert.find("ip_address"), std::string::npos) << insert;
+  EXPECT_NE(insert.find("device_info"), std::string::npos) << insert;
+  EXPECT_NE(insert.find("identity_data"), std::string::npos) << insert;
+  EXPECT_EQ(c.find("INSERT INTO access_log ("), std::string::npos)
+    << "tabel lama access_log tidak ada di schema Go";
+}
+
+TEST(ProductionHardening, Queue_JobJsonRoundTrip_FullFields){
+  queue::SubmissionJob j;
+  j.job_id="e2e1"; j.exam_id=9; j.student_name="Budi"; j.exam_number="01";
+  j.student_class="XII-A"; j.start_time="2026-09-01T08:00:00Z";
+  j.mac_address="aa:bb"; j.enqueued_at="2026-09-01T08:05:00Z"; j.retries=1;
+  j.answers={{"1","A"},{"2","B"}};
+  j.identity_data={{"nis","12345"}};
+  auto j2=queue::SubmissionJob::from_json(j.to_json());
+  ASSERT_TRUE(j2.has_value());
+  EXPECT_EQ(j2->job_id, "e2e1");
+  EXPECT_EQ(j2->exam_id, 9);
+  EXPECT_EQ(j2->student_name, "Budi");
+  EXPECT_EQ(j2->exam_number, "01");
+  EXPECT_EQ(j2->student_class, "XII-A");
+  EXPECT_EQ(j2->mac_address, "aa:bb");
+  EXPECT_EQ(j2->start_time, "2026-09-01T08:00:00Z");
+  EXPECT_EQ(j2->enqueued_at, "2026-09-01T08:05:00Z");
+  EXPECT_EQ(j2->retries, 1);
+  ASSERT_EQ(j2->answers.size(), 2u);
+  EXPECT_EQ(j2->answers["1"], "A");
+  EXPECT_EQ(j2->identity_data["nis"], "12345");
+}
+
+// ----------------------------------------------------------------------
+// Sequence sync PG (setval) — setelah restore backup, sequence bisa
+// ketinggalan dari MAX(id) sehingga nextval mengembalikan id yang sudah
+// dipakai → INSERT gagal (409/PK violation). migrate() harus sync.
+// ----------------------------------------------------------------------
+
+TEST(ProductionHardening, Migrate_SyncsSequencesAfterRestore){
+  auto c = read_source_file("src/store/exam_store_postgres.cpp");
+  EXPECT_NE(c.find("setval"), std::string::npos) << "migrate harus sync sequence (setval)";
+  EXPECT_NE(c.find("pg_get_serial_sequence"), std::string::npos);
+  EXPECT_NE(c.find("\"exams\""), std::string::npos);
+  EXPECT_NE(c.find("\"submissions\""), std::string::npos);
+  EXPECT_NE(c.find("\"student_access_logs\""), std::string::npos);
+}
+
+// ----------------------------------------------------------------------
+// E2E — alur penuh: upload PDF → verifikasi R2 → start → submit →
+// worker score (questions_json nyata) → result
+// ----------------------------------------------------------------------
+
+TEST(ProductionHardening, E2E_FullFlow_UploadStartSubmitScoreResult){
+  clear_exams_for_testing();
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+
+  // 1) Upload PDF (multipart) — create_exam: upload R2 + verifikasi HEAD.
+  std::string boundary="----E2E";
+  Request cr; cr.body=multipart_pdf(boundary,"soal.pdf","%PDF-1.4 e2e flow\n%%EOF\n");
+  cr.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  auto after_create=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(after_create.has_value());
+  EXPECT_EQ(after_create->file_path, "soal.pdf");
+
+  // 2) Simpan soal — questions_json dipersist & dipakai scorer worker.
+  Request sq; sq.params["exam_id"]=std::to_string(id);
+  sq.headers["Content-Type"]="application/json";
+  sq.body="{\"questions\":[{\"number\":1,\"type\":\"single_choice\",\"weight\":1.0,\"key\":\"A\"},"
+          "{\"number\":2,\"type\":\"single_choice\",\"weight\":1.0,\"key\":\"B\"}]}";
+  ASSERT_EQ(save_exam_questions(sq).status,200);
+
+  // 3) Start ujian.
+  examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
+    e.status="active"; e.exam_started_at="2026-09-01T00:00:00Z";
+  });
+
+  // 4) Submit siswa — hook menangkap job nyata (answers + identitas).
+  queue::SubmissionJob captured;
+  set_submit_enqueue_hook_for_test([&](const queue::SubmissionJob& j){ captured=j; });
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["Content-Type"]="application/json";
+  rq.body="{\"student_name\":\"Budi\",\"exam_number\":\"01\",\"student_class\":\"XII-A\","
+          "\"mac_address\":\"aa:bb:cc:dd\",\"answers\":{\"1\":\"A\",\"2\":\"C\"}}";
+  auto submit_res=submit_exam(rq);
+  ASSERT_EQ(submit_res.status,202) << submit_res.body;
+  ASSERT_FALSE(captured.job_id.empty());
+  set_submit_enqueue_hook_for_test(nullptr);
+
+  // 5) Worker score: queue in-memory + scorer pakai questions_json exam.
+  std::deque<std::string> q_store;
+  std::map<std::string,std::string> results;
+  queue::SubmissionQueue q(
+    [&](const std::string&, const std::string& v){ q_store.push_back(v); },
+    [&](const std::string&, int)->std::optional<std::string>{
+      if(q_store.empty()) return std::nullopt;
+      auto v=q_store.front(); q_store.pop_front(); return v;
+    },
+    [&](const std::string& k, const std::string& v){ results[k]=v; }
+  );
+  q_store.push_back(captured.to_json());
+  auto scorer_fn=[](const queue::SubmissionJob& job)->std::optional<double>{
+    auto ex=examvan::store::active_store()->get_by_id(job.exam_id);
+    if(!ex) return std::nullopt;
+    return examvan::scoring::score_submission_json(ex->questions_json.value_or(""), job.answers);
+  };
+  queue::Worker w(&q, scorer_fn);
+  w.start();
+  const std::string result_key=std::string(queue::kResultKeyPrefix)+captured.job_id;
+  int waited=0;
+  while(results.find(result_key)==results.end() && waited<200){
+    std::this_thread::sleep_for(std::chrono::milliseconds(25)); waited++;
+  }
+  w.stop();
+  auto it=results.find(result_key);
+  ASSERT_NE(it, results.end()) << "worker harus menulis result utk job " << captured.job_id;
+  EXPECT_NE(it->second.find("\"success\":true"), std::string::npos) << it->second;
+  // Jawaban {1:A benar, 2:C salah} dari 2 soal → score 50.0.
+  EXPECT_NE(it->second.find("\"score\":50"), std::string::npos) << it->second;
+  reset_r2_flags();
 }
