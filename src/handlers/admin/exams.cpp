@@ -708,11 +708,25 @@ Response update_exam(const Request& req){
   }
   // pre-validasi nama hanya untuk action edit
   std::string new_name;
+  // submitEditExam (frontend) mengirim FormData multipart: name + pdf_file
+  // (opsional). Sebelumnya pdf_file DIABAIKAN → ganti PDF di modal edit ujian
+  // diam-diam tidak terjadi.
+  std::string edit_pdf_name, edit_pdf_data, edit_pdf_ct;
   if(action=="edit"){
-    new_name=req.params.count("name")? req.params.at("name") : "";
-    if(new_name.empty()){
-      auto form=helpers::parse_form(req.body);
-      new_name = form.count("name")? form["name"] : "";
+    bool is_multipart=false;
+    std::string ct_hdr;
+    for(auto& kv:req.headers){ std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch); if(k=="content-type"){ ct_hdr=kv.second; break; } }
+    if(ct_hdr.find("multipart/form-data")!=std::string::npos) is_multipart=true;
+    if(is_multipart){
+      std::map<std::string,std::string> form;
+      parse_multipart(req.body, ct_hdr, form, edit_pdf_name, edit_pdf_data, edit_pdf_ct);
+      auto fn=form.find("name"); if(fn!=form.end()) new_name=fn->second;
+    } else {
+      new_name=req.params.count("name")? req.params.at("name") : "";
+      if(new_name.empty()){
+        auto form=helpers::parse_form(req.body);
+        new_name = form.count("name")? form["name"] : "";
+      }
     }
     // Bug 3: edit wajib ada param name — error spesifik, bukan generik
     if(new_name.empty()){
@@ -722,6 +736,33 @@ Response update_exam(const Request& req){
     if(new_name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
     if(has_null_bytes(new_name)){ Response r; r.status=400; r.json(400,"{\"error\":\"name contains invalid characters\"}"); return r; }
     if(new_name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return r; }
+    // PDF baru (opsional): validasi + upload R2 + verifikasi (mirror create_exam).
+    if(!edit_pdf_data.empty()){
+      if(!validate_pdf_content(edit_pdf_data)){
+        Response r; r.status=400; r.json(400,"{\"error\":\"file must be valid PDF\"}"); return r;
+      }
+      if(edit_pdf_data.size()>5*1024*1024){
+        Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return r;
+      }
+      auto cfg_r2=Config::load();
+      r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
+      if(!rc.enabled()){
+        Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
+      }
+      std::string key=r2::object_key_for_exam(id, edit_pdf_name);
+      if(g_upload_mock){
+        g_upload_mock(key, edit_pdf_data);
+      } else {
+        r2::R2Client client{rc};
+        if(!(client.upload(key, edit_pdf_data) && client.verify(key))){
+          const char* strict=getenv("EXAMVAN_R2_STRICT");
+          bool non_strict=strict && std::string(strict)=="0";
+          if(!non_strict){
+            Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return r;
+          }
+        }
+      }
+    }
   }
   std::string result_status;
   std::string result_name;
@@ -756,7 +797,10 @@ Response update_exam(const Request& req){
       e.exam_started_at.reset(); // Go parity: stopping clears the started marker
       result_status="inactive";
     }
-    else if(action=="edit" && !new_name.empty()){ e.name=new_name; result_name=new_name; }
+    else if(action=="edit"){
+      if(!new_name.empty()){ e.name=new_name; result_name=new_name; }
+      if(!edit_pdf_data.empty()){ e.file_path=edit_pdf_name; e.size_bytes=edit_pdf_data.size(); }
+    }
   });
   if(!found){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
   if(already_started){
@@ -1085,5 +1129,212 @@ Response save_exam_questions(const Request& req){
   }
   utils::log_info("exam_questions_saved","id="+id_str);
   Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Konfigurasi soal berhasil disimpan\"}"); return r;
+}
+
+// ===== Bulk toggle ==========================================================
+// POST /admin/api/exams/bulk-toggle {ids:[...], status:"active"|"inactive"}
+// (frontend bulkToggleExams). Sebelumnya route tidak ada → 404.
+Response bulk_toggle_exams(const Request& req){
+  std::string ids_raw=json_raw_value(req.body,"ids");
+  std::string status=json_string_field(req.body,"status");
+  std::vector<int> ids;
+  if(ids_raw.empty() || !parse_int_array(ids_raw,ids) || ids.empty()){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"ids must be a non-empty array of numbers\"}"); return r;
+  }
+  if(status!="active" && status!="inactive"){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"status must be active or inactive\"}"); return r;
+  }
+  int ok_count=0;
+  for(int id: ids){
+    bool found=exams().update(id,[&](models::Exam& e){
+      e.status=status;
+      if(status=="active") e.tombstoned_at.reset(); // Go parity: re-activation clears tombstone
+    });
+    if(found) ok_count++;
+  }
+  utils::log_info("exams_bulk_toggled","count="+std::to_string(ok_count)+" status="+status);
+  Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"updated\":"+std::to_string(ok_count)+",\"message\":\"Status "+std::to_string(ok_count)+" ujian berhasil diperbarui\"}"); return r;
+}
+
+// ===== Bulk delete ==========================================================
+// POST /admin/api/exams/bulk-delete {ids:[...]} (frontend bulkDeleteExams).
+// R2 cleanup per exam (mirror delete_exam) lalu hapus dari store.
+Response bulk_delete_exams(const Request& req){
+  std::string ids_raw=json_raw_value(req.body,"ids");
+  std::vector<int> ids;
+  if(ids_raw.empty() || !parse_int_array(ids_raw,ids) || ids.empty()){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"ids must be a non-empty array of numbers\"}"); return r;
+  }
+  int ok_count=0;
+  for(int id: ids){
+    auto exam=exams().get_by_id(id);
+    if(!exam) continue;
+    auto cfg_r2=Config::load();
+    r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
+    std::string key=r2::object_key_for_exam(id, exam->file_path);
+    if(g_upload_mock){
+      g_upload_mock(key, "");
+    } else if(rc.enabled()){
+      r2::R2Client client{rc};
+      if(!client.remove(key)) utils::log_error("exam_bulk_delete_r2_failed","id="+std::to_string(id));
+    } else {
+      // Tanpa R2 object tidak bisa dibersihkan → lewati ujian ini (paritas delete_exam).
+      continue;
+    }
+    if(exams().remove(id)) ok_count++;
+  }
+  utils::log_info("exams_bulk_deleted","count="+std::to_string(ok_count));
+  Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"deleted\":"+std::to_string(ok_count)+",\"message\":\""+std::to_string(ok_count)+" ujian dihapus\"}"); return r;
+}
+
+// ===== Delegate exam =========================================================
+// GET /admin/api/exams/:exam_id/delegate-data + POST .../delegate
+// (modal delegasi operator). Sebelumnya route tidak ada → modal 404.
+//
+// Tanpa PG (HAS_LIBPQ=0): kembalikan bentuk kosong agar modal tetap terbuka.
+// Dengan PG: list guru/pengawas satu instansi (paritas Go DelegateData).
+#ifdef HAS_LIBPQ
+static int session_admin_id_from(const Request& req){
+  for(auto& kv:req.headers){ std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch); if(k=="x-internal-admin-id"){ try{ return std::stoi(kv.second); }catch(...){} } }
+  return 0;
+}
+#endif
+
+Response delegate_data(const Request& req){
+  auto id_str=get_exam_id(req);
+  if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
+  int id=0;
+  try{ id=std::stoi(id_str); }catch(...){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid exam id\"}"); return r; }
+  auto exam=exams().get_by_id(id);
+  if(!exam){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  std::string current_owner="null", delegated_to="null", gurus="[]", pengawas="[]", assigned="[]";
+#ifdef HAS_LIBPQ
+  int uid=session_admin_id_from(req);
+  try{
+    auto cfg_db=Config::load();
+    examvan::DbPool pool(cfg_db.database_url, 10);
+    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    if(auto c=real.acquire()){
+      auto ui=real.exec_params(c.get(),"SELECT instansi FROM admin_users WHERE id=$1",{std::to_string(uid)});
+      if(ui && PQresultStatus(ui.get())==PGRES_TUPLES_OK && PQntuples(ui.get())>0){
+        std::string inst=PQgetvalue(ui.get(),0,0);
+        // current owner (created_by)
+        auto ow=real.exec_params(c.get(),"SELECT id,username FROM admin_users WHERE id=$1",{std::to_string(exam->created_by)});
+        if(ow && PQresultStatus(ow.get())==PGRES_TUPLES_OK && PQntuples(ow.get())>0){
+          current_owner="{\"id\":"+std::string(PQgetvalue(ow.get(),0,0))+",\"username\":\""+json_escape(PQgetvalue(ow.get(),0,1))+"\"}";
+        }
+        // delegated_to
+        if(exam->delegated_to.has_value()){
+          auto dt=real.exec_params(c.get(),"SELECT id,username FROM admin_users WHERE id=$1",{std::to_string(*exam->delegated_to)});
+          if(dt && PQresultStatus(dt.get())==PGRES_TUPLES_OK && PQntuples(dt.get())>0){
+            delegated_to="{\"id\":"+std::string(PQgetvalue(dt.get(),0,0))+",\"username\":\""+json_escape(PQgetvalue(dt.get(),0,1))+"\"}";
+          }
+        }
+        // available gurus: instansi sama, active, role guru, exclude creator
+        auto gr=real.exec_params(c.get(),
+          "SELECT id,username,COALESCE(instansi,'') FROM admin_users WHERE instansi=$1 AND status='active' AND role ILIKE '%\"guru\"%' AND id<>$2 ORDER BY username",
+          {inst,std::to_string(exam->created_by)});
+        if(gr && PQresultStatus(gr.get())==PGRES_TUPLES_OK){
+          std::string arr="[";
+          for(int i=0;i<PQntuples(gr.get());i++){
+            if(i>0) arr+=",";
+            arr+="{\"id\":"+std::string(PQgetvalue(gr.get(),i,0))+",\"username\":\""+json_escape(PQgetvalue(gr.get(),i,1))+"\",\"instansi\":\""+json_escape(PQgetvalue(gr.get(),i,2))+"\"}";
+          }
+          arr+="]"; gurus=arr;
+        }
+        // available pengawas: instansi sama, active, role pengawas
+        auto pw=real.exec_params(c.get(),
+          "SELECT id,username,COALESCE(instansi,'') FROM admin_users WHERE instansi=$1 AND status='active' AND role ILIKE '%\"pengawas\"%' ORDER BY username",
+          {inst});
+        if(pw && PQresultStatus(pw.get())==PGRES_TUPLES_OK){
+          std::string arr="[";
+          for(int i=0;i<PQntuples(pw.get());i++){
+            if(i>0) arr+=",";
+            arr+="{\"id\":"+std::string(PQgetvalue(pw.get(),i,0))+",\"username\":\""+json_escape(PQgetvalue(pw.get(),i,1))+"\",\"instansi\":\""+json_escape(PQgetvalue(pw.get(),i,2))+"\"}";
+          }
+          arr+="]"; pengawas=arr;
+        }
+        // assigned pengawas ids
+        auto ap=real.exec_params(c.get(),"SELECT user_id FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
+        if(ap && PQresultStatus(ap.get())==PGRES_TUPLES_OK){
+          std::string arr="[";
+          for(int i=0;i<PQntuples(ap.get());i++){
+            if(i>0) arr+=",";
+            arr+=PQgetvalue(ap.get(),i,0);
+          }
+          arr+="]"; assigned=arr;
+        }
+      }
+      real.release(c.release());
+    }
+  }catch(...){ /* best-effort */ }
+#endif
+  Response r; r.status=200; r.json(200,"{\"success\":true,\"data\":{"
+    "\"current_owner\":"+current_owner
+    +",\"delegated_to\":"+delegated_to
+    +",\"available_gurus\":"+gurus
+    +",\"available_pengawas\":"+pengawas
+    +",\"assigned_pengawas_ids\":"+assigned+"}}"); return r;
+}
+
+Response delegate_exam(const Request& req){
+  auto id_str=get_exam_id(req);
+  if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
+  int id=0;
+  try{ id=std::stoi(id_str); }catch(...){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid exam id\"}"); return r; }
+  if(!exams().get_by_id(id)){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  std::string new_owner_raw=json_raw_value(req.body,"new_owner_id");
+  std::string pengawas_raw=json_raw_value(req.body,"pengawas_ids");
+  std::vector<int> pengawas_ids;
+  if(!pengawas_raw.empty() && !parse_int_array(pengawas_raw,pengawas_ids)){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"pengawas_ids must be an array of numbers\"}"); return r;
+  }
+  std::optional<int> new_owner;
+  if(!new_owner_raw.empty()){
+    try{ int v=std::stoi(new_owner_raw); if(v>0) new_owner=v; }catch(...){}
+  }
+#ifdef HAS_LIBPQ
+  int uid=session_admin_id_from(req);
+  try{
+    auto cfg_db=Config::load();
+    examvan::DbPool pool(cfg_db.database_url, 10);
+    examvan::db::RealPool real(pool.sanitized_url(), 10);
+    if(auto c=real.acquire()){
+      // validasi target guru: instansi sama, active, role guru (paritas Go)
+      if(new_owner.has_value()){
+        auto t=real.exec_params(c.get(),"SELECT COALESCE(instansi,''),role,status FROM admin_users WHERE id=$1",{std::to_string(*new_owner)});
+        bool ok=t && PQresultStatus(t.get())==PGRES_TUPLES_OK && PQntuples(t.get())>0;
+        if(ok){
+          std::string ti=PQgetvalue(t.get(),0,0), tr=PQgetvalue(t.get(),0,1), ts=PQgetvalue(t.get(),0,2);
+          auto ui=real.exec_params(c.get(),"SELECT instansi FROM admin_users WHERE id=$1",{std::to_string(uid)});
+          std::string opinst=ui&&PQresultStatus(ui.get())==PGRES_TUPLES_OK&&PQntuples(ui.get())>0?PQgetvalue(ui.get(),0,0):"";
+          ok = (ti==opinst && ts=="active" && tr.find("guru")!=std::string::npos);
+        }
+        if(!ok){
+          Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"User tujuan harus Guru aktif di instansi yang sama\"}"); return r;
+        }
+      }
+      real.exec_params(c.get(),"BEGIN",{});
+      if(new_owner.has_value())
+        real.exec_params(c.get(),"UPDATE exams SET delegated_to=$1 WHERE id=$2",{std::to_string(*new_owner),std::to_string(id)});
+      else
+        real.exec_params(c.get(),"UPDATE exams SET delegated_to=NULL WHERE id=$1",{std::to_string(id)});
+      if(!pengawas_raw.empty()){
+        real.exec_params(c.get(),"DELETE FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
+        for(int pid: pengawas_ids){
+          real.exec_params(c.get(),"INSERT INTO exam_pengawas (exam_id,user_id) VALUES ($1,$2)",{std::to_string(id),std::to_string(pid)});
+        }
+      }
+      real.exec_params(c.get(),"COMMIT",{});
+      real.release(c.release());
+    }
+  }catch(...){ utils::log_error("exam_delegate_failed","id="+id_str); }
+#endif
+  // Tanpa PG: best-effort via store (delegated_to tersimpan in-memory).
+  if(new_owner.has_value()){
+    exams().update(id,[&](models::Exam& e){ e.delegated_to=new_owner; });
+  }
+  utils::log_info("exam_delegated","id="+id_str);
+  Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"message\":\"Delegasi ujian berhasil disimpan\"}"); return r;
 }
 } // namespace examvan::handlers::admin

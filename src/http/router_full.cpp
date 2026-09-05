@@ -197,6 +197,10 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/admin/api/upload", admin_api(handlers::admin::create_exam));
   r.add("PUT","/admin/api/exams/:id", admin_api(handlers::admin::update_exam));
   r.add("DELETE","/admin/api/exams/:id", admin_api(handlers::admin::delete_exam));
+  r.add("POST","/admin/api/exams/bulk-toggle", admin_api(handlers::admin::bulk_toggle_exams));
+  r.add("POST","/admin/api/exams/bulk-delete", admin_api(handlers::admin::bulk_delete_exams));
+  r.add("GET","/admin/api/exams/:exam_id/delegate-data", admin_api(handlers::admin::delegate_data));
+  r.add("POST","/admin/api/exams/:exam_id/delegate", admin_api(handlers::admin::delegate_exam));
   r.add("POST","/admin/api/exams/:exam_id/toggle", admin_api(handlers::admin::update_exam));
   r.add("POST","/admin/api/exams/:exam_id/delete", admin_api(handlers::admin::delete_exam));
   r.add("POST","/admin/api/exams/:exam_id/edit", admin_api(handlers::admin::update_exam));

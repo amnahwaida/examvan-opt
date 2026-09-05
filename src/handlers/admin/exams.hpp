@@ -16,6 +16,10 @@ Response export_xlsx(const Request& req);
 // Konfigurasi soal & kunci jawaban per exam (GET/POST /admin/api/exams/:exam_id/questions).
 Response get_exam_questions(const Request& req);
 Response save_exam_questions(const Request& req);
+Response bulk_toggle_exams(const Request& req);
+Response bulk_delete_exams(const Request& req);
+Response delegate_data(const Request& req);
+Response delegate_exam(const Request& req);
 
 /* Test-only hooks (dipanggil dari test TDD; tidak dipakai di produksi).
  * Tutorial: g_exams statis di module-level, test perlu reset antar kasus. */

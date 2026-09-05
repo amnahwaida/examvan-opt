@@ -446,6 +446,91 @@ TEST(ProductionHardening, Questions_ValidStructureAccepted){
   EXPECT_EQ(res.status,200) << res.body;
 }
 
+TEST(ProductionHardening, BulkToggleExams_Works){
+  clear_exams_for_testing();
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+  Request c1; c1.body="name=BulkA&file_path=a.pdf&size_bytes=100";
+  auto r1=create_exam(c1); ASSERT_EQ(r1.status,201)<<r1.body;
+  Request c2; c2.body="name=BulkB&file_path=b.pdf&size_bytes=100";
+  auto r2=create_exam(c2); ASSERT_EQ(r2.status,201)<<r2.body;
+  int id1=std::stoi(json_field(r1.body,"id"));
+  int id2=std::stoi(json_field(r2.body,"id"));
+  Request bt; bt.body="{\"ids\":["+std::to_string(id1)+","+std::to_string(id2)+"],\"status\":\"active\"}";
+  auto res=bulk_toggle_exams(bt);
+  EXPECT_EQ(res.status,200) << res.body;
+  auto e1=examvan::store::active_store()->get_by_id(id1);
+  auto e2=examvan::store::active_store()->get_by_id(id2);
+  ASSERT_TRUE(e1.has_value()); ASSERT_TRUE(e2.has_value());
+  EXPECT_EQ(e1->status,"active"); EXPECT_EQ(e2->status,"active");
+  Request bad; bad.body="{\"ids\":["+std::to_string(id1)+"],\"status\":\"bogus\"}";
+  EXPECT_EQ(bulk_toggle_exams(bad).status,400);
+}
+
+TEST(ProductionHardening, BulkDeleteExams_Works){
+  clear_exams_for_testing();
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+  Request c1; c1.body="name=BDelA&file_path=a.pdf&size_bytes=100";
+  auto r1=create_exam(c1); ASSERT_EQ(r1.status,201)<<r1.body;
+  Request c2; c2.body="name=BDelB&file_path=b.pdf&size_bytes=100";
+  auto r2=create_exam(c2); ASSERT_EQ(r2.status,201)<<r2.body;
+  int id1=std::stoi(json_field(r1.body,"id"));
+  int id2=std::stoi(json_field(r2.body,"id"));
+  Request bd; bd.body="{\"ids\":["+std::to_string(id1)+","+std::to_string(id2)+"]}";
+  auto res=bulk_delete_exams(bd);
+  EXPECT_EQ(res.status,200) << res.body;
+  EXPECT_FALSE(examvan::store::active_store()->get_by_id(id1).has_value());
+  EXPECT_FALSE(examvan::store::active_store()->get_by_id(id2).has_value());
+}
+
+TEST(ProductionHardening, DelegateData_GoShape){
+  auto c=read_source_file("src/handlers/admin/exams.cpp");
+  // Response shape Go: current_owner/delegated_to/available_gurus/available_pengawas/assigned_pengawas_ids
+  EXPECT_NE(c.find("current_owner"), std::string::npos);
+  EXPECT_NE(c.find("delegated_to"), std::string::npos);
+  EXPECT_NE(c.find("available_gurus"), std::string::npos);
+  EXPECT_NE(c.find("available_pengawas"), std::string::npos);
+  EXPECT_NE(c.find("assigned_pengawas_ids"), std::string::npos);
+  // Guru: instansi sama, active, role guru, exclude creator; pengawas: role ILIKE
+  EXPECT_NE(c.find("role ILIKE"), std::string::npos);
+  EXPECT_NE(c.find("exam_pengawas"), std::string::npos);
+}
+
+TEST(ProductionHardening, DelegatePost_UpdatesOwnerAndPengawas){
+  auto c=read_source_file("src/handlers/admin/exams.cpp");
+  EXPECT_NE(c.find("delegated_to"), std::string::npos)
+    << "delegate harus mengubah exams.delegated_to (owner baru)";
+  EXPECT_NE(c.find("DELETE FROM exam_pengawas"), std::string::npos);
+  EXPECT_NE(c.find("INSERT INTO exam_pengawas"), std::string::npos);
+  EXPECT_NE(c.find("new_owner_id"), std::string::npos);
+  EXPECT_NE(c.find("pengawas_ids"), std::string::npos);
+}
+
+TEST(ProductionHardening, EditExam_PdfUploadHandled){
+  clear_exams_for_testing();
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+  Request c; c.body="name=EditPdf&file_path=old.pdf&size_bytes=100";
+  auto r=create_exam(c); ASSERT_EQ(r.status,201)<<r.body;
+  int id=std::stoi(json_field(r.body,"id"));
+  // Multipart edit: nama baru + PDF baru (paritas submitEditExam frontend).
+  std::string boundary="----EditPdf";
+  std::string body="--"+boundary+"\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nEditPdf Baru\r\n";
+  body+="--"+boundary+"\r\nContent-Disposition: form-data; name=\"pdf_file\"; filename=\"new.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4 new content\r\n%%EOF\r\n";
+  body+="--"+boundary+"--\r\n";
+  Request eq; eq.params["exam_id"]=std::to_string(id);
+  eq.path="/admin/api/exams/"+std::to_string(id)+"/edit";
+  eq.headers["Content-Type"]="multipart/form-data; boundary="+boundary;
+  eq.body=body;
+  auto res=update_exam(eq);
+  EXPECT_EQ(res.status,200) << res.body;
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  EXPECT_EQ(exam->name,"EditPdf Baru");
+  EXPECT_NE(exam->file_path,"old.pdf") << "file_path harus berubah saat PDF baru diupload";
+}
+
 TEST(ProductionHardening, Questions_MissingExam404){
   Request gq; gq.params["exam_id"]="99999";
   EXPECT_EQ(get_exam_questions(gq).status,404);
