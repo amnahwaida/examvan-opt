@@ -883,9 +883,10 @@ TEST(ExamProduction, CreateExam_CreatedAtConsistent){
 }
 
 // Bug D: export_xlsx harus 501, bukan 200 dengan content palsu
-TEST(ExamProduction, ExportXlsx_Returns501NotImpl){
+TEST(ExamProduction, ExportXlsx_ReturnsValidXlsx){
   auto res=export_xlsx(Request{});
-  EXPECT_EQ(res.status,501) << "export_xlsx stub harus return 501, bukan 200 fake: " << res.body;
+  EXPECT_EQ(res.status,200) << res.body.substr(0,100);
+  EXPECT_EQ(res.body.substr(0,2), "PK") << "harus zip xlsx valid";
 }
 
 // Bug E: update_exam dengan action tidak dikenal → 400

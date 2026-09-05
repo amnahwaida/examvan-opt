@@ -8,9 +8,10 @@ TEST(Export, CsvContainsHeader) {
   EXPECT_NE(csv.find("UAS"), std::string::npos);
 }
 
-TEST(Export, XlsxPlaceholderHasPK) {
-  auto x=build_xlsx_placeholder("UAS");
+TEST(Export, XlsxHasPK) {
+  auto x=build_submissions_xlsx({});
   EXPECT_EQ(x.substr(0,2), "PK");
+  EXPECT_NE(x.find("Nama Siswa"), std::string::npos);
 }
 
 TEST(Export, HandlersReturn200) {

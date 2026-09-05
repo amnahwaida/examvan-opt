@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "handlers/admin/exams.hpp"
+#include "handlers/admin/export.hpp"
 #include "handlers/api/exams.hpp"
 #include "handlers/r2/r2.hpp"
 #include "config/config.hpp"
@@ -444,6 +445,43 @@ TEST(ProductionHardening, Questions_ValidStructureAccepted){
     "{\"number\":2,\"type\":\"short_answer\",\"key\":\"jakarta\"}]}";
   auto res=save_exam_questions(sq);
   EXPECT_EQ(res.status,200) << res.body;
+}
+
+TEST(ProductionHardening, ExportSubmissions_ReturnsValidXlsx){
+  Request eq; eq.query="tz_offset=-420";
+  auto res=export_submissions_xlsx(eq);
+  EXPECT_EQ(res.status,200) << res.body.substr(0,100);
+  EXPECT_NE(res.headers.count("Content-Type"),0u);
+  EXPECT_NE(res.headers.at("Content-Type").find("spreadsheetml"), std::string::npos);
+  // XLSX = zip: magic PK\x03\x04 + part XML.
+  EXPECT_NE(res.body.find("PK\x03\x04"), std::string::npos) << "harus zip valid";
+  EXPECT_NE(res.body.find("[Content_Types].xml"), std::string::npos);
+  EXPECT_NE(res.body.find("sheet1.xml"), std::string::npos);
+  EXPECT_NE(res.body.find("Nama Siswa"), std::string::npos) << "header paritas Go";
+  EXPECT_NE(res.headers.count("Content-Disposition"),0u);
+  auto cd=res.headers.at("Content-Disposition");
+  EXPECT_NE(cd.find("attachment"), std::string::npos) << cd;
+}
+
+TEST(ProductionHardening, ExportXlsx_Not501){
+  // Per-exam export (/admin/api/exams/:id/export) tidak boleh lagi 501.
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request eq; eq.params["id"]=std::to_string(id);
+  auto res=export_xlsx(eq);
+  EXPECT_EQ(res.status,200) << res.body.substr(0,100);
+  EXPECT_NE(res.body.find("PK\x03\x04"), std::string::npos);
+}
+
+TEST(ProductionHardening, ExportXlsx_RouteRegistered){
+  Config cfg; Router r; register_full_routes(r,cfg);
+  bool has_sub=false, has_exam=false;
+  for(auto& s: r.routes()){
+    if(s.find("submissions/export")!=std::string::npos) has_sub=true;
+    if(s.find("exams/")!=std::string::npos && s.find("/export")!=std::string::npos) has_exam=true;
+  }
+  EXPECT_TRUE(has_sub) << "route /admin/api/submissions/export harus terdaftar";
+  EXPECT_TRUE(has_exam) << "route /admin/api/exams/:id/export harus terdaftar";
 }
 
 TEST(ProductionHardening, BulkToggleExams_Works){

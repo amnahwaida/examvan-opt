@@ -119,7 +119,7 @@ TEST(P0_R2, PresignCredentialEncoding) {
 }
 
 TEST(P0_Export, XlsxIsValidZip) {
-  auto x=handlers::admin::build_xlsx_placeholder("UAS");
+  auto x=handlers::admin::build_submissions_xlsx({});
   ASSERT_GE(x.size(), 4u);
   EXPECT_EQ(x.substr(0,2), "PK") << "XLSX must be ZIP";
   EXPECT_NE(x.find("[Content_Types].xml"), std::string::npos) << "missing content types";

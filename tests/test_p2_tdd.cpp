@@ -18,9 +18,14 @@ TEST(P2_Export, CsvInjectionEscaped) {
 }
 
 TEST(P2_Export, XlsxContainsExamNameSafely) {
-  auto x = handlers::admin::build_xlsx_placeholder("Test\"Exam");
+  std::vector<examvan::handlers::admin::SubmissionRow> rows;
+  examvan::handlers::admin::SubmissionRow r;
+  r.id="1"; r.exam_name="Test\"Exam"; r.student_name="Budi";
+  rows.push_back(r);
+  auto x = handlers::admin::build_submissions_xlsx(rows);
   EXPECT_NE(x.find("Test"), std::string::npos);
   EXPECT_EQ(x.find("placeholder"), std::string::npos);
+  EXPECT_NE(x.find("&quot;"), std::string::npos) << "karakter XML wajib di-escape";
   EXPECT_GT(x.size(), 1000u);
 }
 

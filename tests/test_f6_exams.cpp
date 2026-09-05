@@ -21,7 +21,8 @@ TEST(F6Exams, CreateSuccess201) {
 TEST(F6Exams, ExportXlsxHeaders) {
   examvan::Request req;
   auto r=export_xlsx(req);
-  // ExportXlsx belum diimplementasi — 501 Not Implemented (bukan 200 fake xlsx)
-  EXPECT_EQ(r.status,501);
-  EXPECT_NE(r.body.find("NOT_IMPLEMENTED"), std::string::npos);
+  // Export XLSX nyata: 200 + zip valid + header kolom paritas Go.
+  EXPECT_EQ(r.status,200) << r.body.substr(0,100);
+  EXPECT_EQ(r.body.substr(0,2), "PK");
+  EXPECT_NE(r.body.find("Nama Siswa"), std::string::npos);
 }

@@ -225,8 +225,10 @@ TEST(ProtobufHandlers, DeleteExam_JsonStillWorks) {
 
 TEST(ProtobufHandlers, ExportXlsx_NoProtobufNeeded) {
   auto res = handlers::admin::export_xlsx(Request{});
-  // ExportXlsx belum diimplementasi — 501 Not Implemented (bukan 200 fake xlsx)
-  EXPECT_EQ(res.status, 501);
+  // Export XLSX nyata — tanpa header protobuf tetap 200 + file valid (zip).
+  EXPECT_EQ(res.status, 200) << res.body.substr(0,100);
+  EXPECT_NE(res.headers.at("Content-Type").find("spreadsheetml"), std::string::npos);
+  EXPECT_EQ(res.body.substr(0,2), "PK");
 }
 
 // ======================================================================

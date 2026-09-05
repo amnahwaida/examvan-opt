@@ -1,4 +1,5 @@
 #include "handlers/admin/exams.hpp"
+#include "handlers/admin/export.hpp"
 #include "helpers/utils.hpp"
 #include "config/config.hpp"
 #include "handlers/r2/r2.hpp"
@@ -865,10 +866,10 @@ Response delete_exam(const Request& req){
 #endif
   Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"message\":\"Ujian dihapus\"}"); return r;
 }
-Response export_xlsx(const Request&){
-  // Bug D: export_xlsx belum diimplementasi — jangan balas 200 dengan
-  // konten XLSX palsu (user mendapat file corrupt). Jelas 501 + pesan.
-  Response r; r.status=501; r.json(501,"{\"error\":\"XLSX export not implemented\",\"error_code\":\"NOT_IMPLEMENTED\"}"); return r;
+Response export_xlsx(const Request& req){
+  // Export per-ujian: delegasi ke export_submissions_xlsx (export.cpp) yang
+  // membaca :id dari params dan membangun XLSX nyata (zip + XML valid).
+  return export_submissions_xlsx(req);
 }
 // ---- Konversi jadwal WIB → UTC ISO (paritas Go SaveQuestions) ----
 // Go menerima "YYYY-MM-DD HH:MM" (Asia/Jakarta, UTC+7 tanpa DST) lalu
