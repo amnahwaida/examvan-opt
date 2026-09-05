@@ -484,8 +484,24 @@ di depan proxy Fonnte).
    OTP CT-compare, dll.
 
 ---
-*Dokumen temuan — bukan changelog. Belum ada perbaikan yang dilakukan pada
-saat dokumen ini ditulis (HEAD `1124fca`, 2026-09-06).*
+*Status perbaikan (2026-09-06): SEMUA temuan sudah diperbaiki & dikomit
+setelah dokumen ini ditulis.*
+
+| Klaster | Commit |
+|---|---|
+| M1–M6, M8, M10–M15, H1–H2, M7, M11 | `b4f0c80` |
+| C2 (gate PDF), C3 (result poll), C4 (submit job_id+start_time) | `9f6507e` |
+| C1 (strip token/file_path /api/exams) | `b4e691c` |
+| C6 (R2 lintas-layout), M9 (exam_by_token kaya+strip key) | `77662d8` |
+| C7, C8 (scope kepemilikan exam/submission di admin_api) | `d8b0b0c` |
+| C5 (CSRF mutasi admin + halaman suntik token segar) | `8ac8159` |
+
+Keterangan sisa (bukan bug, dicatat):
+- Scope instansi lintas-sekolah PENUH (C1) butuh kolom `instansi` di skema
+  exams — C7/C8 menutup IDOR via created_by/delegated_to/superadmin; dimensi
+  instansi menyusul bila skema ditambah.
+- Test suite: **681/682 hijau** (1 skip `P7_Frontend.JsGuardCount`), semua
+  commit menjaga hijau.
 
 ---
 
