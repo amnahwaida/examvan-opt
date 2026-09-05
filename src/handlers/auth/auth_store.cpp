@@ -161,7 +161,7 @@ static bool open_pool(examvan::db::RealPool& out){
   return out.connect();
 }
 
-static bool row_to_user(const PgResultPtr& r, int i, RegisteredUser& out){
+static bool row_to_user(const examvan::db::PgResultPtr& r, int i, RegisteredUser& out){
   if(!r || PQresultStatus(r.get())!=PGRES_TUPLES_OK || PQntuples(r.get())<=i) return false;
   out.id=std::stoi(PQgetvalue(r.get(),i,0));
   out.username=PQgetvalue(r.get(),i,1);

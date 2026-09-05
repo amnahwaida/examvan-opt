@@ -20,6 +20,7 @@
 #ifdef HAS_UWEBSOCKETS
 #include "App.h"
 struct WsData { std::string room; bool privileged; std::string id; std::shared_ptr<examvan::Client> client; };
+struct UwsRequestState { std::string body; bool responded{false}; bool aborted{false}; };
 #endif
 
 namespace examvan::server {
@@ -404,7 +405,7 @@ bool Server::listen(const ServerOpts& opts) {
       // jadi tanpa flag "responded" kode 413 bisa mengeksekusi end() dua kali,
       // dan tanpa buffer per-request sisa body bocor ke request berikutnya pada
       // koneksi keep-alive yang sama.
-      auto st = std::make_shared<struct { std::string body; bool responded=false; bool aborted=false; }>();
+      auto st = std::make_shared<UwsRequestState>();
       res->onAborted([res, st](){
         st->aborted = true;
         st->responded = true;
