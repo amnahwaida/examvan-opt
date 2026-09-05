@@ -5,8 +5,8 @@
 namespace examvan::handlers::auth {
 
 /* Render halaman public auth (/register, /register/confirm, /forgot-password,
- * /reset-password) dari template SOURCE templates/public/*.html — bukan file
- * rendered — karena blok {{if .email_enabled}} / {{if .turnstile_enabled}}
+ * /reset-password) dari template SOURCE templates/public/<nama>.html — bukan
+ * file rendered — karena blok {{if .email_enabled}} / {{if .turnstile_enabled}}
  * harus dievaluasi terhadap setting runtime (file rendered di-capture saat
  * semua setting mati). Urutan pemrosesan:
  *   1. {{if .X}}...{{else}}...{{end}} → sisi yang aktif (nesting-aware),

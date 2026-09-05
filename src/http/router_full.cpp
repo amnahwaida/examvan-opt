@@ -14,6 +14,9 @@
 #include "handlers/auth/login.hpp"
 #include "middleware/auth.hpp"
 #include "handlers/auth/logout.hpp"
+#include "handlers/auth/register.hpp"
+#include "handlers/auth/recovery.hpp"
+#include "handlers/auth/auth_helpers.hpp"
 #include "handlers/public/template_helper.hpp"
 #include "session/cookie.hpp"
 #include "session/csrf.hpp"
@@ -111,46 +114,33 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/admin/login", [cfg](const Request& req){ return handlers::auth::login_handler(req, cfg); });
   r.add("POST","/logout", [](const Request& req){ return handlers::auth::logout_handler(req); });
   r.add("GET","/logout", [](const Request& req){ return handlers::auth::logout_page(req); });
-  r.add("GET","/register", [](const Request& req){
-    std::string csrf=generate_csrf_token();
-    std::string html=handlers::public_::render_public_template("register","2.7.2");
-    size_t p=html.find("CSRF_PLACEHOLDER");
-    while(p!=std::string::npos){ html.replace(p,16,csrf); p=html.find("CSRF_PLACEHOLDER",p+csrf.size()); }
-    Response res; res.status=200; res.headers["Content-Type"]="text/html";
-    std::string ck="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax"; if(!Config::load().is_development()) ck+="; Secure";
-    res.headers["Set-Cookie"]=ck;
-    res.body=html.empty()?"<html>Register</html>":html; return res;
-  });
-  r.add("POST","/register", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
-  r.add("GET","/register/confirm", [](const Request&){
-    std::string html=handlers::public_::render_public_template("register_confirm","2.7.2");
-    Response res; res.status=200; res.headers["Content-Type"]="text/html";
-    res.body=html.empty()?"<html>Confirm</html>":html; return res;
-  });
-  r.add("POST","/register/confirm", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
-  r.add("POST","/register/resend", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
-  r.add("GET","/forgot-password", [](const Request& req){
-    std::string csrf=generate_csrf_token();
-    std::string html=handlers::public_::render_public_template("forgot_password","2.7.2");
-    size_t p=html.find("CSRF_PLACEHOLDER");
-    while(p!=std::string::npos){ html.replace(p,16,csrf); p=html.find("CSRF_PLACEHOLDER",p+csrf.size()); }
-    Response res; res.status=200; res.headers["Content-Type"]="text/html";
-    std::string ck="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax"; if(!Config::load().is_development()) ck+="; Secure";
-    res.headers["Set-Cookie"]=ck;
-    res.body=html.empty()?"<html>Forgot</html>":html; return res;
-  });
-  r.add("POST","/forgot-password", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
-  r.add("GET","/reset-password", [](const Request& req){
-    std::string csrf=generate_csrf_token();
-    std::string html=handlers::public_::render_public_template("reset_password","2.7.2");
-    size_t p=html.find("CSRF_PLACEHOLDER");
-    while(p!=std::string::npos){ html.replace(p,16,csrf); p=html.find("CSRF_PLACEHOLDER",p+csrf.size()); }
-    Response res; res.status=200; res.headers["Content-Type"]="text/html";
-    std::string ck="csrf_token="+csrf+"; Path=/; HttpOnly; SameSite=Lax"; if(!Config::load().is_development()) ck+="; Secure";
-    res.headers["Set-Cookie"]=ck;
-    res.body=html.empty()?"<html>Reset</html>":html; return res;
-  });
-  r.add("POST","/reset-password", [](const Request&){ Response res; res.json(200,"{\"ok\":true}"); return res; });
+  r.add("GET","/register", handlers::auth::register_page);
+  /* Mutasi public di-rate-limit per-IP (5/menit per alur) — paritas Go
+   * middleware rate limit. RateLimiter statis per alur. */
+  static middleware::RateLimiter g_auth_register_rl(5, std::chrono::minutes(1));
+  static middleware::RateLimiter g_auth_confirm_rl(5, std::chrono::minutes(1));
+  static middleware::RateLimiter g_auth_resend_rl(5, std::chrono::minutes(1));
+  static middleware::RateLimiter g_auth_forgot_rl(5, std::chrono::minutes(1));
+  static middleware::RateLimiter g_auth_reset_rl(5, std::chrono::minutes(1));
+  auto auth_ip=[](const Request& req)->std::string{ return handlers::auth::client_ip(req); };
+  auto rl_wrap=[auth_ip](middleware::RateLimiter& lim, Handler h)->Handler{
+    return [&lim, auth_ip, h](const Request& req)->Response{
+      if(!lim.allow(auth_ip(req))){
+        Response rr; rr.status=429;
+        rr.json(429,"{\"error\":\"Terlalu banyak permintaan. Coba lagi nanti.\"}");
+        return rr;
+      }
+      return h(req);
+    };
+  };
+  r.add("POST","/register", rl_wrap(g_auth_register_rl, [cfg](const Request& req){ return handlers::auth::register_handler(req, cfg); }));
+  r.add("GET","/register/confirm", handlers::auth::register_confirm_page);
+  r.add("POST","/register/confirm", rl_wrap(g_auth_confirm_rl, [cfg](const Request& req){ return handlers::auth::register_confirm_handler(req, cfg); }));
+  r.add("POST","/register/resend", rl_wrap(g_auth_resend_rl, [cfg](const Request& req){ return handlers::auth::resend_otp(req, cfg); }));
+  r.add("GET","/forgot-password", handlers::auth::forgot_password_page);
+  r.add("POST","/forgot-password", rl_wrap(g_auth_forgot_rl, [cfg](const Request& req){ return handlers::auth::forgot_password_handler(req, cfg); }));
+  r.add("GET","/reset-password", handlers::auth::reset_password_page);
+  r.add("POST","/reset-password", rl_wrap(g_auth_reset_rl, [cfg](const Request& req){ return handlers::auth::reset_password_handler(req, cfg); }));
   r.add("GET","/download", handlers::public_::download_page);
   r.add("GET","/download/apk", handlers::public_::download_apk);
   r.add("GET","/download/app/:id", handlers::public_::download_system_app);

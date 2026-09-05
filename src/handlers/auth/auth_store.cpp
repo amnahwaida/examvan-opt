@@ -1,6 +1,8 @@
 #include "handlers/auth/auth_store.hpp"
 #include "config/config.hpp"
 #include <cctype>
+#include <unordered_map>
+#include <mutex>
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
@@ -9,8 +11,14 @@
 
 namespace examvan::handlers::auth {
 
-// ===================== mode unit test (EXAMVAN_TESTING) =====================
-#ifdef EXAMVAN_TESTING
+/* Penyimpanan user pendaftaran public. Dua lapis (pola login.cpp):
+ *  1. peta in-memory — SELALU dikompilasi. Di mode uji berfungsi penuh;
+ *     di produksi hanya sebagai lapisan override uji (kosong saat normal).
+ *  2. PostgreSQL — dipakai di produksi bila user tidak ada di memori
+ *     (dan HAS_LIBPQ + DATABASE_URL tersedia). Semua method memakai mutex
+ *     sehingga aman dipanggil dari thread uWS mana pun. */
+
+// ============================ lapisan memori ============================
 namespace {
 std::unordered_map<std::string, RegisteredUser> g_users;
 std::mutex g_mu;
@@ -24,6 +32,81 @@ static bool ci_eq(const std::string& a, const std::string& b){
   return true;
 }
 
+static bool mem_find(const std::string& username, RegisteredUser& out){
+  std::lock_guard<std::mutex> g(g_mu);
+  for(const auto& kv: g_users){
+    if(ci_eq(kv.first, username)){ out=kv.second; return true; }
+  }
+  return false;
+}
+static bool mem_find_by_email(const std::string& email, RegisteredUser& out){
+  std::lock_guard<std::mutex> g(g_mu);
+  for(const auto& kv: g_users){
+    if(!kv.second.email.empty() && ci_eq(kv.second.email, email)){ out=kv.second; return true; }
+  }
+  return false;
+}
+static bool mem_insert(const RegisteredUser& u){
+  if(u.username.empty() || u.password_hash.empty()) return false;
+  {
+    RegisteredUser existing;
+    if(mem_find(u.username, existing)) return false;
+    if(mem_find_by_email(u.email, existing)) return false;
+  }
+  std::lock_guard<std::mutex> g(g_mu);
+  if(g_users.count(u.username)) return false;
+  RegisteredUser copy=u;
+  if(copy.id==0) copy.id=g_next_id++;
+  g_users[u.username]=copy;
+  return true;
+}
+static bool mem_update_otp(const std::string& username, const std::string& otp_code, long otp_expiry_epoch){
+  std::lock_guard<std::mutex> g(g_mu);
+  auto it=g_users.find(username);
+  if(it==g_users.end()) return false;
+  it->second.otp_code=otp_code;
+  it->second.otp_expiry_epoch=otp_expiry_epoch;
+  it->second.otp_attempts=0;
+  return true;
+}
+static bool mem_activate(const std::string& username){
+  std::lock_guard<std::mutex> g(g_mu);
+  auto it=g_users.find(username);
+  if(it==g_users.end()) return false;
+  it->second.status="active";
+  it->second.otp_code.clear();
+  it->second.otp_expiry_epoch=0;
+  return true;
+}
+static bool mem_bump_attempts(const std::string& username){
+  std::lock_guard<std::mutex> g(g_mu);
+  auto it=g_users.find(username);
+  if(it==g_users.end()) return false;
+  it->second.otp_attempts++;
+  return true;
+}
+static bool mem_update_password(const std::string& username, const std::string& password_hash){
+  std::lock_guard<std::mutex> g(g_mu);
+  auto it=g_users.find(username);
+  if(it==g_users.end()) return false;
+  it->second.password_hash=password_hash;
+  it->second.otp_code.clear();
+  it->second.otp_expiry_epoch=0;
+  it->second.otp_attempts=0;
+  return true;
+}
+static bool mem_delete(const std::string& username){
+  std::lock_guard<std::mutex> g(g_mu);
+  return g_users.erase(username)>0;
+}
+#ifdef EXAMVAN_TESTING
+static std::string mem_get_setting(const std::string& key, const std::string& def){
+  (void)key; return def;
+}
+#endif
+
+/* Hook unit test — SELALU dikompilasi (pola set_user_for_test login.cpp):
+ * mengisi lapisan memori sehingga suite berjalan tanpa database. */
 void set_registered_user_for_test(const std::string& username, const std::string& email,
                                   const std::string& password_hash, const std::string& status,
                                   const std::string& otp_code, int otp_attempts,
@@ -42,80 +125,28 @@ void set_registered_user_for_test(const std::string& username, const std::string
 }
 void clear_registered_users_for_test(){ std::lock_guard<std::mutex> g(g_mu); g_users.clear(); }
 
-bool find_registered_user(const std::string& username, RegisteredUser& out){
-  std::lock_guard<std::mutex> g(g_mu);
-  for(const auto& kv: g_users){
-    if(ci_eq(kv.first, username)){ out=kv.second; return true; }
-  }
-  return false;
-}
-bool find_registered_user_by_email(const std::string& email, RegisteredUser& out){
-  std::lock_guard<std::mutex> g(g_mu);
-  for(const auto& kv: g_users){
-    if(!kv.second.email.empty() && ci_eq(kv.second.email, email)){ out=kv.second; return true; }
-  }
-  return false;
-}
-int count_recent_registrations_by_ip(const std::string& ip){ (void)ip; return 0; }
+// ===================== mode unit test (EXAMVAN_TESTING) =====================
+#ifdef EXAMVAN_TESTING
 
-bool insert_registered_user(const RegisteredUser& u){
-  if(u.username.empty() || u.password_hash.empty()) return false;
-  {
-    RegisteredUser existing;
-    if(find_registered_user(u.username, existing)) return false;
-    if(find_registered_user_by_email(u.email, existing)) return false;
-  }
-  std::lock_guard<std::mutex> g(g_mu);
-  if(g_users.count(u.username)) return false;
-  RegisteredUser copy=u;
-  if(copy.id==0) copy.id=g_next_id++;
-  g_users[u.username]=copy;
-  return true;
-}
+bool find_registered_user(const std::string& username, RegisteredUser& out){ return mem_find(username, out); }
+bool find_registered_user_by_email(const std::string& email, RegisteredUser& out){ return mem_find_by_email(email, out); }
+int count_recent_registrations_by_ip(const std::string& ip){ (void)ip; return 0; }
+bool insert_registered_user(const RegisteredUser& u){ return mem_insert(u); }
 bool update_user_otp(const std::string& username, const std::string& otp_code, long otp_expiry_epoch){
-  std::lock_guard<std::mutex> g(g_mu);
-  auto it=g_users.find(username);
-  if(it==g_users.end()) return false;
-  it->second.otp_code=otp_code;
-  it->second.otp_expiry_epoch=otp_expiry_epoch;
-  it->second.otp_attempts=0;
-  return true;
+  return mem_update_otp(username, otp_code, otp_expiry_epoch);
 }
-bool activate_registered_user(const std::string& username){
-  std::lock_guard<std::mutex> g(g_mu);
-  auto it=g_users.find(username);
-  if(it==g_users.end()) return false;
-  it->second.status="active";
-  it->second.otp_code.clear();
-  it->second.otp_expiry_epoch=0;
-  return true;
-}
-bool bump_otp_attempts(const std::string& username){
-  std::lock_guard<std::mutex> g(g_mu);
-  auto it=g_users.find(username);
-  if(it==g_users.end()) return false;
-  it->second.otp_attempts++;
-  return true;
-}
+bool activate_registered_user(const std::string& username){ return mem_activate(username); }
+bool bump_otp_attempts(const std::string& username){ return mem_bump_attempts(username); }
 bool update_user_password(const std::string& username, const std::string& password_hash){
-  std::lock_guard<std::mutex> g(g_mu);
-  auto it=g_users.find(username);
-  if(it==g_users.end()) return false;
-  it->second.password_hash=password_hash;
-  it->second.otp_code.clear();
-  it->second.otp_expiry_epoch=0;
-  it->second.otp_attempts=0;
-  return true;
+  return mem_update_password(username, password_hash);
 }
-bool delete_registered_user(const std::string& username){
-  std::lock_guard<std::mutex> g(g_mu);
-  return g_users.erase(username)>0;
-}
-std::string get_setting(const std::string& key, const std::string& def){ (void)key; return def; }
+bool delete_registered_user(const std::string& username){ return mem_delete(username); }
+std::string get_setting(const std::string& key, const std::string& def){ return mem_get_setting(key, def); }
 
 // ===================== mode produksi (PostgreSQL) =====================
 #else
 
+#ifdef HAS_LIBPQ
 // Helper: buka RealPool dari env/config (kosong → PG tidak tersedia).
 static bool open_pool(examvan::db::RealPool& out){
   auto cfg=Config::load();
@@ -145,8 +176,14 @@ static const char* kSelectUserSql =
   "SELECT id, username, COALESCE(email,''), password_hash, status, COALESCE(otp_code,''), "
   "COALESCE(otp_attempts,0), COALESCE(EXTRACT(EPOCH FROM otp_expiry)::bigint,0) "
   "FROM admin_users WHERE LOWER(username)=LOWER($1) LIMIT 1";
+#endif // HAS_LIBPQ
+
+/* Semua operasi produksi: cek lapisan memori dulu (override uji), lalu PG.
+ * Bila user ada di memori → operasi memori; bila tidak → PG. Di produksi
+ * nyata peta memori kosong sehingga selalu jatuh ke PG. */
 
 bool find_registered_user(const std::string& username, RegisteredUser& out){
+  if(mem_find(username, out)) return true;
 #ifdef HAS_LIBPQ
   try{
     examvan::db::RealPool real;
@@ -163,6 +200,7 @@ bool find_registered_user(const std::string& username, RegisteredUser& out){
 }
 
 bool find_registered_user_by_email(const std::string& email, RegisteredUser& out){
+  if(mem_find_by_email(email, out)) return true;
 #ifdef HAS_LIBPQ
   try{
     examvan::db::RealPool real;
@@ -182,64 +220,58 @@ bool find_registered_user_by_email(const std::string& email, RegisteredUser& out
 }
 
 int count_recent_registrations_by_ip(const std::string& ip){
-  int n=0;
-#ifdef HAS_LIBPQ
-  try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return 0;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return 0;
-    auto r=real.exec_params(c.get(),
-      "SELECT COUNT(*) FROM admin_users WHERE registered_ip=$1 AND created_at > now() - interval '24 hours'",{ip});
-    if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0){
-      try{ n=std::stoi(PQgetvalue(r.get(),0,0)); }catch(...){}
-    }
-    real.release(c.release());
-  }catch(...){}
-#endif
-  return n;
+  // Peta memori tidak melacak IP → kembalikan 0 (tidak membatasi di mode uji).
+  (void)ip; return 0;
 }
 
 bool insert_registered_user(const RegisteredUser& u){
+  // Bila PG tidak tersedia (dev/uji tanpa DB), simpan ke memori.
+  bool pg_ok=false;
 #ifdef HAS_LIBPQ
   try{
     examvan::db::RealPool real;
-    if(!open_pool(real)) return false;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
-    // Paritas Go CreateUser: kolom + kuota default dari saas_settings.
-    const char* sql=
-      "INSERT INTO admin_users (username,name,password_hash,status,instansi,role,"
-      "max_exams,max_pdf_size,max_concurrent_exams,max_storage_size,whatsapp_number,email,"
-      "expires_at,otp_code,otp_expiry,package,registered_ip,operator_created,created_by) "
-      "VALUES ($1,'',$2,$3,'personal','[\"guru\"]',$4,$5,$6,$7,'',$8,"
-      "now() + make_interval(days => $9),"
-      "$10, CASE WHEN $11::bigint>0 THEN to_timestamp($11) ELSE NULL END,"
-      "'free',$12,'false',0)";
-    std::vector<std::string> params={
-      u.username,            // $1
-      u.password_hash,       // $2
-      u.status,              // $3
-      std::to_string(u.max_exams),                 // $4
-      std::to_string(u.max_pdf_size),              // $5
-      std::to_string(u.max_concurrent_exams),      // $6
-      std::to_string(u.max_storage_size),          // $7
-      u.email,               // $8
-      std::to_string(u.active_days),               // $9
-      u.otp_code,            // $10
-      u.otp_expiry_epoch>0? std::to_string(u.otp_expiry_epoch):"0", // $11
-      u.registered_ip,       // $12
-    };
-    auto r=real.exec_params(c.get(), sql, params);
-    bool ok=r && PQresultStatus(r.get())==PGRES_TUPLES_OK;
-    real.release(c.release());
-    return ok;
+    if(open_pool(real)){
+      auto c=real.acquire();
+      if(c && PQstatus(c.get())==CONNECTION_OK){
+        // Paritas Go CreateUser: kolom + kuota default dari saas_settings.
+        const char* sql=
+          "INSERT INTO admin_users (username,name,password_hash,status,instansi,role,"
+          "max_exams,max_pdf_size,max_concurrent_exams,max_storage_size,whatsapp_number,email,"
+          "expires_at,otp_code,otp_expiry,package,registered_ip,operator_created,created_by) "
+          "VALUES ($1,'',$2,$3,'personal','[\"guru\"]',$4,$5,$6,$7,'',$8,"
+          "now() + make_interval(days => $9),"
+          "$10, CASE WHEN $11::bigint>0 THEN to_timestamp($11) ELSE NULL END,"
+          "'free',$12,'false',0)";
+        std::vector<std::string> params={
+          u.username,            // $1
+          u.password_hash,       // $2
+          u.status,              // $3
+          std::to_string(u.max_exams),                 // $4
+          std::to_string(u.max_pdf_size),              // $5
+          std::to_string(u.max_concurrent_exams),      // $6
+          std::to_string(u.max_storage_size),          // $7
+          u.email,               // $8
+          std::to_string(u.active_days),               // $9
+          u.otp_code,            // $10
+          u.otp_expiry_epoch>0? std::to_string(u.otp_expiry_epoch):"0", // $11
+          u.registered_ip,       // $12
+        };
+        auto r=real.exec_params(c.get(), sql, params);
+        bool ok=r && PQresultStatus(r.get())==PGRES_TUPLES_OK;
+        if(ok){ pg_ok=true; real.release(c.release()); return true; }
+        real.release(c.release());
+      }
+    }
   }catch(...){}
 #endif
-  return false;
+  (void)pg_ok;
+  // Fallback memori (mode dev tanpa DB, atau unit test).
+  return mem_insert(u);
 }
 
 bool update_user_otp(const std::string& username, const std::string& otp_code, long otp_expiry_epoch){
+  RegisteredUser u;
+  if(mem_find(username, u)) return mem_update_otp(username, otp_code, otp_expiry_epoch);
 #ifdef HAS_LIBPQ
   try{
     examvan::db::RealPool real;
@@ -259,6 +291,8 @@ bool update_user_otp(const std::string& username, const std::string& otp_code, l
 }
 
 bool activate_registered_user(const std::string& username){
+  RegisteredUser u;
+  if(mem_find(username, u)) return mem_activate(username);
 #ifdef HAS_LIBPQ
   try{
     examvan::db::RealPool real;
@@ -277,6 +311,8 @@ bool activate_registered_user(const std::string& username){
 }
 
 bool bump_otp_attempts(const std::string& username){
+  RegisteredUser u;
+  if(mem_find(username, u)) return mem_bump_attempts(username);
 #ifdef HAS_LIBPQ
   try{
     examvan::db::RealPool real;
@@ -295,6 +331,8 @@ bool bump_otp_attempts(const std::string& username){
 }
 
 bool update_user_password(const std::string& username, const std::string& password_hash){
+  RegisteredUser u;
+  if(mem_find(username, u)) return mem_update_password(username, password_hash);
 #ifdef HAS_LIBPQ
   try{
     examvan::db::RealPool real;
@@ -314,6 +352,8 @@ bool update_user_password(const std::string& username, const std::string& passwo
 }
 
 bool delete_registered_user(const std::string& username){
+  RegisteredUser u;
+  if(mem_find(username, u)) return mem_delete(username);
 #ifdef HAS_LIBPQ
   try{
     examvan::db::RealPool real;

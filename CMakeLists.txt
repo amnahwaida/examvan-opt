@@ -141,6 +141,12 @@ add_library(examvan_core STATIC
   src/handlers/admin/export.cpp
   src/handlers/auth/login.cpp
   src/handlers/auth/logout.cpp
+  src/handlers/auth/auth_helpers.cpp
+  src/handlers/auth/auth_store.cpp
+  src/handlers/auth/template_renderer.cpp
+  src/handlers/auth/register.cpp
+  src/handlers/auth/recovery.cpp
+  src/helpers/smtp.cpp
   src/queue/submission_queue.cpp
   src/jobs/jobs.cpp
   src/server/server.cpp
@@ -245,6 +251,7 @@ add_executable(examvan-tests
   tests/test_docker_runtime_tdd.cpp
   tests/test_audit_fix_tdd.cpp
   tests/test_csrf_fix_tdd.cpp
+  tests/test_public_auth_tdd.cpp
   tests/test_exam_creation_prod_tdd.cpp
   tests/test_exam_full_prod_tdd.cpp
   tests/test_production_hardening_tdd.cpp
