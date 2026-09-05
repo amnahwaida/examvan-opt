@@ -23,4 +23,12 @@ Response time_handler(const Request& req);
 /* Test-only hook: tangkap SubmissionJob yang akan di-enqueue oleh submit_exam
  * (tanpa Redis nyata). Dipanggil dari test TDD; tidak dipakai di produksi. */
 void set_submit_enqueue_hook_for_test(std::function<void(const queue::SubmissionJob&)> hook);
+
+/* Test-only hook: ganti device_approved() (tanpa PG). nullptr = pakai PG.
+ * Dipakai C2 (gate PDF) & submit/result di test TDD. */
+void set_device_approved_hook_for_test(std::function<bool(int, const std::string&)> hook);
+
+/* Test-only hook (C3): ganti lookup hasil worker per job_id (tanpa Redis).
+ * Return "done:<score>" / "failed:<msg>" / "" (pending). nullptr = pakai Redis. */
+void set_result_lookup_hook_for_test(std::function<std::string(const std::string&)> hook);
 } // namespace examvan::handlers::api

@@ -625,28 +625,26 @@ TEST(ProtobufHandlers, SubmitExam_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, ExamResult_ValidProtobufResponse) {
+  // C3: result poll credential-gated — tanpa token/device → 401 JSON.
   int eid=prepare_started_exam_id_for_api();
   ASSERT_GT(eid,0);
   auto req = pb_accept();
   req.params["exam_id"] = std::to_string(eid);
   auto res = handlers::api::exam_result(req);
-  EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::ExamResultResponse pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid ExamResultResponse protobuf";
-  EXPECT_TRUE(pb.success());
+  EXPECT_EQ(res.status, 401) << res.body;
 }
 
 TEST(ProtobufHandlers, ExamResult_JsonStillWorks) {
+  // C3: dengan token sah → pending (belum ada hasil worker), bukan stub.
   int eid=prepare_started_exam_id_for_api();
   ASSERT_GT(eid,0);
+  auto exam=store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
   Request req; req.params["exam_id"] = std::to_string(eid);
+  req.headers["X-Exam-Token"]=exam->token;
   auto res = handlers::api::exam_result(req);
-  EXPECT_EQ(res.status, 200);
-  // exam_result returns {exam_id, score} — no explicit "success" field
-  EXPECT_NE(res.body.find("\"exam_id\":"+std::to_string(eid)), std::string::npos);
-  EXPECT_NE(res.body.find("\"score\""), std::string::npos);
+  EXPECT_EQ(res.status, 200) << res.body;
+  EXPECT_NE(res.body.find("\"status\":\"pending\""), std::string::npos) << res.body;
 }
 
 // ======================================================================

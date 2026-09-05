@@ -324,8 +324,14 @@ static bool exam_schedule_ended(const models::Exam& e){
   if(!t) return false;
   return std::chrono::system_clock::now() > *t + std::chrono::seconds(60);
 }
+// Test-only hook (C2): ganti device_approved tanpa PG.
+static std::function<bool(int,const std::string&)> g_device_approved_hook;
+void set_device_approved_hook_for_test(std::function<bool(int, const std::string&)> hook){
+  g_device_approved_hook = std::move(hook);
+}
 // Device sudah di-approve? (paritas Go: SELECT status FROM exam_approvals ...)
 static bool device_approved(int exam_id, const std::string& mac){
+  if(g_device_approved_hook) return g_device_approved_hook(exam_id, mac);
 #ifdef HAS_LIBPQ
   try{
     auto cfg=Config::load();
@@ -609,6 +615,12 @@ Response exam_by_token(const Request& req){
 }
 
 Response exam_pdf(const Request& req){
+  // C2: gate paritas Go (ExamPDF). Naskah soal TIDAK boleh diunduh hanya
+  // dengan exam_id: wajib X-Exam-Token (401), exam aktif+dimulai+token cocok
+  // (404/403), belum lewat jadwal (403), DAN device punya baris 'approved'
+  // (403) — gate approval inilah yang membuat alur persetujuan pengawas punya
+  // makna di sisi server (token statis dipakai sekelas, jadi token saja
+  // tidak cukup).
   auto it=req.params.find("exam_id");
   if(it==req.params.end() || it->second.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"exam id required\"}"); return r; }
   int exam_id=0;
@@ -616,6 +628,37 @@ Response exam_pdf(const Request& req){
   auto exam=store::active_store()->get_by_id(exam_id);
   if(!exam){ Response r; r.status=404; r.json(404,"{\"error\":\"exam not found\"}"); return r; }
   if(exam->file_path.empty()){ Response r; r.status=404; r.json(404,"{\"error\":\"file not found\"}"); return r; }
+  // Token wajib (header X-Exam-Token / query token).
+  std::string token=req.headers.count("X-Exam-Token")?req.headers.at("X-Exam-Token"):"";
+  if(token.empty()){ auto q=helpers::parse_form(req.query); if(q.count("token")) token=q["token"]; }
+  if(token.empty()){
+    Response r; r.status=401; r.json(401,"{\"success\":false,\"error\":\"Token tidak disertakan\"}"); return r;
+  }
+  if(!exam->is_active() || !exam->exam_started_at.has_value() || exam->exam_started_at->empty() ||
+     !examtoken::matches(*exam, token)){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Ujian tidak ditemukan\"}"); return r;
+  }
+  if(exam_schedule_ended(*exam)){
+    Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"Waktu ujian telah berakhir\"}"); return r;
+  }
+  // Gate approval device: X-Device-Id header (Android "DEVICE:<AndroidId>",
+  // desktop MAC) atau query mac_address. Perangkat tanpa baris 'approved' —
+  // termasuk siswa sah yang belum lewat gate persetujuan — ditolak.
+  std::string device;
+  for(auto& kv: req.headers){
+    std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch);
+    if(k=="x-device-id"){ device=kv.second; break; }
+  }
+  if(device.empty()){ auto q=helpers::parse_form(req.query); if(q.count("mac_address")) device=q["mac_address"]; }
+  device=sanitize_mac_like_go(device);
+  if(device.empty() || device=="unknown" || !device_approved(exam_id, device)){
+    Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"Perangkat belum disetujui pengawas\"}"); return r;
+  }
+  // Rate limit per exam+device (paritas Go pdfRateLimit; 10/60s).
+  std::string ip=req.headers.count("X-Forwarded-For")?req.headers.at("X-Forwarded-For"):"";
+  if(!rate_limit_allowed("ratelimit:pdf:", exam_id, device, ip, 10)){
+    Response r; r.status=429; r.json(429,"{\"success\":false,\"error\":\"Terlalu banyak request. Silakan coba lagi nanti.\"}"); return r;
+  }
   auto cfg=Config::load();
   r2::R2Config rc{cfg.r2_access_key, cfg.r2_secret_key, cfg.r2_endpoint, cfg.r2_bucket};
   if(!rc.enabled()){
@@ -684,6 +727,10 @@ Response submit_exam(const Request& req){
   job.answers=parse_string_map(json_raw_value(req.body,"answers"));
   job.identity_data=parse_string_map(json_raw_value(req.body,"identity_data"));
   job.enqueued_at=helpers::format_iso_utc(std::chrono::system_clock::now());
+  // C4: paritas Go sanitizeStartTime — start_time dari body dipertahankan
+  // (sebelumnya selalu kosong → submissions.start_time hilang).
+  job.start_time=json_string_field(req.body,"start_time");
+  if(job.start_time.empty()){ auto form=helpers::parse_form(req.body); if(form.count("start_time")) job.start_time=form["start_time"]; }
   if(job.student_name.empty()){
     auto form=helpers::parse_form(req.body);
     if(form.count("student_name")) job.student_name=form["student_name"];
@@ -696,6 +743,14 @@ Response submit_exam(const Request& req){
   } else {
     enqueue_job_to_redis(job);
   }
+  // C4: respons menyertakan job_id (rahasia per-submission untuk poll /result)
+  // + congrats_message (paritas Go SubmitExam). Android membaca job_id dari
+  // respons ini untuk poll hasil.
+  std::string congrats=exam->congrats_message.value_or("");
+  if(!congrats.empty()){
+    // Batasi panjang (paritas Go: field bebas, tapi jangan sampai respons raksasa).
+    if(congrats.size()>2000) congrats.resize(2000);
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::SubmitExamResponse pb;
@@ -705,49 +760,128 @@ Response submit_exam(const Request& req){
     Response r; r.status=202; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.status=202; r.json(202,"{\"success\":true,\"status\":\"queued\"}"); return r;
+  Response r; r.status=202;
+  r.json(202,"{\"success\":true,\"status\":\"queued\",\"job_id\":\""+json_escape(job.job_id)
+    +"\",\"congrats_message\":"+(congrats.empty()?"null":"\""+json_escape(congrats)+"\"")+"}");
+  return r;
+}
+
+// Test-only hook (C3): ganti lookup hasil worker (Redis) tanpa Redis nyata.
+// Return: "done:<score>", "failed:<msg>", atau "" (tidak ditemukan / pending).
+static std::function<std::string(const std::string& /*job_id*/)> g_result_lookup_hook;
+void set_result_lookup_hook_for_test(std::function<std::string(const std::string&)> hook){
+  g_result_lookup_hook = std::move(hook);
 }
 
 Response exam_result(const Request& req){
+  // C3: implementasi poll hasil paritas Go ExamResult. Endpoint ini TIDAK
+  // publik: butuh X-Exam-Token atau device masih 'approved' (kalau tidak,
+  // skor + tautan identitas siswa bocor sebelum guru memublikasikan hasil).
   auto it=req.params.find("exam_id");
   if(it==req.params.end() || it->second.empty()){
-#ifdef HAS_PROTOBUF
-    if(middleware::is_protobuf_accept(req)){
-      examvan::v1::ExamResultResponse pb;
-      pb.set_success(false);
-      pb.set_error("exam id required");
-      std::string out; pb.SerializeToString(&out);
-      Response r; r.status=400; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-    }
-#endif
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"exam id required\"}"); return r;
   }
   int exam_id=0;
-  try{ exam_id=std::stoi(it->second); }catch(...){}
-  // Validasi: exam harus ada (bukan sukses palsu untuk id sembarang).
-  if(!store::active_store()->get_by_id(exam_id).has_value()){
-#ifdef HAS_PROTOBUF
-    if(middleware::is_protobuf_accept(req)){
-      examvan::v1::ExamResultResponse pb;
-      pb.set_success(false);
-      pb.set_error("exam not found");
-      std::string out; pb.SerializeToString(&out);
-      Response r; r.status=404; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+  try{ exam_id=std::stoi(it->second); }catch(...){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"ID ujian tidak valid\"}"); return r;
+  }
+  auto exam=store::active_store()->get_by_id(exam_id);
+  if(!exam){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Ujian tidak ditemukan\"}"); return r;
+  }
+  // Param poll (paritas Go): job_id + mac_address + identity_data (query).
+  auto q=helpers::parse_form(req.query);
+  auto getp=[&](const std::string& k)->std::string{ auto f=q.find(k); return f!=q.end()?f->second:""; };
+  std::string job_id=getp("job_id");
+  std::string mac=req.headers.count("X-Device-Id")?req.headers.at("X-Device-Id"):getp("mac_address");
+  std::string identity=getp("identity_data");
+  mac=sanitize_mac_like_go(mac);
+  // --- Access gate ---
+  std::string token=req.headers.count("X-Exam-Token")?req.headers.at("X-Exam-Token"):getp("token");
+  bool access_ok = (!token.empty() && examtoken::matches(*exam, token));
+  if(!access_ok && mac!="unknown") access_ok = device_approved(exam_id, mac);
+  if(!access_ok){
+    Response r; r.status=401; r.json(401,"{\"success\":false,\"error\":\"Akses ditolak\"}"); return r;
+  }
+  // --- Rate limit per exam+MAC dan per-exam (paritas Go) ---
+  std::string ip=req.headers.count("X-Forwarded-For")?req.headers.at("X-Forwarded-For"):"";
+  if(!rate_limit_allowed("ratelimit:result:", exam_id, mac, ip, 60)){
+    Response r; r.status=429; r.json(429,"{\"success\":false,\"error\":\"Terlalu banyak request. Silakan coba lagi nanti.\"}"); return r;
+  }
+  // --- Redis result dulu (hasil worker otoritatif) ---
+  if(!job_id.empty()){
+    std::string raw;
+    if(g_result_lookup_hook){
+      raw=g_result_lookup_hook(job_id);
+    } else {
+#ifdef HAS_HIREDIS
+      try{
+        auto cfg=Config::load();
+        auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
+        if(ctx){
+          auto* r=(redisReply*)redisCommand(ctx.get(),"GET %s%s", queue::kResultKeyPrefix, job_id.c_str());
+          if(r && r->type==REDIS_REPLY_STRING) raw.assign(r->str, r->len);
+          if(r) freeReplyObject(r);
+        }
+      }catch(...){}
+#endif
     }
-#endif
-    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
+    if(!raw.empty()){
+      // Parse {"job_id":..,"success":true,"score":87.5,"message":..}
+      bool success = raw.find("\"success\":true")!=std::string::npos ||
+                     raw.find("\"success\": true")!=std::string::npos;
+      std::string score_s;
+      {
+        std::string needle="\"score\":";
+        size_t p=raw.find(needle);
+        if(p!=std::string::npos){
+          size_t s=raw.find_first_not_of(" \t",p+needle.size());
+          if(s!=std::string::npos && raw[s]!='n' && raw[s]!='N'){
+            size_t e=raw.find_first_of(",}",s);
+            score_s=raw.substr(s, e-s);
+          }
+        }
+      }
+      if(success){
+        Response r; r.status=200;
+        r.json(200,"{\"success\":true,\"status\":\"done\",\"score\":"+(score_s.empty()?"null":score_s)
+          +",\"message\":\"Jawaban berhasil disimpan\"}");
+        return r;
+      }
+      Response r; r.status=200; r.json(200,"{\"success\":false,\"status\":\"failed\",\"score\":null,\"message\":\"Gagal memproses jawaban\"}");
+      return r;
+    }
   }
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(req)){
-    examvan::v1::ExamResultResponse pb;
-    pb.set_success(true);
-    pb.set_exam_id(exam_id);
-    pb.set_has_score(false);
-    std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
-  }
+  // --- Fallback DB: submission yang sudah ditulis worker (Redis result bisa
+  //     kedaluwarsa). Butuh job_id (rahasia per-submission) + mac. ---
+  if(!job_id.empty() && mac!="unknown" && !mac.empty()){
+#ifdef HAS_LIBPQ
+    try{
+      auto cfg=Config::load();
+      examvan::DbPool pool(cfg.database_url, 10);
+      examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
+      if(auto c=real.acquire()){
+        auto res=real.exec_params(c.get(),
+          "SELECT score FROM submissions WHERE exam_id=$1 AND mac_address=$2 AND answers_json IS NOT NULL AND answers_json != ''"
+          " ORDER BY created_at DESC LIMIT 1",
+          {std::to_string(exam_id), mac});
+        if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0){
+          std::string score=PQgetvalue(res.get(),0,0);
+          if(!score.empty()){
+            Response r; r.status=200;
+            r.json(200,"{\"success\":true,\"status\":\"done\",\"score\":"+score+",\"message\":\"Jawaban berhasil disimpan\"}");
+            return r;
+          }
+        }
+        real.release(c.release());
+      }
+    }catch(...){}
 #endif
-  Response r; r.json(200,"{\"success\":true,\"exam_id\":"+std::to_string(exam_id)+",\"score\":null,\"has_score\":false}"); return r;
+    (void)identity;
+  }
+  // --- Belum ada hasil durable → pending ---
+  Response r; r.status=200; r.json(200,"{\"success\":true,\"status\":\"pending\",\"score\":null,\"message\":\"Jawaban masih diproses\"}");
+  return r;
 }
 
 // Paritas Go sanitizeMAC (handlers/api/exams.go): hanya alnum + ':' '.' '-'

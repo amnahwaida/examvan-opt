@@ -109,10 +109,12 @@ TEST(Api, FullRouterHas40Routes) {
 }
 
 TEST(Api, PresignPdfRedirect) {
-  // Exam tidak ada → 404 (bukan redirect ke URL palsu r2.example.com).
+  using examvan::handlers::api::set_device_approved_hook_for_test;
+  set_device_approved_hook_for_test(nullptr);
+  // C2: tanpa token → 401; tanpa device approved → 403; exam tidak ada → 404.
   Request missing; missing.params["exam_id"]="99999";
   EXPECT_EQ(handlers::api::exam_pdf(missing).status,404);
-  // Exam valid → 302 ke presigned URL asli (bukan domain placeholder).
+  // Exam valid + token + device approved → 302 presigned (bukan placeholder).
   examvan::handlers::admin::clear_exams_for_testing();
   setenv("R2_ACCESS_KEY_ID","test",1);
   setenv("R2_SECRET_ACCESS_KEY","test",1);
@@ -124,9 +126,29 @@ TEST(Api, PresignPdfRedirect) {
   auto p=created.body.find("\"id\":");
   ASSERT_NE(p,std::string::npos);
   p+=5; auto e=created.body.find_first_of(",}",p);
-  Request req; req.params["exam_id"]=created.body.substr(p,e-p);
-  auto res=handlers::api::exam_pdf(req);
-  EXPECT_EQ(res.status,302);
+  std::string id=created.body.substr(p,e-p);
+  int eid=std::stoi(id);
+  // Aktifkan + mulai (token hanya valid bila exam active & started).
+  examvan::store::active_store()->update(eid, [](examvan::models::Exam& ex){
+    ex.status="active"; ex.exam_started_at="2026-08-31T00:00:00Z";
+  });
+  auto exam=examvan::store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
+  // Tanpa token → 401.
+  Request no_tok; no_tok.params["exam_id"]=id;
+  EXPECT_EQ(handlers::api::exam_pdf(no_tok).status,401);
+  // Token ada tapi device belum approved → 403.
+  Request unauth; unauth.params["exam_id"]=id;
+  unauth.headers["X-Exam-Token"]=exam->token;
+  EXPECT_EQ(handlers::api::exam_pdf(unauth).status,403);
+  // Token + device approved → 302 ke presigned URL asli.
+  set_device_approved_hook_for_test([](int, const std::string& mac){ return mac=="AA:BB:CC:DD:EE:FF"; });
+  Request ok; ok.params["exam_id"]=id;
+  ok.headers["X-Exam-Token"]=exam->token;
+  ok.headers["X-Device-Id"]="AA:BB:CC:DD:EE:FF";
+  auto res=handlers::api::exam_pdf(ok);
+  EXPECT_EQ(res.status,302) << res.body;
   EXPECT_EQ(res.headers["Location"].find("r2.example.com"), std::string::npos) << "stub placeholder r2.example.com harus hilang: " << res.headers["Location"];
   EXPECT_NE(res.headers["Location"].find("X-Amz-Signature="), std::string::npos) << res.headers["Location"];
+  set_device_approved_hook_for_test(nullptr);
 }

@@ -195,13 +195,24 @@ TEST(ProductionHardening, ExamPdf_RedirectsToPresignedUrl){
   auto created=create_exam(cr);
   ASSERT_EQ(created.status,201) << created.body;
   std::string id=json_field(created.body,"id");
+  int eid=std::stoi(id);
+  // C2: gate — exam harus active+started, token cocok, device approved.
+  examvan::store::active_store()->update(eid, [](examvan::models::Exam& e){
+    e.status="active"; e.exam_started_at="2026-08-31T00:00:00Z";
+  });
+  auto exam=examvan::store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
+  set_device_approved_hook_for_test([](int,const std::string&){ return true; });
   Request req; req.params["exam_id"]=id;
+  req.headers["X-Exam-Token"]=exam->token;
+  req.headers["X-Device-Id"]="AA:BB:CC:DD:EE:FF";
   auto res=exam_pdf(req);
-  EXPECT_EQ(res.status,302);
+  EXPECT_EQ(res.status,302) << res.body;
   std::string loc=res.headers["Location"];
   EXPECT_NE(loc.find("https://test.r2.cloudflarestorage.com"), std::string::npos) << loc;
   EXPECT_NE(loc.find("exams/"+id+"/soal.pdf"), std::string::npos) << loc;
   EXPECT_NE(loc.find("X-Amz-Signature="), std::string::npos) << loc;
+  set_device_approved_hook_for_test(nullptr);
   reset_r2_flags();
 }
 
@@ -216,10 +227,21 @@ TEST(ProductionHardening, ExamPdf_R2NotConfigured503){
   auto created=create_exam(cr);
   ASSERT_EQ(created.status,201) << created.body;
   std::string id=json_field(created.body,"id");
+  int eid=std::stoi(id);
+  // C2: gate dulu (active+started+token+approved) supaya sampai ke cek R2.
+  examvan::store::active_store()->update(eid, [](examvan::models::Exam& e){
+    e.status="active"; e.exam_started_at="2026-08-31T00:00:00Z";
+  });
+  auto exam=examvan::store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
+  set_device_approved_hook_for_test([](int,const std::string&){ return true; });
   Request req; req.params["exam_id"]=id;
+  req.headers["X-Exam-Token"]=exam->token;
+  req.headers["X-Device-Id"]="AA:BB:CC:DD:EE:FF";
   auto res=exam_pdf(req);
   EXPECT_EQ(res.status,503);
   EXPECT_NE(res.body.find("R2_NOT_CONFIGURED"), std::string::npos) << res.body;
+  set_device_approved_hook_for_test(nullptr);
   set_r2_endpoint("https://test.r2.cloudflarestorage.com");
 }
 
@@ -700,11 +722,30 @@ TEST(ProductionHardening, ExamResult_MissingExam404){
 TEST(ProductionHardening, ExamResult_ValidExam200){
   int id=create_started_exam_id();
   ASSERT_GT(id,0);
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  // C3: endpoint credential-gated — tanpa token/approved device → 401.
+  Request anon; anon.params["exam_id"]=std::to_string(id);
+  EXPECT_EQ(exam_result(anon).status,401) << anon.body;
+  // Token cocok + job_id dengan hasil worker → done+score.
+  set_result_lookup_hook_for_test([](const std::string& jid){
+    return jid=="JOB1" ? "{\"success\":true,\"score\":87.5}" : "";
+  });
   Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]=exam->token;
+  rq.query="job_id=JOB1";
   auto res=exam_result(rq);
   EXPECT_EQ(res.status,200) << res.body;
-  EXPECT_NE(res.body.find("\"exam_id\":"+std::to_string(id)), std::string::npos) << res.body;
-  EXPECT_NE(res.body.find("\"score\""), std::string::npos) << res.body;
+  EXPECT_NE(res.body.find("\"status\":\"done\""), std::string::npos) << res.body;
+  EXPECT_NE(res.body.find("87.5"), std::string::npos) << res.body;
+  // job_id tak dikenal → pending.
+  Request pend; pend.params["exam_id"]=std::to_string(id);
+  pend.headers["X-Exam-Token"]=exam->token;
+  pend.query="job_id=NOPE";
+  auto resp=exam_result(pend);
+  EXPECT_EQ(resp.status,200) << resp.body;
+  EXPECT_NE(resp.body.find("\"status\":\"pending\""), std::string::npos) << resp.body;
+  set_result_lookup_hook_for_test(nullptr);
 }
 
 TEST(ProductionHardening, AccessLog_MissingExam404){
