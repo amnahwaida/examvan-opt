@@ -1,5 +1,6 @@
 #include "http/handlers.hpp"
 #include "session/cookie.hpp"
+#include "websocket/socketio.hpp"
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -79,7 +80,10 @@ void register_routes(Router& r, const Config& cfg){
   r.add("GET","/ws/:room_id", [](const Request& req){
     auto it=req.params.find("room_id");
     std::string room=it!=req.params.end()?it->second:"";
-    Response res; res.json(101,"{\"upgrade\":\"websocket\",\"room\":\""+room+"\"}"); return res;
+    // json_string: room dari path bisa mengandung " → escape (dulu injeksi
+    // JSON refleksi di body respons; jalur WS asli lewat g_app->ws, stub ini
+    // hanya untuk GET HTTP biasa).
+    Response res; res.json(101,"{\"upgrade\":\"websocket\",\"room\":"+examvan::json_string(room)+"}"); return res;
   });
 }
 
