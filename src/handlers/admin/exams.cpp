@@ -436,6 +436,18 @@ Response create_exam(const Request& req){
   exam.token=token;
   exam.active_token=token; // Go parity: active_token = token saat create
   exam.status="inactive";
+  // created_by dari session admin (diinjeksi admin_api dari cookie terverifikasi).
+  // Tanpa ini INSERT gagal FK exams_created_by_fkey → admin_users(id) di schema
+  // Go (sebelumnya selalu 0 → create_exam tak pernah berhasil di DB nyata).
+  const std::string kInternalAdminIdHeader = "X-Internal-Admin-Id";
+  for(const auto& kv:req.headers){
+    std::string k=kv.first; for(char& c:k) c=tolower((unsigned char)c);
+    std::string want=kInternalAdminIdHeader; for(char& c:want) c=tolower((unsigned char)c);
+    if(k==want){
+      try{ exam.created_by=std::stoi(kv.second); }catch(...){}
+      break;
+    }
+  }
   exam.security_level="medium";
   exam.created_at=helpers::format_iso_utc(std::chrono::system_clock::now());
   if(!exams().add(exam)){

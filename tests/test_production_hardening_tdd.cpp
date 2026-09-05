@@ -18,6 +18,7 @@
 #include <deque>
 #include <fstream>
 #include <sstream>
+#include <mutex>
 #include <thread>
 #include <chrono>
 using namespace examvan;
@@ -341,8 +342,11 @@ TEST(ProductionHardening, SubmitExam_ValidStartedExam_202WithHook){
     hooked=true; hooked_exam=j.exam_id;
     auto it=j.answers.find("1"); if(it!=j.answers.end()) hooked_answers=it->second;
   });
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
   Request rq; rq.params["exam_id"]=std::to_string(id);
   rq.headers["Content-Type"]="application/json";
+  rq.headers["X-Exam-Token"]=exam->token;
   rq.body="{\"student_name\":\"Ani\",\"answers\":{\"1\":\"A\"}}";
   auto res=submit_exam(rq);
   EXPECT_EQ(res.status,202) << res.body;
@@ -371,6 +375,52 @@ TEST(ProductionHardening, SubmitExam_NotStarted403){
   auto res=submit_exam(rq);
   EXPECT_EQ(res.status,403) << res.body;
   EXPECT_NE(res.body.find("exam not started"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, SubmitExam_NoToken401){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.body="{\"student_name\":\"Ani\"}"; // tanpa token
+  auto res=submit_exam(rq);
+  EXPECT_EQ(res.status,401) << res.body;
+  EXPECT_NE(res.body.find("Token tidak disertakan"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, SubmitExam_WrongToken404){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]="WRONGTOKEN";
+  rq.body="{\"student_name\":\"Ani\",\"mac_address\":\"aa:bb\"}";
+  auto res=submit_exam(rq);
+  EXPECT_EQ(res.status,404) << res.body;
+  EXPECT_NE(res.body.find("Ujian tidak ditemukan"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, SubmitExam_Ended403UnlessApproved){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  examvan::store::active_store()->update(id,[](examvan::models::Exam& e){
+    e.end_time="2020-01-01T00:00:00Z"; // sudah lewat + grace 60s
+  });
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]=exam->token;
+  rq.body="{\"student_name\":\"Ani\",\"mac_address\":\"aa:bb\"}";
+  auto res=submit_exam(rq);
+  // Tanpa DB, device_approved=false → 403 (paritas Go: hanya device approved
+  // boleh recovery-resubmit lewat deadline).
+  EXPECT_EQ(res.status,403) << res.body;
+  EXPECT_NE(res.body.find("Waktu ujian telah berakhir"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, SubmitExam_TokenValidationGo){
+  auto c=read_source_file("src/handlers/api/exams.cpp");
+  EXPECT_NE(c.find("Token tidak disertakan"), std::string::npos) << "401 token kosong (Go)";
+  EXPECT_NE(c.find("Waktu ujian telah berakhir"), std::string::npos) << "403 ended (Go)";
+  EXPECT_NE(c.find("exam_approvals"), std::string::npos) << "approved lookup (Go)";
 }
 
 TEST(ProductionHardening, ExamResult_MissingExam404){
@@ -532,16 +582,79 @@ TEST(ProductionHardening, AccessLog_MacSanitizedGo){
 
 TEST(ProductionHardening, CompleteExam_MissingExam404){
   Request rq; rq.params["exam_id"]="99999";
+  rq.headers["X-Exam-Token"]="TOKEN";
+  rq.body="mac_address=aa:bb";
   EXPECT_EQ(complete_exam(rq).status,404);
+}
+
+TEST(ProductionHardening, CompleteExam_NoToken401){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.body="mac_address=aa:bb";
+  auto res=complete_exam(rq);
+  EXPECT_EQ(res.status,401) << res.body;
+  EXPECT_NE(res.body.find("Token tidak disertakan"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, CompleteExam_NoMac400){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]=exam->token;
+  auto res=complete_exam(rq);
+  EXPECT_EQ(res.status,400) << res.body;
+  EXPECT_NE(res.body.find("MAC address diperlukan"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, CompleteExam_WrongToken404){
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]="WRONGTOKEN";
+  rq.body="mac_address=aa:bb";
+  auto res=complete_exam(rq);
+  EXPECT_EQ(res.status,404) << res.body;
+}
+
+TEST(ProductionHardening, CompleteExam_NotActive404){
+  clear_exams_for_testing();
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+  Request cr; cr.body="name=NotActiveComp&file_path=soal.pdf&size_bytes=100";
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]=exam->token;
+  rq.body="mac_address=aa:bb";
+  auto res=complete_exam(rq);
+  EXPECT_EQ(res.status,404) << res.body;
 }
 
 TEST(ProductionHardening, CompleteExam_ValidExam200){
   int id=create_started_exam_id();
   ASSERT_GT(id,0);
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
   Request rq; rq.params["exam_id"]=std::to_string(id);
+  rq.headers["X-Exam-Token"]=exam->token;
+  rq.body="mac_address=aa:bb";
   auto res=complete_exam(rq);
   EXPECT_EQ(res.status,200) << res.body;
   EXPECT_NE(res.body.find("\"completed\":true"), std::string::npos) << res.body;
+}
+
+TEST(ProductionHardening, CompleteExam_ParityGo){
+  auto c=read_source_file("src/handlers/api/exams.cpp");
+  EXPECT_NE(c.find("Token tidak disertakan"), std::string::npos) << "401 token kosong (Go)";
+  EXPECT_NE(c.find("MAC address diperlukan"), std::string::npos) << "400 tanpa MAC (Go)";
+  EXPECT_NE(c.find("\"heartbeat:\""), std::string::npos) << "DEL heartbeat key (presence offline)";
+  EXPECT_NE(c.find("DEL"), std::string::npos);
 }
 
 TEST(ProductionHardening, RequestApproval_NoToken400){
@@ -588,6 +701,31 @@ TEST(ProductionHardening, RequestApproval_PersistsGo){
     << "request_approval harus benar-benar INSERT ke exam_approvals (bukan stub)";
   EXPECT_NE(c.find("ON CONFLICT (exam_id, mac_address)"), std::string::npos);
   EXPECT_NE(c.find("RETURNING status"), std::string::npos);
+}
+
+TEST(ProductionHardening, RequestApproval_NumericJsonExamIdAccepted){
+  // Klien nyata (app) mengirim "exam_id":<angka> — bukan string. json_string_field
+  // hanya membaca nilai ber-quote → 400 "exam id required" (bug ditemukan smoke test).
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  Request rq;
+  rq.body="{\"exam_id\":"+std::to_string(id)+",\"mac_address\":\"aa:bb:cc\",\"token\":\""+exam->token+"\"}";
+  auto res=request_approval(rq);
+  EXPECT_EQ(res.status,200) << res.body;
+}
+
+TEST(ProductionHardening, RequestApproval_BooleanResetAccepted){
+  // Go memakai field reset bool (JSON true/false tanpa quote) — jangan 400/fallback.
+  int id=create_started_exam_id();
+  ASSERT_GT(id,0);
+  auto exam=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam.has_value());
+  Request rq;
+  rq.body="{\"exam_id\":"+std::to_string(id)+",\"mac_address\":\"aa:bb:cc\",\"token\":\""+exam->token+"\",\"reset\":true}";
+  auto res=request_approval(rq);
+  EXPECT_EQ(res.status,200) << res.body;
 }
 
 // ----------------------------------------------------------------------
@@ -898,23 +1036,31 @@ TEST(ProductionHardening, E2E_FullFlow_UploadStartSubmitScoreResult){
   rq.headers["Content-Type"]="application/json";
   rq.body="{\"student_name\":\"Budi\",\"exam_number\":\"01\",\"student_class\":\"XII-A\","
           "\"mac_address\":\"aa:bb:cc:dd\",\"answers\":{\"1\":\"A\",\"2\":\"C\"}}";
+  auto exam_for_token=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(exam_for_token.has_value());
+  rq.headers["X-Exam-Token"]=exam_for_token->token;
   auto submit_res=submit_exam(rq);
   ASSERT_EQ(submit_res.status,202) << submit_res.body;
   ASSERT_FALSE(captured.job_id.empty());
   set_submit_enqueue_hook_for_test(nullptr);
 
   // 5) Worker score: queue in-memory + scorer pakai questions_json exam.
+  // Worker.start() menjalankan 8 thread worker yang berbagi q_store/results
+  // secara konkuren — semua akses HARUS disinkronkan mutex (tanpa ini data
+  // race: pop_front() menghancurkan string saat front() menyalinnya).
   std::deque<std::string> q_store;
   std::map<std::string,std::string> results;
+  std::mutex q_mu, r_mu;
   queue::SubmissionQueue q(
-    [&](const std::string&, const std::string& v){ q_store.push_back(v); },
+    [&](const std::string&, const std::string& v){ std::lock_guard<std::mutex> g(q_mu); q_store.push_back(v); },
     [&](const std::string&, int)->std::optional<std::string>{
+      std::lock_guard<std::mutex> g(q_mu);
       if(q_store.empty()) return std::nullopt;
       auto v=q_store.front(); q_store.pop_front(); return v;
     },
-    [&](const std::string& k, const std::string& v){ results[k]=v; }
+    [&](const std::string& k, const std::string& v){ std::lock_guard<std::mutex> g(r_mu); results[k]=v; }
   );
-  q_store.push_back(captured.to_json());
+  { std::lock_guard<std::mutex> g(q_mu); q_store.push_back(captured.to_json()); }
   auto scorer_fn=[](const queue::SubmissionJob& job)->std::optional<double>{
     auto ex=examvan::store::active_store()->get_by_id(job.exam_id);
     if(!ex) return std::nullopt;
@@ -924,10 +1070,16 @@ TEST(ProductionHardening, E2E_FullFlow_UploadStartSubmitScoreResult){
   w.start();
   const std::string result_key=std::string(queue::kResultKeyPrefix)+captured.job_id;
   int waited=0;
-  while(results.find(result_key)==results.end() && waited<200){
+  bool found=false;
+  while(waited<200){
+    {
+      std::lock_guard<std::mutex> g(r_mu);
+      if(results.find(result_key)!=results.end()){ found=true; break; }
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(25)); waited++;
   }
   w.stop();
+  std::lock_guard<std::mutex> g(r_mu);
   auto it=results.find(result_key);
   ASSERT_NE(it, results.end()) << "worker harus menulis result utk job " << captured.job_id;
   EXPECT_NE(it->second.find("\"success\":true"), std::string::npos) << it->second;
@@ -1002,4 +1154,55 @@ TEST(ProductionHardening, Heartbeat_AccessLogAndFlusherGo){
   EXPECT_NE(q.find("INSERT INTO student_access_logs"), std::string::npos);
   auto m=read_source_file("src/main.cpp");
   EXPECT_NE(m.find("HeartbeatFlusher"), std::string::npos) << "flusher harus di-start di main";
+}
+
+// ----------------------------------------------------------------------
+// Smoke test menemukan bug produksi nyata: create_exam TIDAK pernah mengisi
+// created_by, padahal schema Go punya FK exams_created_by_fkey → admin_users(id).
+// INSERT selalu gagal (silent) → response menyesatkan "custom_token already in
+// use" (409) padahal akar masalahnya FK violation. Fix: admin_api menginjeksi
+// X-Internal-Admin-Id dari session terverifikasi; create_exam memakainya.
+// ----------------------------------------------------------------------
+
+TEST(ProductionHardening, CreateExam_SetsCreatedByFromSessionHeader){
+  clear_exams_for_testing();
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+  Request cr; cr.body="name=CreatedByTest&file_path=soal.pdf&size_bytes=100";
+  cr.headers["X-Internal-Admin-Id"]="42";
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  auto saved=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(saved.has_value());
+  EXPECT_EQ(saved->created_by,42) << "created_by harus diambil dari session admin";
+}
+
+TEST(ProductionHardening, CreateExam_CreatedByDefaultsZeroWithoutHeader){
+  clear_exams_for_testing();
+  setenv("EXAMVAN_R2_TESTMODE","1",1);
+  set_r2_endpoint("https://test.r2.cloudflarestorage.com");
+  Request cr; cr.body="name=CreatedByDefault&file_path=soal.pdf&size_bytes=100";
+  auto created=create_exam(cr);
+  ASSERT_EQ(created.status,201) << created.body;
+  int id=std::stoi(json_field(created.body,"id"));
+  auto saved=examvan::store::active_store()->get_by_id(id);
+  ASSERT_TRUE(saved.has_value());
+  EXPECT_EQ(saved->created_by,0);
+}
+
+TEST(ProductionHardening, AdminApiWrapper_InjectsSessionAdminId){
+  auto c=read_source_file("src/http/router_full.cpp");
+  EXPECT_NE(c.find("X-Internal-Admin-Id"), std::string::npos)
+    << "admin_api harus menginjeksi admin_id session ke handler";
+  // Nilai harus berasal dari session terverifikasi, bukan header klien.
+  size_t p=c.find("X-Internal-Admin-Id");
+  ASSERT_NE(p,std::string::npos);
+  EXPECT_NE(c.rfind("admin_id",p), std::string::npos)
+    << "header diisi dari SessionData.admin_id (bukan nilai klien)";
+  auto e=read_source_file("src/handlers/admin/exams.cpp");
+  EXPECT_NE(e.find("X-Internal-Admin-Id"), std::string::npos)
+    << "create_exam harus membaca header internal admin id";
+  EXPECT_NE(e.find("created_by"), std::string::npos)
+    << "create_exam harus mengisi exam.created_by";
 }

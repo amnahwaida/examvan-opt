@@ -402,12 +402,17 @@ Response request_approval(const Request& req){
     if(form.count("token")) token=form["token"];
   }
   // ---- Parse & validasi payload (paritas Go RequestApproval) ----
-  std::string exam_id_s=json_string_field(req.body,"exam_id");
+  // json_raw_value: klien nyata mengirim exam_id sebagai ANGKA ("exam_id":2)
+  // dan reset sebagai boolean (true/false tanpa quote) — json_string_field
+  // hanya membaca nilai ber-quote dan gagal → 400 palsu (bug ditemukan smoke test).
+  std::string exam_id_s=json_raw_value(req.body,"exam_id");
   std::string mac=json_string_field(req.body,"mac_address");
   std::string sname=json_string_field(req.body,"student_name");
   std::string snum=json_string_field(req.body,"exam_number");
   std::string sclass=json_string_field(req.body,"student_class");
-  std::string reset_s=json_string_field(req.body,"reset");
+  std::string reset_s=json_raw_value(req.body,"reset");
+  if(exam_id_s.empty()) exam_id_s=json_string_field(req.body,"exam_id");
+  if(reset_s.empty()) reset_s=json_string_field(req.body,"reset");
   if(exam_id_s.empty()){
     auto form=helpers::parse_form(req.body);
     if(form.count("exam_id")) exam_id_s=form["exam_id"];
@@ -641,14 +646,29 @@ Response submit_exam(const Request& req){
   if(!exam->is_active() || !exam->exam_started_at.has_value() || exam->exam_started_at->empty()){
     Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"exam not started\",\"message\":\"Ujian belum dimulai\"}"); return r;
   }
+  // MAC untuk rate limit + approved lookup.
+  std::string sub_mac=json_string_field(req.body,"mac_address");
+  if(sub_mac.empty()){ auto form=helpers::parse_form(req.body); if(form.count("mac_address")) sub_mac=form["mac_address"]; }
+  std::string sub_ip=req.headers.count("X-Forwarded-For")?req.headers.at("X-Forwarded-For"):"";
   // Rate limit per exam+MAC (paritas Go ratelimit:submit: 10/60s).
-  {
-    std::string rl_mac=json_string_field(req.body,"mac_address");
-    if(rl_mac.empty()){ auto form=helpers::parse_form(req.body); if(form.count("mac_address")) rl_mac=form["mac_address"]; }
-    std::string rl_ip=req.headers.count("X-Forwarded-For")?req.headers.at("X-Forwarded-For"):"";
-    if(!rate_limit_allowed("ratelimit:submit:", exam_id, rl_mac, rl_ip, 10)){
-      Response r; r.status=429; r.json(429,"{\"success\":false,\"error\":\"Terlalu banyak percobaan submit. Silakan coba lagi nanti.\"}"); return r;
+  if(!rate_limit_allowed("ratelimit:submit:", exam_id, sub_mac, sub_ip, 10)){
+    Response r; r.status=429; r.json(429,"{\"success\":false,\"error\":\"Terlalu banyak percobaan submit. Silakan coba lagi nanti.\"}"); return r;
+  }
+  // Token (paritas Go): X-Exam-Token / token query; kosong → 401.
+  std::string sub_token=req.headers.count("X-Exam-Token")?req.headers.at("X-Exam-Token"):"";
+  if(sub_token.empty()){ auto q=helpers::parse_form(req.query); if(q.count("token")) sub_token=q["token"]; }
+  if(sub_token.empty()){
+    Response r; r.status=401; r.json(401,"{\"success\":false,\"error\":\"Token tidak disertakan\"}"); return r;
+  }
+  // Schedule ended: hanya device approved boleh recovery-resubmit (Go).
+  if(exam_schedule_ended(*exam)){
+    if(!device_approved(exam_id, sub_mac)){
+      Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"Waktu ujian telah berakhir\"}"); return r;
     }
+  }
+  // Token cocok ATAU device approved (toleransi rotasi token, paritas Go).
+  if(!examtoken::matches(*exam, sub_token) && !device_approved(exam_id, sub_mac)){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Ujian tidak ditemukan\"}"); return r;
   }
   // Bangun job nyata (identitas + jawaban) lalu enqueue ke queue Redis.
   queue::SubmissionJob job;
@@ -881,9 +901,43 @@ Response complete_exam(const Request& req){
   try{ exam_id=std::stoi(it->second); }catch(...){
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"invalid exam id\"}"); return r;
   }
-  if(!store::active_store()->get_by_id(exam_id).has_value()){
-    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
+  // MAC wajib (paritas Go CompleteExam).
+  std::string mac=json_string_field(req.body,"mac_address");
+  if(mac.empty()){ auto form=helpers::parse_form(req.body); if(form.count("mac_address")) mac=form["mac_address"]; }
+  mac=sanitize_mac_like_go(mac);
+  if(mac.empty() || mac=="unknown"){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"MAC address diperlukan\"}"); return r;
   }
+  // Token: X-Exam-Token → body → query (paritas Go).
+  std::string token=req.headers.count("X-Exam-Token")?req.headers.at("X-Exam-Token"):"";
+  if(token.empty()){ auto form=helpers::parse_form(req.body); if(form.count("token")) token=form["token"]; }
+  if(token.empty()){ auto q=helpers::parse_form(req.query); if(q.count("token")) token=q["token"]; }
+  if(token.empty()){
+    Response r; r.status=401; r.json(401,"{\"success\":false,\"error\":\"Token tidak disertakan\"}"); return r;
+  }
+  // Rate limit per exam+MAC (paritas Go presence bucket 10/60s).
+  std::string ip=req.headers.count("X-Forwarded-For")?req.headers.at("X-Forwarded-For"):"";
+  if(!rate_limit_allowed("ratelimit:presence:", exam_id, mac, ip, 10)){
+    Response r; r.status=429; r.json(429,"{\"success\":false,\"error\":\"Terlalu banyak request. Silakan coba lagi nanti.\"}"); return r;
+  }
+  // Exam harus aktif + token cocok (paritas Go: complete TANPA toleransi
+  // approved — hanya token yang valid yang boleh menghapus presence).
+  auto exam=store::active_store()->get_by_id(exam_id);
+  if(!exam || !exam->is_active() || !examtoken::matches(*exam, token)){
+    Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Ujian tidak ditemukan\"}"); return r;
+  }
+  // Hapus heartbeat key → siswa langsung tampil offline (paritas Go).
+#ifdef HAS_HIREDIS
+  try{
+    auto cfg=Config::load();
+    auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
+    if(ctx){
+      const std::string hb_key="heartbeat:"+std::to_string(exam_id)+":"+mac;
+      auto* r=(redisReply*)redisCommand(ctx.get(),"DEL %s", hb_key.c_str());
+      if(r) freeReplyObject(r);
+    }
+  }catch(...){ /* best-effort: presence key TTL 5m akan kadaluarsa sendiri */ }
+#endif
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::CompleteExamResponse pb;

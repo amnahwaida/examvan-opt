@@ -602,9 +602,12 @@ TEST(ProtobufHandlers, RequestApproval_JsonStillWorks) {
 TEST(ProtobufHandlers, SubmitExam_ValidProtobufResponse) {
   int eid=prepare_started_exam_id_for_api();
   ASSERT_GT(eid,0);
+  auto exam=store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
   auto req = pb_accept();
   req.method = "POST";
   req.params["exam_id"] = std::to_string(eid);
+  req.headers["X-Exam-Token"] = exam->token;
   auto res = handlers::api::submit_exam(req);
   EXPECT_EQ(res.status, 202);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -618,7 +621,10 @@ TEST(ProtobufHandlers, SubmitExam_ValidProtobufResponse) {
 TEST(ProtobufHandlers, SubmitExam_JsonStillWorks) {
   int eid=prepare_started_exam_id_for_api();
   ASSERT_GT(eid,0);
+  auto exam=store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
   Request req; req.method = "POST"; req.params["exam_id"] = std::to_string(eid);
+  req.headers["X-Exam-Token"] = exam->token;
   auto res = handlers::api::submit_exam(req);
   EXPECT_EQ(res.status, 202);
   EXPECT_NE(res.body.find("\"status\":\"queued\""), std::string::npos);
@@ -695,9 +701,13 @@ TEST(ProtobufHandlers, AccessLog_JsonStillWorks) {
 TEST(ProtobufHandlers, CompleteExam_ValidProtobufResponse) {
   int eid=prepare_started_exam_id_for_api();
   ASSERT_GT(eid,0);
+  auto exam=store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
   auto req = pb_accept();
   req.method = "POST";
   req.params["exam_id"] = std::to_string(eid);
+  req.headers["X-Exam-Token"] = exam->token;
+  req.body="mac_address=aa:bb";
   auto res = handlers::api::complete_exam(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
@@ -711,7 +721,11 @@ TEST(ProtobufHandlers, CompleteExam_ValidProtobufResponse) {
 TEST(ProtobufHandlers, CompleteExam_JsonStillWorks) {
   int eid=prepare_started_exam_id_for_api();
   ASSERT_GT(eid,0);
+  auto exam=store::active_store()->get_by_id(eid);
+  ASSERT_TRUE(exam.has_value());
   Request req; req.method = "POST"; req.params["exam_id"] = std::to_string(eid);
+  req.headers["X-Exam-Token"] = exam->token;
+  req.body="mac_address=aa:bb";
   auto res = handlers::api::complete_exam(req);
   EXPECT_EQ(res.status, 200);
   EXPECT_NE(res.body.find("\"completed\":true"), std::string::npos);

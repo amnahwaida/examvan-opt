@@ -46,15 +46,21 @@ void register_full_routes(Router& r, const Config& cfg){
       std::string prev=cfg.secret_prev;
       auto it=req.headers.find("Cookie");
       bool ok=false;
+      SessionData sess;
       if(it!=req.headers.end()){
-        if(prev.empty()) ok=verify_session_cookie(key,it->second).has_value();
-        else ok=verify_session_cookie_dual(key,prev,it->second).has_value();
-        if(!ok) ok=middleware::is_authenticated(req,key);
+        if(prev.empty()){ auto s=verify_session_cookie(key,it->second); ok=s.has_value(); if(ok) sess=*s; }
+        else { auto s=verify_session_cookie_dual(key,prev,it->second); ok=s.has_value(); if(ok) sess=*s; }
+        if(!ok) ok=middleware::is_authenticated(req,key,&sess);
       }
       if(!ok){
         Response rr; rr.status=401; rr.json(401,"{\"success\":false,\"message\":\"unauthorized\"}"); return rr;
       }
-      return h(req);
+      // Teruskan admin_id session ke handler via header internal (nilai dari
+      // session terverifikasi, meng-overwrite apapun yang dikirim klien).
+      // create_exam memakainya untuk created_by (FK exams_created_by_fkey).
+      Request r2=req;
+      r2.headers["X-Internal-Admin-Id"]=std::to_string(sess.admin_id);
+      return h(r2);
     };
   };
 

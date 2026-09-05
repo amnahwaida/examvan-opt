@@ -3,6 +3,7 @@
 #include <libpq-fe.h>
 #include <algorithm>
 #include <cstdlib>
+#include "utils/log.hpp"
 
 namespace examvan::store {
 namespace {
@@ -56,6 +57,12 @@ bool ExamStorePostgres::exec_command_nullable(const std::string& sql,const std::
   if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
   auto result=pool_.exec_params_nullable(c.get(),sql,params);
   const bool ok=result && (PQresultStatus(result.get())==PGRES_COMMAND_OK || PQresultStatus(result.get())==PGRES_TUPLES_OK);
+  if(!ok){
+    // Log error asli PG (mis. FK violation) — sebelumnya gagal senyap dan
+    // create_exam melaporkan "custom_token already in use" yang menyesatkan.
+    std::string err = result ? PQresultErrorMessage(result.get()) : "no result";
+    utils::log_error("pg_exec_failed", "sql="+sql.substr(0,120)+" err="+err);
+  }
   pool_.release(c.release());
   return ok;
 }
