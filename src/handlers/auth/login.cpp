@@ -171,12 +171,15 @@ Response login_handler(const Request& req, const Config& cfg){
           if(auto c=pool.acquire()){
             // Ambil id + role ASLI (bukan hanya password_hash): session harus
             // membawa identitas user sungguhan, bukan admin_id=1 hardcoded.
-            auto res=pool.exec_params(c.get(),"SELECT password_hash, id, COALESCE(role,'guru') FROM admin_users WHERE lower(username)=lower($1) LIMIT 1",{uname_norm});
+            // Status juga dicek: user suspended / pending_otp TIDAK boleh login
+            // (paritas Go) — bukan hanya di-reject per-request oleh admin_api.
+            auto res=pool.exec_params(c.get(),
+              "SELECT password_hash, id, COALESCE(role,'guru'), status FROM admin_users WHERE lower(username)=lower($1) LIMIT 1",{uname_norm});
             if(res && PQntuples(res.get())>0){
-              std::string db_hash=PQgetvalue(res.get(),0,0);
-              if(verify_password(password, db_hash)){
+              std::string db_status=PQgetvalue(res.get(),0,3);
+              if(db_status=="active" && verify_password(password, PQgetvalue(res.get(),0,0))){
                 ok=true;
-                stored=db_hash;
+                stored=PQgetvalue(res.get(),0,0);
                 try{ sess_admin_id=std::stoi(PQgetvalue(res.get(),0,1)); }catch(...){}
                 std::string db_role=PQgetvalue(res.get(),0,2);
                 sess_role_json="[\""+db_role+"\"]";

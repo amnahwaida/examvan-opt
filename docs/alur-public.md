@@ -121,7 +121,8 @@ reset.
   5/mnt, `/api/hasil/:token` 30/mnt.
 - **Session**: cookie `examvan_session` HMAC-SHA256 + rotasi kunci ganda,
   HttpOnly + SameSite=Lax (+Secure di prod), payload berisi `admin_id` dan
-  `role` asli dari DB.
+  `role` asli dari DB. Login menolak user non-`active` (suspended /
+  `pending_otp`), paritas Go.
 - **Enumeration**: respons netral untuk forgot/resend; username cadangan
   (`admin`, `superadmin`) dilarang untuk registrasi public.
 
