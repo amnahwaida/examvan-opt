@@ -5,6 +5,9 @@
 #include "middleware/protobuf.hpp"
 #include "utils/log.hpp"
 #include "helpers/smtp.hpp"
+#include "handlers/r2/r2.hpp"
+#include "utils/sanitize.hpp"
+#include <regex>
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
@@ -285,6 +288,20 @@ Response test_smtp_connection(const Request& req){
   r.json(200,"{\"success\":true,\"message\":\"Koneksi SMTP berhasil terhubung!\"}"); return r;
 }
 
+[[maybe_unused]] static std::string multipart_field(const std::string& body,const std::string& boundary,const std::string& name){
+  std::string marker="--"+boundary;
+  size_t p=0;
+  while((p=body.find(marker,p))!=std::string::npos){
+    size_t h=body.find("\r\n\r\n",p); if(h==std::string::npos) break;
+    size_t end=body.find(marker,h+4); if(end==std::string::npos) break;
+    std::string headers=body.substr(p,h-p);
+    if(headers.find("name=\""+name+"\"")==std::string::npos){ p=end; continue; }
+    size_t start=h+4; if(end>=2 && body[end-2]=='\r' && body[end-1]=='\n') end-=2;
+    return body.substr(start,end-start);
+  }
+  return "";
+}
+
 Response system_apps_page(const Request& req){
 #ifdef HAS_LIBPQ
   try{
@@ -303,7 +320,31 @@ Response system_apps_page(const Request& req){
           Response r; r.status=ok?200:404; r.json(r.status,ok?"{\"success\":true,\"message\":\"Aplikasi berhasil dihapus\"}":"{\"success\":false,\"message\":\"Aplikasi tidak ditemukan.\"}"); return r;
         }
         if(req.method=="POST"){
-          Response r; r.status=501; r.json(501,"{\"success\":false,\"message\":\"Upload aplikasi belum tersedia pada backend C++.\"}"); return r;
+          std::string ct;
+          if(auto h=req.headers.find("Content-Type"); h!=req.headers.end()) ct=h->second;
+          auto bp=ct.find("boundary=");
+          if(bp==std::string::npos){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Multipart boundary tidak ditemukan.\"}"); return r; }
+          std::string boundary=ct.substr(bp+9); if(!boundary.empty() && boundary.front()=='\"') boundary=boundary.substr(1,boundary.size()-2);
+          std::string name=multipart_field(req.body,boundary,"name");
+          std::string platform=multipart_field(req.body,boundary,"platform");
+          std::string version=multipart_field(req.body,boundary,"version");
+          std::string file=multipart_field(req.body,boundary,"file");
+          if(name.empty()||version.empty()||file.empty()||(platform!="android"&&platform!="windows"&&platform!="linux")){
+            Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Field aplikasi atau file tidak valid.\"}"); return r;
+          }
+          name=helpers::sanitize_student_input(name);
+          if(!std::regex_match(version,std::regex(R"(^[0-9]+\\.[0-9]+\\.[0-9]+$)"))){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Format versi tidak valid.\"}"); return r; }
+          if(file.size()>100*1024*1024){ Response r; r.status=413; r.json(413,"{\"success\":false,\"message\":\"File terlalu besar.\"}"); return r; }
+          auto dup=real.exec_params(c.get(),"SELECT id FROM system_apps WHERE name=$1 AND platform=$2 AND version=$3",{name,platform,version});
+          if(dup && PQresultStatus(dup.get())==PGRES_TUPLES_OK && PQntuples(dup.get())>0){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Aplikasi dengan versi tersebut sudah ada.\"}"); return r; }
+          auto cfg_r2=Config::load(); r2::R2Config rc{cfg_r2.r2_access_key,cfg_r2.r2_secret_key,cfg_r2.r2_endpoint,cfg_r2.r2_bucket};
+          if(!rc.enabled()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error_code\":\"R2_NOT_CONFIGURED\",\"message\":\"Cloudflare R2 tidak dikonfigurasi.\"}"); return r; }
+          std::string key=r2::object_key_for_app(version,platform);
+          r2::R2Client client{rc};
+          if(!client.upload(key,file,"application/octet-stream") || !client.verify(key)){ Response r; r.status=502; r.json(502,"{\"success\":false,\"error_code\":\"UPLOAD_FAILED\",\"message\":\"Gagal mengupload file aplikasi.\"}"); return r; }
+          auto ins=real.exec_params(c.get(),"INSERT INTO system_apps (name,platform,version,file_path,size_bytes) VALUES ($1,$2,$3,$4,$5)",{name,platform,version,key,std::to_string(file.size())});
+          if(!ins || PQresultStatus(ins.get())!=PGRES_COMMAND_OK){ client.remove(key); Response r; r.status=500; r.json(500,"{\"success\":false,\"message\":\"Gagal menyimpan metadata aplikasi.\"}"); return r; }
+          Response r; r.status=201; r.json(201,"{\"success\":true,\"message\":\"Aplikasi berhasil diunggah\"}"); return r;
         }
         auto rows=real.exec_params(c.get(),"SELECT id,name,platform,version,file_path,size_bytes,created_at::text,updated_at::text FROM system_apps ORDER BY created_at DESC",{});
         if(rows && PQresultStatus(rows.get())==PGRES_TUPLES_OK){
