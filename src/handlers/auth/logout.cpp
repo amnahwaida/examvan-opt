@@ -2,6 +2,7 @@
 #include "session/csrf.hpp"
 #include "session/cookie.hpp"
 #include "helpers/utils.hpp"
+#include "config/config.hpp"
 #include "middleware/protobuf.hpp"
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
@@ -20,16 +21,19 @@ Response logout_handler(const Request& req){
   if(csrf_h.empty()) csrf_h=get_hdr_ci_lo(req,"X-XSRF-Token");
   if(csrf_h.empty()){
     auto form=helpers::parse_form(req.body);
-    auto f=form.find("csrf_token"); if(f==form.end()) f=form.find("_csrf"); if(f==form.end()) f=form.find("csrf");
+    // P17-M4: form browser mengirim name="_csrf_token" (nav.html).
+    auto f=form.find("csrf_token"); if(f==form.end()) f=form.find("_csrf_token"); if(f==form.end()) f=form.find("_csrf"); if(f==form.end()) f=form.find("csrf");
     if(f!=form.end()) csrf_h=f->second;
     if(csrf_h.empty()) csrf_h=json_field_lo(req.body,"csrf_token");
+    if(csrf_h.empty()) csrf_h=json_field_lo(req.body,"_csrf_token");
     if(csrf_h.empty()) csrf_h=json_field_lo(req.body,"_csrf");
   }
   std::string sess_csrf;
   std::string ck=get_hdr_ci_lo(req,"Cookie");
   if(!ck.empty()){
     sess_csrf=extract_cookie(ck,"__Host-csrf_token");
-    if(sess_csrf.empty()) sess_csrf=extract_cookie(ck,"csrf_token");
+    // P17-M1: fallback plain cookie hanya di development.
+    if(sess_csrf.empty() && Config::load().is_development()) sess_csrf=extract_cookie(ck,"csrf_token");
   }
   // JANGAN fallback ke "test-csrf-token" (dulu: token CSRF yang diketahui
   // bisa lolos saat cookie hilang). Tanpa cookie → tolak, paritas login.cpp.

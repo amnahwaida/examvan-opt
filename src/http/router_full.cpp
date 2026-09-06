@@ -22,6 +22,7 @@
 #include "session/csrf.hpp"
 #include "middleware/ratelimit.hpp"
 #include "middleware/body_limit.hpp"
+#include "middleware/protobuf.hpp"
 #include "middleware/cors.hpp"
 #include "helpers/utils.hpp"
 #include "store/exam_store.hpp"
@@ -48,7 +49,10 @@ void register_full_routes(Router& r, const Config& cfg){
    * user active (guru/pengawas). require_role() di middleware/auth.hpp. */
   auto admin_api=[cfg](Handler h, std::string role_req={}, std::string scope={})->Handler{
     return [cfg,h,role_req,scope](const Request& req)->Response{
-      if(req.body.size()>5*1024*1024){ Response rr; rr.status=413; rr.body="payload too large"; return rr; }
+      // P17-C3: system-app mengizinkan 100 MB (admin/settings.cpp) — wrapper
+      // 5 MB akan 413 sebelum handler. Kecualikan route tersebut (105 MB).
+      const size_t max_body=req.path.find("/system-apps")!=std::string::npos?(size_t)105*1024*1024:(size_t)5*1024*1024;
+      if(req.body.size()>max_body){ Response rr; rr.status=413; rr.body="payload too large"; return rr; }
       std::string ip="global";
       auto it_ip=req.headers.find("X-Real-IP");
       if(it_ip!=req.headers.end()) ip=it_ip->second;
@@ -127,7 +131,10 @@ void register_full_routes(Router& r, const Config& cfg){
           auto itc=req.headers.find("Cookie");
           if(itc!=req.headers.end()) cookie_hdr=itc->second;
           std::string session_csrf=extract_cookie(cookie_hdr,"__Host-csrf_token");
-          if(session_csrf.empty()) session_csrf=extract_cookie(cookie_hdr,"csrf_token");
+          // P17-M1: fallback plain cookie hanya di development. Di production
+          // attacker subdomain dapat menanam csrf_token (Domain=.site) saat
+          // korban belum punya __Host- cookie → double-submit lolos.
+          if(session_csrf.empty() && cfg.is_development()) session_csrf=extract_cookie(cookie_hdr,"csrf_token");
           std::string tok;
           for(auto& kv: req.headers){
             std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch);
@@ -293,12 +300,20 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/api/health", handlers::api::health);
   r.add("GET","/api/time", handlers::api::time_handler);
   r.add("GET","/api/exams", handlers::api::list_exams);
-  r.add("POST","/api/exams/request-approval", handlers::api::request_approval);
+  // P17-M3: student POST tunduk pada require_protobuf bila
+  // PROTOBUF_MANDATORY=1 (paritas admin routes).
+  auto pb_gate=[cfg](Handler h)->Handler{
+    return [cfg,h](const Request& req)->Response{
+      if(auto rej=middleware::require_protobuf(req,cfg)) return *rej;
+      return h(req);
+    };
+  };
+  r.add("POST","/api/exams/request-approval", pb_gate(handlers::api::request_approval));
   r.add("GET","/api/exams/token/:token", handlers::api::exam_by_token);
   r.add("GET","/api/exams/:exam_id/pdf", handlers::api::exam_pdf);
-  r.add("POST","/api/exams/:exam_id/submit", handlers::api::submit_exam);
+  r.add("POST","/api/exams/:exam_id/submit", pb_gate(handlers::api::submit_exam));
   r.add("GET","/api/exams/:exam_id/result", handlers::api::exam_result);
-  r.add("POST","/api/exams/:exam_id/access-log", handlers::api::access_log);
+  r.add("POST","/api/exams/:exam_id/access-log", pb_gate(handlers::api::access_log));
   r.add("POST","/api/exams/:exam_id/complete", handlers::api::complete_exam);
   /* /api/hasil/:token di-rate-limit 30/mnt per-IP (paritas Go; lihat doc
    alur-public). Halaman /hasil memakai endpoint ini juga. */
@@ -388,14 +403,17 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/admin/api/users/:id/toggle-status", admin_api(handlers::admin::user_toggle_status, "superadmin"));
   r.add("POST","/admin/api/users/:id/verify", admin_api(handlers::admin::user_verify, "superadmin"));
   r.add("POST","/admin/api/users/:id/deactivate-package", admin_api(handlers::admin::user_deactivate_package, "superadmin"));
-  r.add("POST","/admin/api/instansi/update", admin_api(handlers::admin::instansi_update, "superadmin"));
-  r.add("POST","/admin/api/change-password", admin_api(handlers::admin::change_password, "superadmin"));
+  // P17-C2: self-service milik sesi sendiri — authenticated saja.
+  r.add("POST","/admin/api/instansi/update", admin_api(handlers::admin::instansi_update));
+  r.add("POST","/admin/api/change-password", admin_api(handlers::admin::change_password));
   r.add("GET","/admin/api/vouchers", admin_api(handlers::admin::list_vouchers, "superadmin"));
   r.add("POST","/admin/api/vouchers", admin_api(handlers::admin::create_voucher, "superadmin"));
   r.add("POST","/admin/api/vouchers/batch", admin_api(handlers::admin::create_vouchers_batch, "superadmin"));
-  r.add("GET","/admin/api/vouchers/mine", admin_api(handlers::admin::vouchers_mine, "superadmin"));
-  r.add("POST","/admin/api/vouchers/redeem", admin_api(handlers::admin::redeem_voucher, "superadmin"));
-  r.add("POST","/admin/api/vouchers/activate", admin_api(handlers::admin::activate_voucher, "superadmin"));
+  // P17-C1: redeem/activate/mine dipakai guru/pengawas/operator — authenticated
+  // saja (handler sendiri menolak superadmin).
+  r.add("GET","/admin/api/vouchers/mine", admin_api(handlers::admin::vouchers_mine));
+  r.add("POST","/admin/api/vouchers/redeem", admin_api(handlers::admin::redeem_voucher));
+  r.add("POST","/admin/api/vouchers/activate", admin_api(handlers::admin::activate_voucher));
   r.add("GET","/admin/api/vouchers/audit-logs", admin_api(handlers::admin::list_audit_logs, "superadmin"));
   r.add("POST","/admin/api/vouchers/:id/toggle", admin_api(handlers::admin::toggle_voucher, "superadmin"));
   r.add("POST","/admin/api/vouchers/:id/delete", admin_api(handlers::admin::delete_voucher, "superadmin"));

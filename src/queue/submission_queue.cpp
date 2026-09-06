@@ -4,6 +4,7 @@
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
 #include <chrono>
+#include <thread>
 #include <iomanip>
 #include <random>
 #include <sstream>
@@ -220,7 +221,7 @@ std::optional<SubmissionJob> SubmissionJob::from_protobuf(const std::string& s){
 std::string JobResult::to_json() const {
   std::ostringstream ss;
   ss<<"{\"job_id\":\""<<json_escape(job_id)<<"\",\"exam_id\":"<<exam_id
-    <<",\"mac_address\":\""<<json_escape(mac_address)<<"\",\"identity_data\":\""<<json_escape(identity_data)<<"\",\"success\":"<<(success?"true":"false")
+    <<",\"mac_address\":\""<<json_escape(mac_address)<<"\",\"identity_data\":\""<<json_escape(identity_data)<<"\",\"identity_hash\":\""<<json_escape(identity_hash)<<"\",\"success\":"<<(success?"true":"false")
     <<",\"message\":\""<<json_escape(message)<<"\",\"processed_at\":\""<<json_escape(processed_at)<<"\"";
   ss<<",\"score\":";
   if(score.has_value()) ss<<*score; else ss<<"null";
@@ -266,6 +267,23 @@ std::optional<SubmissionJob> SubmissionQueue::dequeue(int timeout){
 }
 
 bool SubmissionQueue::requeue(const SubmissionJob& job){
+  // P17-L3: cek hasil LPUSH — job hilang bila Redis down dan retry habis.
+  if(lpush_checked_){
+    try{
+      return lpush_checked_(kQueueKey,
+#ifdef HAS_PROTOBUF
+        ([&]{
+          auto cfg=Config::load();
+          std::string payload=cfg.protobuf_mandatory ? job.to_protobuf() : job.to_json();
+          if(payload.empty()) payload=job.to_json();
+          return payload;
+        })()
+#else
+        job.to_json()
+#endif
+      );
+    }catch(...){ return false; }
+  }
   if(!lpush_) return false;
 #ifdef HAS_PROTOBUF
   auto cfg=Config::load();
@@ -276,6 +294,10 @@ bool SubmissionQueue::requeue(const SubmissionJob& job){
 #endif
   lpush_(kQueueKey, payload);
   return true;
+}
+
+void SubmissionQueue::set_lpush_checked(std::function<bool(const std::string&,const std::string&)> fn){
+  lpush_checked_=std::move(fn);
 }
 
 void SubmissionQueue::store_result(const JobResult& r){
@@ -291,10 +313,33 @@ void Worker::start(){
 }
 
 void Worker::stop(){
+  // P17-L4: join batch dulu lalu worker + final drain — BRPOP in-flight yang
+  // bangun setelah stop tidak boleh kehilangan job.
   running_=false;
   cv_.notify_all();
-  for(auto& t: workers_) if(t.joinable()) t.join();
   if(batch_th_.joinable()) batch_th_.join();
+  for(auto& t: workers_) if(t.joinable()) t.join();
+  // Final drain: proses sisa batch_q_ yang belum sempat diambil run_batch.
+  // (Best-effort; tanpa PG/Redis, job dikembalikan via requeue-checked.)
+  std::vector<std::pair<SubmissionJob,std::optional<double>>> rest;
+  {
+    std::lock_guard<std::mutex> g(mu_);
+    while(!batch_q_.empty()){ rest.push_back(batch_q_.front()); batch_q_.pop(); }
+  }
+  for(auto& b: rest){
+    auto job=b.first;
+    if(job.retries<kMaxRetries){
+      job.retries++;
+      std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries)));
+      queue_->requeue(job);
+    } else {
+      JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address;
+      r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data);
+      r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban";
+      r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now());
+      queue_->store_result(r);
+    }
+  }
 }
 
 size_t Worker::pending() const { std::lock_guard<std::mutex> g(mu_); return batch_q_.size(); }
@@ -352,8 +397,10 @@ void Worker::run_batch(){
           "UPDATE submissions SET job_id=$1, answers_json=$2, score=NULLIF($3,'')::double precision, start_time=COALESCE(start_time,NULLIF($4,'')), student_name=$5, exam_number=$6, student_class=$7, identity_data=$8 WHERE id=(SELECT id FROM submissions WHERE exam_id=$9 AND mac_address=$10 AND ($11='' OR exam_number=$11) ORDER BY created_at DESC LIMIT 1) RETURNING id",{j.job_id,map_to_json(j.answers),score_text,j.start_time,j.student_name,j.exam_number,j.student_class,map_to_json(j.identity_data),std::to_string(j.exam_id),j.mac_address,j.exam_number}):nullptr;
         bool updated=up && PQresultStatus(up.get())==PGRES_TUPLES_OK && PQntuples(up.get())>0;
         if(ok && !updated){
-          auto ins=real.exec_params(c.get(),"INSERT INTO submissions (job_id,exam_id,student_name,exam_number,student_class,answers_json,score,start_time,mac_address,identity_data) VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,'')::double precision,$8,$9,$10)",{j.job_id,std::to_string(j.exam_id),j.student_name,j.exam_number,j.student_class,map_to_json(j.answers),score_text,j.start_time,j.mac_address,map_to_json(j.identity_data)});
-          ok=ins && PQresultStatus(ins.get())==PGRES_COMMAND_OK;
+          // P17-C5: UNIQUE(exam_id, mac_address) + ON CONFLICT — heartbeat
+          // placeholder dan worker upsert dapat berlomba dalam tick yang sama.
+          auto ins=real.exec_params(c.get(),"INSERT INTO submissions (job_id,exam_id,student_name,exam_number,student_class,answers_json,score,start_time,mac_address,identity_data) VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,'')::double precision,$8,$9,$10) ON CONFLICT (exam_id, mac_address) DO UPDATE SET job_id=EXCLUDED.job_id, answers_json=EXCLUDED.answers_json, score=EXCLUDED.score, start_time=COALESCE(EXCLUDED.start_time,submissions.start_time), student_name=EXCLUDED.student_name, exam_number=EXCLUDED.exam_number, student_class=EXCLUDED.student_class, identity_data=EXCLUDED.identity_data",{j.job_id,std::to_string(j.exam_id),j.student_name,j.exam_number,j.student_class,map_to_json(j.answers),score_text,j.start_time,j.mac_address,map_to_json(j.identity_data)});
+          ok=ins && (PQresultStatus(ins.get())==PGRES_COMMAND_OK || PQresultStatus(ins.get())==PGRES_TUPLES_OK);
         }
         if(ok){
           auto release=real.exec_params(c.get(),"RELEASE SAVEPOINT submission_job",{});
@@ -366,12 +413,21 @@ void Worker::run_batch(){
       }
       auto commit=real.exec_params(c.get(),"COMMIT",{});
       if(!commit || PQresultStatus(commit.get())!=PGRES_COMMAND_OK){ failed.insert(failed.end(),persisted.begin(),persisted.end()); persisted.clear(); }
+      else {
+        // P17-C4: revoke approval setelah COMMIT sukses (paritas Go
+        // submission_queue.go:462-466) — device tidak boleh re-enter / re-submit
+        // tanpa persetujuan baru. Best-effort di luar transaksi commit.
+        for(auto& b: persisted){
+          real.exec_params(c.get(),"DELETE FROM exam_approvals WHERE exam_id=$1 AND mac_address=$2",
+            {std::to_string(b.first.exam_id), b.first.mac_address});
+        }
+      }
     } else if(c) real.exec_params(c.get(),"ROLLBACK",{});
     if(c) real.release(c.release());
-    for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
-    for(auto& b: persisted){ JobResult r; r.job_id=b.first.job_id; r.exam_id=b.first.exam_id; r.mac_address=b.first.mac_address; r.identity_data=map_to_json(b.first.identity_data); r.success=true; r.score=b.second; r.message="ok"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); }
+    for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries))); queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
+    for(auto& b: persisted){ JobResult r; r.job_id=b.first.job_id; r.exam_id=b.first.exam_id; r.mac_address=b.first.mac_address; r.identity_data=map_to_json(b.first.identity_data); r.identity_hash=identity_fingerprint(b.first.identity_data); r.success=true; r.score=b.second; r.message="ok"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); }
 #else
-    for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.success=false; r.score=b.second; r.message="Database tidak tersedia"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
+    for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries))); queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Database tidak tersedia"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
 #endif
   }
 }
@@ -470,9 +526,11 @@ static int drain_heartbeat_batch(redisContext* ctx, db::RealPool& real, PGconn* 
         if(answers.empty()) need_empty=false; // placeholder row sudah ada (belum submit)
       }
       if(need_empty){
+        // P17-C5: placeholder heartbeat vs worker upsert — ON CONFLICT agar
+        // tidak duplikat row untuk (exam_id, mac_address) yang sama.
         auto ph=real.exec_params(conn,
           "INSERT INTO submissions (exam_id, student_name, exam_number, student_class, mac_address, start_time, created_at, identity_data)"
-          " VALUES ($1,$2,$3,$4,$5,$6,$7,'{}')",
+          " VALUES ($1,$2,$3,$4,$5,$6,$7,'{}') ON CONFLICT (exam_id, mac_address) DO NOTHING",
           {std::to_string(hb->exam_id), hb->student_name, hb->exam_number, hb->student_class,
            hb->mac_address, hb->last_seen.empty()?now_txt:hb->last_seen, now_txt});
         if(!ph || (PQresultStatus(ph.get())!=PGRES_COMMAND_OK && PQresultStatus(ph.get())!=PGRES_TUPLES_OK)) row_ok=false;

@@ -82,10 +82,10 @@ static std::string json_escape(const std::string& s){
   return o;
 }
 
-// Mask secrets on GET; never return short secrets verbatim.
+// Mask secrets on GET; fixed mask for short secrets (P17-L5: sized mask leaks length).
 static std::string mask_token(const std::string& t){
   if(t.empty()) return "";
-  if(t.size()<=4) return std::string(t.size(),'*');
+  if(t.size()<=4) return "****";
   return std::string(t.size()-4,'*')+t.substr(t.size()-4);
 }
 

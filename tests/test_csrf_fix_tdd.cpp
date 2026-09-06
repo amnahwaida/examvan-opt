@@ -141,7 +141,7 @@ TEST(CsrfFix, LoginTokenWithSpecialChars){
   Config cfg; cfg.secret_key=std::string(32,'x');
   std::string tok="abc+def/ghi==";
   Request req; req.body="username=guru&password=p&_csrf="+std::string("abc%2Bdef%2Fghi%3D%3D");
-  req.headers["Cookie"]="csrf_token="+tok;
+  req.headers["Cookie"]="__Host-csrf_token="+tok;
   req.headers["Accept"]="application/json";
   auto res=login_handler(req,cfg);
   EXPECT_EQ(res.status,200) << res.body << " token with +/=";
@@ -175,10 +175,10 @@ TEST(CsrfFix, ServerForwardsHeaders){
 
 TEST(CsrfFix, LogoutCsrf){
   Request req; req.body="_csrf=test-csrf-token";
-  req.headers["Cookie"]="csrf_token=test-csrf-token";
+  req.headers["Cookie"]="__Host-csrf_token=test-csrf-token";
   auto res=logout_handler(req);
   EXPECT_EQ(res.status,200) << res.body;
-  req.headers["Cookie"]="csrf_token=other";
+  req.headers["Cookie"]="__Host-csrf_token=other";
   auto res2=logout_handler(req);
   EXPECT_EQ(res2.status,403);
 }

@@ -102,8 +102,9 @@ Response pengawas_exams(const Request& req){
   (void)uid;
   std::string pagination="{\"page\":"+std::to_string(page)+",\"per_page\":"+std::to_string(per_page)+",\"total\":0,\"total_pages\":0}";
   std::string stats="{\"total_exams\":0,\"active_exams\":0,\"total_students\":0,\"total_submitted\":0}";
-  bool is_priv=false;
-  (void)is_priv;
+  bool is_priv=false, is_super=false;
+  std::string caller_instansi;
+  (void)is_priv; (void)is_super; (void)caller_instansi;
 #ifdef HAS_LIBPQ
   {
     auto cfg2=Config::load();
@@ -114,10 +115,12 @@ Response pengawas_exams(const Request& req){
       examvan::db::RealPool rp2(examvan::conninfo_from_url_or_raw(p2.url), 2);
       if(auto c2=rp2.acquire()){
         if(PQstatus(c2.get())==CONNECTION_OK){
-          auto me=rp2.exec_params(c2.get(),"SELECT role FROM admin_users WHERE id=$1",{std::to_string(uid)});
+          auto me=rp2.exec_params(c2.get(),"SELECT role, COALESCE(instansi,'') FROM admin_users WHERE id=$1",{std::to_string(uid)});
           if(me && PQresultStatus(me.get())==PGRES_TUPLES_OK && PQntuples(me.get())>0){
             std::string role=PQgetvalue(me.get(),0,0);
-            if(role.find("superadmin")!=std::string::npos || role.find("operator")!=std::string::npos) is_priv=true;
+            caller_instansi=PQgetvalue(me.get(),0,1);
+            if(role.find("superadmin")!=std::string::npos){ is_priv=true; is_super=true; }
+            else if(role.find("operator")!=std::string::npos){ is_priv=true; }
           }
         }
         rp2.release(c2.release());
@@ -130,13 +133,19 @@ Response pengawas_exams(const Request& req){
     auto c=real.acquire();
     if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
     // ujian yang diampu: exam_pengawas JOIN exams (untuk pengawas biasa).
-    // Superadmin/operator melihat semua.
+    // Superadmin melihat semua; operator (P17-M5) hanya assigned + same-instansi.
     std::string where=" WHERE 1=1";
     std::vector<std::string> params;
 
     if(!is_priv){
       where+=" AND e.id IN (SELECT exam_id FROM exam_pengawas WHERE user_id=$"+std::to_string(params.size()+1)+")";
       params.push_back(std::to_string(uid));
+    } else if(!is_super){
+      where+=" AND (e.id IN (SELECT exam_id FROM exam_pengawas WHERE user_id=$"+std::to_string(params.size()+1)+")"
+        " OR e.created_by=$"+std::to_string(params.size()+1)+
+        " OR e.created_by IN (SELECT id FROM admin_users WHERE instansi=$"+std::to_string(params.size()+2)+" AND instansi<>'' AND instansi<>'personal'))";
+      params.push_back(std::to_string(uid));
+      params.push_back(caller_instansi);
     }
     if(!search.empty()){
       where+=" AND e.name ILIKE $"+std::to_string(params.size()+1);
@@ -178,23 +187,29 @@ Response pengawas_exams(const Request& req){
         +",\"total\":"+std::to_string(total)+",\"total_pages\":"+std::to_string(total_pages)+"}";
       got=true;
     }
-    // stats global (untuk header)
+    // stats global (untuk header) — scope sama dengan list (P17-M5).
+    std::string scope_stats;
+    std::vector<std::string> scope_params;
+    if(!is_priv){
+      scope_stats=" AND e.id IN (SELECT exam_id FROM exam_pengawas WHERE user_id="+std::to_string(uid)+")";
+    } else if(!is_super){
+      scope_stats=" AND (e.id IN (SELECT exam_id FROM exam_pengawas WHERE user_id="+std::to_string(uid)+")"
+        " OR e.created_by="+std::to_string(uid)+
+        " OR e.created_by IN (SELECT id FROM admin_users WHERE instansi=$1 AND instansi<>'' AND instansi<>'personal'))";
+      scope_params.push_back(caller_instansi);
+    }
     auto st=real.exec_params(c.get(),
-      "SELECT COUNT(*) FROM exams e WHERE 1=1"
-      +std::string(!is_priv? " AND e.id IN (SELECT exam_id FROM exam_pengawas WHERE user_id="+std::to_string(uid)+")" : ""),{});
+      "SELECT COUNT(*) FROM exams e WHERE 1=1"+scope_stats,scope_params);
     if(st && PQresultStatus(st.get())==PGRES_TUPLES_OK && PQntuples(st.get())>0){
       int total_exams=std::atoi(PQgetvalue(st.get(),0,0));
       auto st2=real.exec_params(c.get(),
-        "SELECT COUNT(*) FROM exams e WHERE e.status='active'"
-        +std::string(!is_priv? " AND e.id IN (SELECT exam_id FROM exam_pengawas WHERE user_id="+std::to_string(uid)+")" : ""),{});
+        "SELECT COUNT(*) FROM exams e WHERE e.status='active'"+scope_stats,scope_params);
       int active= st2 && PQresultStatus(st2.get())==PGRES_TUPLES_OK && PQntuples(st2.get())>0? std::atoi(PQgetvalue(st2.get(),0,0)) : 0;
       auto st3=real.exec_params(c.get(),
-        "SELECT COUNT(*) FROM student_access_logs l LEFT JOIN exams e ON e.id=l.exam_id WHERE 1=1"
-        +std::string(!is_priv? " AND e.id IN (SELECT exam_id FROM exam_pengawas WHERE user_id="+std::to_string(uid)+")" : ""),{});
+        "SELECT COUNT(*) FROM student_access_logs l LEFT JOIN exams e ON e.id=l.exam_id WHERE 1=1"+scope_stats,scope_params);
       int students= st3 && PQresultStatus(st3.get())==PGRES_TUPLES_OK && PQntuples(st3.get())>0? std::atoi(PQgetvalue(st3.get(),0,0)) : 0;
       auto st4=real.exec_params(c.get(),
-        "SELECT COUNT(*) FROM submissions s LEFT JOIN exams e ON e.id=s.exam_id WHERE 1=1"
-        +std::string(!is_priv? " AND e.id IN (SELECT exam_id FROM exam_pengawas WHERE user_id="+std::to_string(uid)+")" : ""),{});
+        "SELECT COUNT(*) FROM submissions s LEFT JOIN exams e ON e.id=s.exam_id WHERE 1=1"+scope_stats,scope_params);
       int submitted= st4 && PQresultStatus(st4.get())==PGRES_TUPLES_OK && PQntuples(st4.get())>0? std::atoi(PQgetvalue(st4.get(),0,0)) : 0;
       stats="{\"total_exams\":"+std::to_string(total_exams)+",\"active_exams\":"+std::to_string(active)
         +",\"total_students\":"+std::to_string(students)+",\"total_submitted\":"+std::to_string(submitted)+"}";
@@ -424,9 +439,10 @@ Response exam_audit_logs(const Request& req){
     }
     real.release(c.release());
   });
-  if(found){ Response r; r.json(200,"{\"success\":true,\"data\":"+arr+"}"); return r; }
+  // P17-M7: frontend membaca res.logs — kirim "logs" (data dipertahankan kompatibel).
+  if(found){ Response r; r.json(200,"{\"success\":true,\"logs\":"+arr+",\"data\":"+arr+"}"); return r; }
 #endif
-  Response r; r.json(200,"{\"success\":true,\"data\":[]}"); return r;
+  Response r; r.json(200,"{\"success\":true,\"logs\":[],\"data\":[]}"); return r;
 }
 
 Response pengawas_state(const Request& req){

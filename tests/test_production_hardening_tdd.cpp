@@ -2011,7 +2011,7 @@ TEST(ProductionHardening, LogoutCsrf_NoCookie403){
   EXPECT_EQ(res.status,403);
   EXPECT_NE(res.body.find("CSRF"), std::string::npos);
   // Dengan cookie yang benar tetap boleh (regresi guard).
-  req.headers["Cookie"]="csrf_token=test-csrf-token";
+  req.headers["Cookie"]="__Host-csrf_token=test-csrf-token";
   auto ok=examvan::handlers::auth::logout_handler(req);
   EXPECT_EQ(ok.status,200);
 }

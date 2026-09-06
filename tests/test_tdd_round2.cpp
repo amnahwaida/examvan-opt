@@ -88,7 +88,7 @@ TEST(TDD2_M2_OpenRedirect, EncodedTraversalBlocked) {
     // need csrf
     Request req;
     req.body="username=bob&password=pass12345&_csrf=test-csrf-token&next=%2F%2Fevil.com";
-    req.headers["Cookie"]="csrf_token=test-csrf-token";
+    req.headers["Cookie"]="__Host-csrf_token=test-csrf-token";
     auto res = handlers::auth::login_handler(req,cfg);
     if(res.status==303){
         EXPECT_NE(res.headers["Location"], "//evil.com");

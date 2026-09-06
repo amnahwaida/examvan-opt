@@ -258,6 +258,7 @@ add_executable(examvan-tests
   tests/test_protobuf_mandatory_tdd.cpp
   tests/test_protobuf_handlers_tdd.cpp
   tests/test_exam_production_tdd.cpp
+  tests/test_p17_tdd.cpp
 )
 target_compile_definitions(examvan-tests PRIVATE EXAMVAN_TESTING=1)
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)

@@ -129,7 +129,8 @@ Response login_handler(const Request& req, const Config& cfg){
   std::string cookie_hdr=get_hdr_ci(req,"Cookie");
   if(!cookie_hdr.empty()){
     auto c=extract_cookie(cookie_hdr,"__Host-csrf_token");
-    if(c.empty()) c=extract_cookie(cookie_hdr,"csrf_token");
+    // P17-M1: fallback plain cookie hanya di development (subdomain planting).
+    if(c.empty() && Config::load().is_development()) c=extract_cookie(cookie_hdr,"csrf_token");
     if(!c.empty()) session_csrf=c;
   }
   if(session_csrf.empty()){

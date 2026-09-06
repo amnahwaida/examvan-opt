@@ -164,6 +164,10 @@ bool ExamStorePostgres::migrate(){
     // Bind asynchronous result records to their durable submission.
     exec_command("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS job_id TEXT");
     exec_command("CREATE INDEX IF NOT EXISTS idx_submissions_job_id ON submissions(job_id)");
+    // P17-C5: cegah duplikasi row (exam_id, mac_address) saat heartbeat
+    // placeholder dan worker upsert berlomba — best-effort (tabel submissions
+    // dimiliki skema Go; IF NOT EXISTS + tanpa menggagalkan ready_).
+    exec_command("CREATE UNIQUE INDEX IF NOT EXISTS submissions_exam_mac ON submissions(exam_id, mac_address)");
     // Sync sequence PG setelah restore backup: restore hanya memulihkan data
     // (MAX(id)), bukan posisi sequence. Kalau sequence ketinggalan, nextval
     // mengembalikan id yang sudah dipakai → INSERT gagal (PK violation / 409).

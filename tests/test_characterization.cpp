@@ -205,7 +205,7 @@ TEST(Characterization, AdminMutationRequiresCsrfCookieMatch) {
   // (Simulasikan cookie csrf_token yg juga di-set halaman: set cookie ganda.)
   Request ok=no_tok;
   std::string csrf="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
-  ok.headers["Cookie"]=cookie+"; csrf_token="+csrf;
+  ok.headers["Cookie"]=cookie+"; __Host-csrf_token="+csrf;
   ok.headers["X-CSRF-Token"]=csrf;
   auto r3=r.dispatch(ok);
   EXPECT_NE(r3.status,403) << "mutation with matching CSRF must pass the gate: " << r3.body;
@@ -222,7 +222,7 @@ TEST(Characterization, LoginRateLimitedPerIp) {
   for(int i=0;i<12;i++){
     Request req; req.method="POST"; req.path="/login";
     req.headers["X-Real-IP"]=ip;
-    req.headers["Cookie"]="csrf_token=test-token";
+    req.headers["Cookie"]="__Host-csrf_token=test-token";
     req.headers["X-CSRF-Token"]="test-token";
     req.headers["Accept"]="application/json";
     req.body="username=nobody&password=wrong&_csrf=test-token";

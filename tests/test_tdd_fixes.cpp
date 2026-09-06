@@ -116,7 +116,7 @@ TEST(TDD_Password, CryptFormat) {
     cfg.admin_user="a"; cfg.admin_pass="b"; cfg.r2_access_key="k"; cfg.r2_secret_key="s"; cfg.r2_endpoint="e";
     Request req;
     req.body="username=alice&password=password123&_csrf=test-csrf-token";
-    req.headers["Cookie"]="csrf_token=test-csrf-token";
+    req.headers["Cookie"]="__Host-csrf_token=test-csrf-token";
     // need csrf token match; set cookie and form csrf
     auto res = handlers::auth::login_handler(req, cfg);
     EXPECT_NE(res.status, 500);

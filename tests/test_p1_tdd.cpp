@@ -14,7 +14,7 @@ TEST(P1_Auth, CookieShouldHaveSecureFlagInProduction) {
   handlers::auth::clear_users_for_test();
   handlers::auth::set_user_for_test("admin","secret123","guru");
   Request req; req.body="username=admin&password=secret123&_csrf=test-csrf-token";
-  req.headers["Cookie"]="csrf_token=test-csrf-token";
+  req.headers["Cookie"]="__Host-csrf_token=test-csrf-token";
   req.headers["X-CSRF-Token"]="test-csrf-token";
   setenv("APP_ENV","production",1);
   auto res = handlers::auth::login_handler(req,cfg);
@@ -41,12 +41,12 @@ TEST(P1_Auth, PasswordShouldBeHashedNotPlain) {
   handlers::auth::clear_users_for_test();
   handlers::auth::set_user_for_test("admin","mySecret!123","guru");
   Request req; req.body="username=admin&password=mySecret!123&_csrf=test-csrf-token";
-  req.headers["Cookie"]="csrf_token=test-csrf-token";
+  req.headers["Cookie"]="__Host-csrf_token=test-csrf-token";
   Config cfg; cfg.secret_key=std::string(32,'c'); cfg.admin_user="admin"; cfg.admin_pass="mySecret!123"; cfg.r2_endpoint="https://e"; cfg.r2_access_key="k"; cfg.r2_secret_key="s";
   auto ok = handlers::auth::login_handler(req,cfg);
   EXPECT_TRUE(ok.status==200 || ok.status==303) << "valid password should succeed even after hashing, got " << ok.status;
   Request bad; bad.body="username=admin&password=wrongpass&_csrf=test-csrf-token";
-  bad.headers["Cookie"]="csrf_token=test-csrf-token";
+  bad.headers["Cookie"]="__Host-csrf_token=test-csrf-token";
   auto fail = handlers::auth::login_handler(bad,cfg);
   EXPECT_EQ(fail.status, 401);
   handlers::auth::clear_users_for_test();

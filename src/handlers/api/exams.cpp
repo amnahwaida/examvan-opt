@@ -27,6 +27,7 @@
 #include <limits>
 #include <functional>
 #include <map>
+#include <vector>
 
 namespace examvan::handlers::api {
 
@@ -410,6 +411,34 @@ static std::string sanitize_mac_like_go(const std::string& raw);
 static std::string truncate_bytes(const std::string& s, size_t n);
 static std::string sanitize_identity_map_json(const std::string& raw);
 
+// P17-C7: kunci identity_fields yang required (paritas Go exams.go:1044-1087).
+// Mengembalikan daftar key dengan "required":true di array JSON.
+static std::vector<std::string> required_identity_keys(const std::string& identity_fields_json){
+  std::vector<std::string> out;
+  size_t pos=0;
+  while((pos=identity_fields_json.find("\"key\"",pos))!=std::string::npos){
+    size_t colon=identity_fields_json.find(':',pos+5);
+    if(colon==std::string::npos) break;
+    size_t q1=identity_fields_json.find('"',colon+1);
+    if(q1==std::string::npos) break;
+    size_t q2=q1+1;
+    while(q2<identity_fields_json.size()){
+      if(identity_fields_json[q2]=='\\'){ q2+=2; continue; }
+      if(identity_fields_json[q2]=='"') break;
+      q2++;
+    }
+    if(q2>=identity_fields_json.size()) break;
+    std::string key=identity_fields_json.substr(q1+1,q2-q1-1);
+    size_t end=identity_fields_json.find('}',q2);
+    if(end==std::string::npos) break;
+    std::string obj=identity_fields_json.substr(pos,end-pos);
+    for(char& ch: obj) if(ch==' '||ch=='\t'||ch=='\n'||ch=='\r') ch=' ';
+    if(obj.find("\"required\":true")!=std::string::npos) out.push_back(key);
+    pos=end+1;
+  }
+  return out;
+}
+
 Response request_approval(const Request& req){
   std::string token=json_string_field(req.body,"token");
   if(token.empty()){
@@ -585,6 +614,54 @@ Response exam_by_token(const Request& req){
     if(reset_at && now >= *reset_at + std::chrono::minutes(*exam.token_reset_interval)){
       const std::string new_token=helpers::generate_token(8);
       const std::string now_text=helpers::format_iso_utc(now);
+      // P17-M2: rotasi di PG dulu (SELECT ... FOR UPDATE) lalu sync memori.
+      // Mutex st.update() hanya in-process → 2 node last-write-wins.
+      bool pg_rotated=false, pg_fresh=false;
+#ifdef HAS_LIBPQ
+      try{
+        auto cfg_db=Config::load();
+        examvan::DbPool pool(cfg_db.database_url, 10);
+        examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
+        if(auto c=real.acquire()){
+          real.exec_params(c.get(),"BEGIN",{});
+          auto cur=real.exec_params(c.get(),
+            "SELECT active_token, token_last_reset_at FROM exams WHERE id=$1 FOR UPDATE",
+            {std::to_string(exam.id)});
+          if(cur && PQresultStatus(cur.get())==PGRES_TUPLES_OK && PQntuples(cur.get())>0){
+            std::string db_tok=PQgetvalue(cur.get(),0,0);
+            std::string db_reset=PQgetisnull(cur.get(),0,1)?"":std::string(PQgetvalue(cur.get(),0,1));
+            auto db_at=helpers::parse_iso_utc(db_reset.empty()?reset_ref:db_reset);
+            if(db_at && now < *db_at + std::chrono::minutes(*exam.token_reset_interval)){
+              pg_fresh=true; // node lain sudah rotasi duluan — pakai token DB
+              if(!db_tok.empty()){ exam.active_token=db_tok; exam.token_last_reset_at=db_reset; }
+              real.exec_params(c.get(),"ROLLBACK",{});
+            } else {
+              auto upd=real.exec_params(c.get(),
+                "UPDATE exams SET active_token=$1, token_last_reset_at=$2 WHERE id=$3",
+                {new_token,now_text,std::to_string(exam.id)});
+              if(upd && (PQresultStatus(upd.get())==PGRES_COMMAND_OK||PQresultStatus(upd.get())==PGRES_TUPLES_OK)){
+                real.exec_params(c.get(),"COMMIT",{});
+                pg_rotated=true;
+              } else {
+                real.exec_params(c.get(),"ROLLBACK",{});
+              }
+            }
+          } else {
+            real.exec_params(c.get(),"ROLLBACK",{});
+          }
+          real.release(c.release());
+        }
+      }catch(...){ pg_rotated=false; pg_fresh=false; }
+#endif
+      if(pg_rotated){
+        // DB sudah menang di bawah row-lock — sync memori tanpa recheck.
+        exam.active_token=new_token;
+        exam.token_last_reset_at=now_text;
+        st.update(exam.id, [&](models::Exam& current){
+          current.active_token=new_token;
+          current.token_last_reset_at=now_text;
+        });
+      } else if(!pg_fresh){
       const bool rotated=st.update(exam.id, [&](models::Exam& current){
         // Recheck under the store lock so concurrent joins produce at most
         // one rotation for the same interval.
@@ -602,6 +679,7 @@ Response exam_by_token(const Request& req){
         }
       });
       (void)rotated;
+      } // !pg_fresh
     }
   }
   if(!exam.is_active() || !exam.exam_started_at.has_value() || exam.exam_started_at->empty()){
@@ -740,7 +818,11 @@ Response submit_exam(const Request& req){
     Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
   }
   // Go parity: submit hanya valid bila ujian aktif & sudah dimulai.
-  if(!exam->is_active() || !exam->exam_started_at.has_value() || exam->exam_started_at->empty()){
+  // P17-C6: snapshot exam sekali — semua cek di bawah memakai salinan ini,
+  // jangan panggil device_approved() (= active_store() lagi) sambil memegang
+  // hasil read yang masih dipakai; pisahkan read path dari approval lookup.
+  models::Exam exam_snapshot=*exam;
+  if(!exam_snapshot.is_active() || !exam_snapshot.exam_started_at.has_value() || exam_snapshot.exam_started_at->empty()){
     Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"exam not started\",\"message\":\"Ujian belum dimulai\"}"); return r;
   }
   // MAC untuk rate limit + approved lookup; canonicalize before either use.
@@ -759,13 +841,13 @@ Response submit_exam(const Request& req){
     Response r; r.status=401; r.json(401,"{\"success\":false,\"error\":\"Token tidak disertakan\"}"); return r;
   }
   // Schedule ended: hanya device approved boleh recovery-resubmit (Go).
-  if(exam_schedule_ended(*exam)){
+  if(exam_schedule_ended(exam_snapshot)){
     if(!device_approved(exam_id, sub_mac)){
       Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"Waktu ujian telah berakhir\"}"); return r;
     }
   }
   // Token cocok ATAU device approved (toleransi rotasi token, paritas Go).
-  if(!examtoken::matches(*exam, sub_token) && !device_approved(exam_id, sub_mac)){
+  if(!examtoken::matches(exam_snapshot, sub_token) && !device_approved(exam_id, sub_mac)){
     Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Ujian tidak ditemukan\"}"); return r;
   }
   // Bangun job nyata (identitas + jawaban) lalu enqueue ke queue Redis.
@@ -793,6 +875,29 @@ Response submit_exam(const Request& req){
     if(form.count("student_class")) job.student_class=form["student_class"];
     if(form.count("mac_address")) job.mac_address=sanitize_mac_like_go(form["mac_address"]);
   }
+  // P17-C7: validasi identity_fields required (paritas Go exams.go:1044-1087)
+  // SEBELUM enqueue — submission tanpa identitas wajib merusak roster/export.
+  {
+    std::string idf=exam_snapshot.identity_fields.value_or("");
+    if(!idf.empty()){
+      auto trim_ws=[](std::string s)->std::string{
+        size_t a=s.find_first_not_of(" \t\r\n"); if(a==std::string::npos) return "";
+        size_t b=s.find_last_not_of(" \t\r\n"); return s.substr(a,b-a+1);
+      };
+      for(auto& key: required_identity_keys(idf)){
+        std::string v;
+        if(key=="student_name") v=job.student_name;
+        else if(key=="exam_number") v=job.exam_number;
+        else if(key=="student_class") v=job.student_class;
+        else { auto it=job.identity_data.find(key); if(it!=job.identity_data.end()) v=it->second; }
+        if(trim_ws(v).empty()){
+          Response r; r.status=400;
+          r.json(400,"{\"success\":false,\"error\":\"Identitas wajib belum lengkap: "+json_escape(key)+"\"}");
+          return r;
+        }
+      }
+    }
+  }
   if(g_enqueue_hook){
     g_enqueue_hook(job);
   } else if(!enqueue_job_to_redis(job)){
@@ -803,7 +908,7 @@ Response submit_exam(const Request& req){
   // C4: respons menyertakan job_id (rahasia per-submission untuk poll /result)
   // + congrats_message (paritas Go SubmitExam). Android membaca job_id dari
   // respons ini untuk poll hasil.
-  std::string congrats=exam->congrats_message.value_or("");
+  std::string congrats=exam_snapshot.congrats_message.value_or("");
   if(!congrats.empty()){
     // Batasi panjang (paritas Go: field bebas, tapi jangan sampai respons raksasa).
     if(congrats.size()>2000) congrats.resize(2000);
@@ -889,10 +994,19 @@ Response exam_result(const Request& req){
     if(!raw.empty()){
       std::string stored_job=json_string_field(raw,"job_id");
       std::string stored_mac=json_string_field(raw,"mac_address");
+      std::string stored_idhash=json_string_field(raw,"identity_hash");
       int stored_exam=0; try{ stored_exam=std::stoi(json_raw_value(raw,"exam_id")); }catch(...){ }
       if(stored_job!=job_id || (stored_exam>0 && stored_exam!=exam_id) ||
          (!stored_mac.empty() && sanitize_mac_like_go(stored_mac)!=mac)){
         Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"Hasil tidak cocok dengan perangkat atau ujian\"}"); return r;
+      }
+      // P17-M6: bila worker mengikat fingerprint identitas DAN peminta
+      // menyertakan identity_data, sidik jari harus cocok (anti-TOFU).
+      if(!stored_idhash.empty() && !identity.empty()){
+        auto imap=parse_string_map(identity);
+        if(queue::identity_fingerprint(imap)!=stored_idhash){
+          Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"Hasil tidak cocok dengan identitas\"}"); return r;
+        }
       }
       // Parse {"job_id":..,"success":true,"score":87.5,"message":..}
       bool success = raw.find("\"success\":true")!=std::string::npos ||

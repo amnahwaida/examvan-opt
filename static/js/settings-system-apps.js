@@ -429,7 +429,7 @@ function submitUpload(event) {
         window.__uploadInProgress = false;
         unlockUploadOverlay(modalEl);
         hideUploadProgressPill();
-        if (xhr.status === 200) {
+        if (xhr.status === 200 || xhr.status === 201) {
             const data = JSON.parse(xhr.responseText);
             if (data.success) {
                 // Fix review ronde 3: refresh KARTU aplikasi secara in-place —
