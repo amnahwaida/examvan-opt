@@ -24,6 +24,7 @@
 #include "middleware/body_limit.hpp"
 #include "middleware/cors.hpp"
 #include "store/exam_store.hpp"
+#include "models/user.hpp"
 #ifdef HAS_LIBPQ
 #include "db/pool_real.hpp"
 #include "db/pool.hpp"
@@ -69,6 +70,9 @@ void register_full_routes(Router& r, const Config& cfg){
       if(!ok){
         Response rr; rr.status=401; rr.json(401,"{\"success\":false,\"message\":\"unauthorized\"}"); return rr;
       }
+      if(sess.admin_id<=0){
+        Response rr; rr.status=401; rr.json(401,"{\"success\":false,\"message\":\"unauthorized\"}"); return rr;
+      }
       // Revalidasi session terhadap PG (paritas Go auth.go): user yang sudah
       // di-suspend/dihapus tidak boleh lanjut pakai session lama. Fail-open
       // saat PG tidak dikonfigurasi/tak terjangkau (dev in-memory, unit test).
@@ -105,7 +109,7 @@ void register_full_routes(Router& r, const Config& cfg){
       // superadmin. Sebelumnya TIDAK ada cek role — guru/pengawas yang
       // aktif bisa hapus user, ubah saas_settings, dsb (privilege escalation).
       if(!role_req.empty()){
-        bool ok_role = sess.is_super_admin || sess.role.find(role_req)!=std::string::npos;
+        bool ok_role = sess.is_super_admin || models::has_role(sess.role, role_req);
         if(!ok_role){
           Response rr; rr.status=403; rr.json(403,"{\"success\":false,\"message\":\"forbidden\"}"); return rr;
         }
@@ -139,7 +143,7 @@ void register_full_routes(Router& r, const Config& cfg){
       // kunci jawaban). Scope memakai store (id di path) — paritas Go
       // checkExamOwnership (tanpa dimensi instansi: store C++ tidak punya
       // kolom instansi; pemilik/delegasi/superadmin tercakup).
-      if(scope=="exam"){
+      if(scope=="exam" || scope=="exam_access"){
         // Ekstrak exam id dari path (:id atau :exam_id).
         std::string eid;
         auto pid=req.params.find("exam_id");
@@ -151,8 +155,23 @@ void register_full_routes(Router& r, const Config& cfg){
             int exam_id=std::stoi(eid);
             auto e=store::active_store()->get_by_id(exam_id);
             if(e){
-              if(e->created_by==sess.admin_id) owner_ok=true;
-              if(!owner_ok && e->delegated_to && *e->delegated_to==sess.admin_id) owner_ok=true;
+              owner_ok=e->created_by==sess.admin_id || (e->delegated_to && *e->delegated_to==sess.admin_id);
+#ifdef HAS_LIBPQ
+              if(scope=="exam_access" || models::has_role(sess.role,models::kRoleOperator)){
+                std::string db_url=Config::load().database_url;
+                if(db_url.empty()) if(auto* env=getenv("DATABASE_URL")) db_url=env;
+                if(!db_url.empty()){
+                  std::string ci=pg_conninfo_from_url(db_url); if(ci.empty()) ci=db_url;
+                  examvan::db::RealPool real(ci,2);
+                  if(real.connect()) if(auto c=real.acquire()){
+                    auto access=real.exec_params(c.get(),
+                      "SELECT EXISTS(SELECT 1 FROM exam_pengawas WHERE exam_id=$1 AND user_id=$2) OR EXISTS(SELECT 1 FROM admin_users me JOIN admin_users owner ON owner.id=$3 WHERE me.id=$2 AND me.role ILIKE '%\\\"operator\\\"%' AND me.instansi<>'' AND me.instansi<>'personal' AND me.instansi=owner.instansi)",
+                      {std::to_string(exam_id),std::to_string(sess.admin_id),std::to_string(e->created_by)});
+                    if(access && PQresultStatus(access.get())==PGRES_TUPLES_OK && PQntuples(access.get())>0 && std::string(PQgetvalue(access.get(),0,0))=="t") owner_ok=true;
+                  }
+                }
+              }
+#endif
             }
           }catch(...){}
         }
@@ -205,6 +224,9 @@ void register_full_routes(Router& r, const Config& cfg){
       // create_exam memakainya untuk created_by (FK exams_created_by_fkey).
       Request r2=req;
       r2.headers["X-Internal-Admin-Id"]=std::to_string(sess.admin_id);
+      r2.headers["X-Internal-Admin-Role"]=sess.role;
+      r2.headers["X-Internal-Admin-Instansi"]=sess.instansi;
+      r2.headers["X-Internal-Admin-Super"]=sess.is_super_admin?"1":"0";
       return h(r2);
     };
   };
@@ -279,42 +301,46 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/api/hasil/:token", rl_wrap(g_hasil_api_rl, handlers::public_::cek_hasil_api));
   r.add("POST","/api/webhook", handlers::api::webhook);
 
-  auto check_auth=[cfg](const std::string& cookie_hdr)->bool{
-    if(cookie_hdr.empty()) return false;
-    if(cfg.secret_prev.empty()) return verify_session_cookie(cfg.secret_key, cookie_hdr).has_value();
-    return verify_session_cookie_dual(cfg.secret_key, cfg.secret_prev, cookie_hdr).has_value();
+  auto check_auth=[cfg](const Request& req)->bool{
+    auto it=req.headers.find("Cookie");
+    if(it==req.headers.end()) return false;
+    SessionData sess;
+    bool ok=cfg.secret_prev.empty()?verify_session_cookie(cfg.secret_key,it->second).has_value():verify_session_cookie_dual(cfg.secret_key,cfg.secret_prev,it->second).has_value();
+    if(!ok) return false;
+    auto parsed=cfg.secret_prev.empty()?verify_session_cookie(cfg.secret_key,it->second):verify_session_cookie_dual(cfg.secret_key,cfg.secret_prev,it->second);
+    return parsed.has_value() && parsed->admin_id>0;
   };
   r.add("GET","/admin/dashboard", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !check_auth(it->second)){
+    if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/dashboard"; return rr;
     }
     return handlers::admin::dashboard_page(req);
   });
   r.add("GET","/admin/settings", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !check_auth(it->second)){
+    if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/settings"; return rr;
     }
     return handlers::admin::settings_page(req);
   });
   r.add("GET","/admin/pengawas", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !check_auth(it->second)){
+    if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/pengawas"; return rr;
     }
     return handlers::admin::pengawas_page(req);
   });
   r.add("GET","/admin/pengawas/:exam_id", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !check_auth(it->second)){
+    if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/pengawas"; return rr;
     }
     return handlers::admin::pengawas_detail_page(req);
   });
   r.add("GET","/admin/submissions", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
-    if(it==req.headers.end() || !check_auth(it->second)){
+    if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/submissions"; return rr;
     }
     return handlers::admin::submissions_page(req);
@@ -353,8 +379,8 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("DELETE","/admin/api/exams/:id", admin_api(handlers::admin::delete_exam,"","exam"));
   r.add("POST","/admin/api/exams/bulk-toggle", admin_api(handlers::admin::bulk_toggle_exams));
   r.add("POST","/admin/api/exams/bulk-delete", admin_api(handlers::admin::bulk_delete_exams));
-  r.add("GET","/admin/api/exams/:exam_id/delegate-data", admin_api(handlers::admin::delegate_data,"","exam"));
-  r.add("POST","/admin/api/exams/:exam_id/delegate", admin_api(handlers::admin::delegate_exam,"","exam"));
+  r.add("GET","/admin/api/exams/:exam_id/delegate-data", admin_api(handlers::admin::delegate_data,"operator","exam"));
+  r.add("POST","/admin/api/exams/:exam_id/delegate", admin_api(handlers::admin::delegate_exam,"operator","exam"));
   r.add("POST","/admin/api/exams/:exam_id/toggle", admin_api(handlers::admin::update_exam,"","exam"));
   r.add("POST","/admin/api/exams/:exam_id/delete", admin_api(handlers::admin::delete_exam,"","exam"));
   r.add("POST","/admin/api/exams/:exam_id/edit", admin_api(handlers::admin::update_exam,"","exam"));
@@ -373,13 +399,13 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/admin/api/queue/status", admin_api(handlers::admin::queue_status));
   r.add("POST","/admin/api/submissions/:id/delete", admin_api(handlers::admin::delete_submission,"","submission"));
   r.add("GET","/admin/api/pengawas/exams", admin_api(handlers::admin::pengawas_exams));
-  r.add("GET","/admin/api/pengawas/exams/:exam_id/submissions", admin_api(handlers::admin::pengawas_submissions,"","exam"));
-  r.add("GET","/admin/api/pengawas/exams/:exam_id/approvals", admin_api(handlers::admin::pending_approvals,"","exam"));
-  r.add("POST","/admin/api/pengawas/exams/:exam_id/approvals/:mac_address", admin_api(handlers::admin::set_approval,"","exam"));
-  r.add("GET","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::get_auto_approve,"","exam"));
-  r.add("POST","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::set_auto_approve,"","exam"));
-  r.add("GET","/admin/api/system-apps", admin_api(handlers::admin::settings_page, "superadmin"));
-  r.add("POST","/admin/api/system-apps", admin_api(handlers::admin::update_settings, "superadmin"));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/submissions", admin_api(handlers::admin::pengawas_submissions,"","exam_access"));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/approvals", admin_api(handlers::admin::pending_approvals,"","exam_access"));
+  r.add("POST","/admin/api/pengawas/exams/:exam_id/approvals/:mac_address", admin_api(handlers::admin::set_approval,"","exam_access"));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::get_auto_approve,"","exam_access"));
+  r.add("POST","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::set_auto_approve,"","exam_access"));
+  r.add("GET","/admin/api/system-apps", admin_api(handlers::admin::system_apps_page, "superadmin"));
+  r.add("POST","/admin/api/system-apps", admin_api(handlers::admin::system_apps_page, "superadmin"));
 }
 
 } // namespace examvan

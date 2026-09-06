@@ -353,6 +353,8 @@ message SubmitExamResponse {
   string status = 2;
   string error = 3;
   string error_code = 4;
+  string job_id = 5;
+  string congrats_message = 6;
 }
 
 message ExamResultResponse {

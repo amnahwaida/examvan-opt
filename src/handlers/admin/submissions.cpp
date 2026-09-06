@@ -1,4 +1,5 @@
 #include "handlers/admin/submissions.hpp"
+#include "handlers/admin/template_helper.hpp"
 #include "helpers/utils.hpp"
 #include "config/config.hpp"
 #include "middleware/protobuf.hpp"
@@ -65,15 +66,11 @@ static std::string json_escape_ci(const std::string& s){
 #endif
 
 Response submissions_page(const Request&){
-#ifdef HAS_PROTOBUF
-  if(middleware::is_protobuf_accept(Request{})){
-    // halaman HTML; tidak ada protobuf
-  }
-#endif
-  std::ifstream fr("templates/admin/submissions.rendered.html");
-  if(fr){
-    std::ostringstream ss; ss<<fr.rdbuf();
-    Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.body=ss.str(); return r;
+  RenderedAdminPage rp=render_admin_page("submissions","2.7.2");
+  if(!rp.html.empty()){
+    Response r; r.status=200; r.headers["Content-Type"]="text/html";
+    if(!rp.csrf_cookie.empty()) r.headers["Set-Cookie"]=rp.csrf_cookie;
+    r.body=rp.html; return r;
   }
   Response r; r.status=200; r.headers["Content-Type"]="text/html";
   r.body="<html><body><h1>Submissions</h1></body></html>"; return r;

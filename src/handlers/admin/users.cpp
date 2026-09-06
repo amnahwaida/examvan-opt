@@ -24,7 +24,7 @@ static std::string get_param(const std::map<std::string,std::string>& form, cons
   auto it=form.find(key); return it!=form.end()? it->second : "";
 }
 
-static std::string json_escape(const std::string& s){
+[[maybe_unused]] static std::string json_escape(const std::string& s){
   std::string o; o.reserve(s.size()+16);
   for(unsigned char c: s){
     switch(c){
@@ -85,7 +85,7 @@ static std::optional<double> json_double_field(const std::string& body, const st
   catch(...) { return std::nullopt; }
 }
 
-// Parse array JSON roles: ["guru","pengawas"] → dipisah koma.
+// Parse array JSON roles and keep only canonical application roles.
 static std::string json_roles_join(const std::string& body){
   std::string needle="\"roles\"";
   size_t p=body.find(needle);
@@ -106,12 +106,14 @@ static std::string json_roles_join(const std::string& body){
         if(body[i]=='"') break;
         r.push_back(body[i]);
       }
-      if(!r.empty()) roles.push_back(r);
+      if(r=="guru" || r=="pengawas" || r=="operator" || r=="superadmin"){
+        if(std::find(roles.begin(),roles.end(),r)==roles.end()) roles.push_back(r);
+      }
       i++;
     } else { while(i<body.size() && body[i]!=']' && body[i]!=',') i++; }
   }
   std::string out="[";
-  for(size_t k=0;k<roles.size();k++){ if(k>0) out+=","; out+="\""+json_escape(roles[k])+"\""; }
+  for(size_t k=0;k<roles.size();k++){ if(k>0) out+=","; out+="\""+roles[k]+"\""; }
   out+="]";
   return out;
 }

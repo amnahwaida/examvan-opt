@@ -125,18 +125,19 @@ static std::map<std::string,std::string> parse_string_map(const std::string& raw
   return out;
 }
 
-// Enqueue SubmissionJob ke Redis (frozen key examvan:submissions:pending).
-static void enqueue_job_to_redis(const queue::SubmissionJob& job){
+static bool enqueue_job_to_redis(const queue::SubmissionJob& job){
 #ifdef HAS_HIREDIS
   auto cfg=Config::load();
   auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
-  if(ctx){
-    std::string payload=job.to_json();
-    auto* r=(redisReply*)redisCommand(ctx.get(),"LPUSH %s %b", queue::kQueueKey, payload.data(), payload.size());
-    if(r) freeReplyObject(r);
-  }
+  if(!ctx) return false;
+  std::string payload=job.to_json();
+  auto* r=(redisReply*)redisCommand(ctx.get(),"LPUSH %s %b", queue::kQueueKey, payload.data(), payload.size());
+  bool ok=r && r->type==REDIS_REPLY_INTEGER && r->integer>0;
+  if(r) freeReplyObject(r);
+  return ok;
 #else
   (void)job;
+  return false;
 #endif
 }
 
@@ -259,9 +260,8 @@ Response list_exams(const Request& req){
     pb.set_per_page(per_page);
     pb.set_total(total);
     pb.set_total_pages(total_pages);
-    for(int i=begin;i<end;++i){
-      pb.add_tokens(exams[i].active_token.empty()?exams[i].token:exams[i].active_token);
-    }
+    // Public protobuf must match the JSON contract: never expose exam tokens.
+    // The legacy tokens field is retained for wire compatibility but left empty.
     std::string out; pb.SerializeToString(&out);
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
@@ -457,6 +457,13 @@ Response request_approval(const Request& req){
   auto exam=store::active_store()->get_by_id(exam_id);
   if(!exam){
     Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Ujian tidak ditemukan\"}"); return r;
+  }
+  // Per-exam and per-device anti-flood buckets protect the pending queue and
+  // auto-approval cap from distributed callers using one leaked exam token.
+  std::string req_ip=req.headers.count("X-Forwarded-For")?req.headers.at("X-Forwarded-For"):"";
+  if(!rate_limit_allowed("ratelimit:reqapp-exam:", exam_id, "", req_ip, 12000) ||
+     !rate_limit_allowed("ratelimit:reqapp-device:", exam_id, mac, req_ip, 30)){
+    Response r; r.status=429; r.json(429,"{\"success\":false,\"error\":\"Terlalu banyak permintaan izin. Silakan coba lagi nanti.\"}"); return r;
   }
   // Token valid ATAU device sudah punya baris approval (toleransi rotasi token).
   if(!examtoken::matches(*exam, token) && !device_has_approval(exam_id, mac)){
@@ -736,9 +743,10 @@ Response submit_exam(const Request& req){
   if(!exam->is_active() || !exam->exam_started_at.has_value() || exam->exam_started_at->empty()){
     Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"exam not started\",\"message\":\"Ujian belum dimulai\"}"); return r;
   }
-  // MAC untuk rate limit + approved lookup.
+  // MAC untuk rate limit + approved lookup; canonicalize before either use.
   std::string sub_mac=json_string_field(req.body,"mac_address");
   if(sub_mac.empty()){ auto form=helpers::parse_form(req.body); if(form.count("mac_address")) sub_mac=form["mac_address"]; }
+  sub_mac=sanitize_mac_like_go(sub_mac);
   std::string sub_ip=req.headers.count("X-Forwarded-For")?req.headers.at("X-Forwarded-For"):"";
   // Rate limit per exam+MAC (paritas Go ratelimit:submit: 10/60s).
   if(!rate_limit_allowed("ratelimit:submit:", exam_id, sub_mac, sub_ip, 10)){
@@ -787,8 +795,10 @@ Response submit_exam(const Request& req){
   }
   if(g_enqueue_hook){
     g_enqueue_hook(job);
-  } else {
-    enqueue_job_to_redis(job);
+  } else if(!enqueue_job_to_redis(job)){
+    Response r; r.status=503;
+    r.json(503,"{\"success\":false,\"error\":\"Antrean jawaban tidak tersedia. Silakan coba lagi.\"}");
+    return r;
   }
   // C4: respons menyertakan job_id (rahasia per-submission untuk poll /result)
   // + congrats_message (paritas Go SubmitExam). Android membaca job_id dari
@@ -803,6 +813,8 @@ Response submit_exam(const Request& req){
     examvan::v1::SubmitExamResponse pb;
     pb.set_success(true);
     pb.set_status("queued");
+    pb.set_job_id(job.job_id);
+    if(!congrats.empty()) pb.set_congrats_message(congrats);
     std::string out; pb.SerializeToString(&out);
     Response r; r.status=202; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
@@ -843,6 +855,7 @@ Response exam_result(const Request& req){
   std::string mac=req.headers.count("X-Device-Id")?req.headers.at("X-Device-Id"):getp("mac_address");
   std::string identity=getp("identity_data");
   mac=sanitize_mac_like_go(mac);
+  if(!identity.empty()) identity=sanitize_identity_map_json(identity);
   // --- Access gate ---
   std::string token=req.headers.count("X-Exam-Token")?req.headers.at("X-Exam-Token"):getp("token");
   bool access_ok = (!token.empty() && examtoken::matches(*exam, token));
@@ -874,6 +887,13 @@ Response exam_result(const Request& req){
 #endif
     }
     if(!raw.empty()){
+      std::string stored_job=json_string_field(raw,"job_id");
+      std::string stored_mac=json_string_field(raw,"mac_address");
+      int stored_exam=0; try{ stored_exam=std::stoi(json_raw_value(raw,"exam_id")); }catch(...){ }
+      if(stored_job!=job_id || (stored_exam>0 && stored_exam!=exam_id) ||
+         (!stored_mac.empty() && sanitize_mac_like_go(stored_mac)!=mac)){
+        Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"Hasil tidak cocok dengan perangkat atau ujian\"}"); return r;
+      }
       // Parse {"job_id":..,"success":true,"score":87.5,"message":..}
       bool success = raw.find("\"success\":true")!=std::string::npos ||
                      raw.find("\"success\": true")!=std::string::npos;
@@ -909,9 +929,9 @@ Response exam_result(const Request& req){
       examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
       if(auto c=real.acquire()){
         auto res=real.exec_params(c.get(),
-          "SELECT score FROM submissions WHERE exam_id=$1 AND mac_address=$2 AND answers_json IS NOT NULL AND answers_json != ''"
+          "SELECT score FROM submissions WHERE job_id=$1 AND exam_id=$2 AND mac_address=$3 AND answers_json IS NOT NULL AND answers_json != ''"
           " ORDER BY created_at DESC LIMIT 1",
-          {std::to_string(exam_id), mac});
+          {job_id,std::to_string(exam_id),mac});
         if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0){
           std::string score=PQgetvalue(res.get(),0,0);
           if(!score.empty()){

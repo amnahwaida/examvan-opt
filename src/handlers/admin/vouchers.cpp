@@ -598,7 +598,7 @@ Response redeem_voucher(const Request& req){
       "INSERT INTO voucher_redemptions (voucher_id,user_id,is_active,package,max_exams,max_pdf_size,max_concurrent_exams,max_storage_size,max_users,role,remaining_seconds,activated_at) VALUES ($1,$2,true,$3,$4,$5,$6,$7,$8,$9,$10,now())",
       {vid,std::to_string(uid),pkg,std::to_string(max_exams),std::to_string(max_pdf),
        std::to_string(max_conc),std::to_string(max_storage),std::to_string(max_users),role,std::to_string(remaining_seconds)});
-    if(!ins || PQresultStatus(ins.get())!=PGRES_TUPLES_OK){ result="__fail__"; rollback_release(); return; }
+    if(!ins || PQresultStatus(ins.get())!=PGRES_COMMAND_OK){ result="__fail__"; rollback_release(); return; }
     auto usr=real.exec_params(c.get(),
       "UPDATE admin_users SET package=$2,max_exams=$3,max_pdf_size=$4,max_concurrent_exams=$5,max_storage_size=$6,package_role=$7,expires_at=now() + ($8 * interval '1 second') WHERE id=$1",
       {std::to_string(uid),pkg,std::to_string(max_exams),std::to_string(max_pdf),
@@ -633,10 +633,13 @@ Response activate_voucher(const Request& req){
   with_pg([&](examvan::db::RealPool& real){
     auto c=real.acquire();
     if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+    auto begin=real.exec_params(c.get(),"BEGIN",{});
+    if(!begin || PQresultStatus(begin.get())!=PGRES_COMMAND_OK){ result="__fail__"; real.release(c.release()); return; }
+    auto rollback_release=[&]{ real.exec_params(c.get(),"ROLLBACK",{}); real.release(c.release()); };
     auto r=real.exec_params(c.get(),
-      "SELECT package,max_exams,max_pdf_size,max_concurrent_exams,max_storage_size,COALESCE(role,''),remaining_seconds,is_active FROM voucher_redemptions WHERE id=$1 AND user_id=$2",
+      "SELECT package,max_exams,max_pdf_size,max_concurrent_exams,max_storage_size,COALESCE(role,''),remaining_seconds,is_active FROM voucher_redemptions WHERE id=$1 AND user_id=$2 FOR UPDATE",
       {rid,std::to_string(uid)});
-    if(!r || PQresultStatus(r.get())!=PGRES_TUPLES_OK || PQntuples(r.get())==0){ result="notfound"; real.release(c.release()); return; }
+    if(!r || PQresultStatus(r.get())!=PGRES_TUPLES_OK || PQntuples(r.get())==0){ result="notfound"; rollback_release(); return; }
     std::string pkg=PQgetvalue(r.get(),0,0);
     std::string mx=PQgetvalue(r.get(),0,1);
     std::string mp=PQgetvalue(r.get(),0,2);
@@ -644,16 +647,21 @@ Response activate_voucher(const Request& req){
     std::string ms=PQgetvalue(r.get(),0,4);
     std::string role=PQgetvalue(r.get(),0,5);
     std::string rem=PQgetvalue(r.get(),0,6);
-    // 1. deactivate semua redemption user yang aktif (idx unique user_id WHERE is_active)
-    auto de=real.exec_params(c.get(),"UPDATE voucher_redemptions SET is_active=false WHERE user_id=$1",{std::to_string(uid)});
-    if(!de || PQresultStatus(de.get())!=PGRES_COMMAND_OK){ result="__fail__"; real.release(c.release()); return; }
-    // 2. aktifkan yang dipilih + terapkan entitlement
+    if(rem.empty() || std::atoll(rem.c_str())<=0 || std::string(PQgetvalue(r.get(),0,7))!="t"){
+      result="__invalid__"; rollback_release(); return;
+    }
+    // 1. deactivate all other active redemptions inside this transaction.
+    auto de=real.exec_params(c.get(),"UPDATE voucher_redemptions SET is_active=false WHERE user_id=$1 AND id<>$2",{std::to_string(uid),rid});
+    if(!de || PQresultStatus(de.get())!=PGRES_COMMAND_OK){ result="__fail__"; rollback_release(); return; }
+    // 2. activate selected and apply entitlement.
     auto ac=real.exec_params(c.get(),"UPDATE voucher_redemptions SET is_active=true,activated_at=now(),remaining_seconds=$2 WHERE id=$1",{rid,rem});
-    if(!ac || PQresultStatus(ac.get())!=PGRES_COMMAND_OK){ result="__fail__"; real.release(c.release()); return; }
+    if(!ac || PQresultStatus(ac.get())!=PGRES_COMMAND_OK){ result="__fail__"; rollback_release(); return; }
     auto usr=real.exec_params(c.get(),
       "UPDATE admin_users SET package=$2,max_exams=$3,max_pdf_size=$4,max_concurrent_exams=$5,max_storage_size=$6,package_role=$7,expires_at=now() + ($8 * interval '1 second') WHERE id=$1",
       {std::to_string(uid),pkg,mx,mp,mc,ms,role,rem});
-    if(!usr || PQresultStatus(usr.get())!=PGRES_COMMAND_OK){ result="__fail__"; real.release(c.release()); return; }
+    if(!usr || PQresultStatus(usr.get())!=PGRES_COMMAND_OK){ result="__fail__"; rollback_release(); return; }
+    auto commit=real.exec_params(c.get(),"COMMIT",{});
+    if(!commit || PQresultStatus(commit.get())!=PGRES_COMMAND_OK){ result="__fail__"; real.release(c.release()); return; }
     result="ok";
     real.release(c.release());
   });

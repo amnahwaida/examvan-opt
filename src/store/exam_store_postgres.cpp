@@ -161,6 +161,9 @@ bool ExamStorePostgres::migrate(){
     exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS owner_id TEXT");
     exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS updated_at TEXT");
     exec_command("ALTER TABLE exam_idempotency ADD COLUMN IF NOT EXISTS finalized_at TEXT");
+    // Bind asynchronous result records to their durable submission.
+    exec_command("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS job_id TEXT");
+    exec_command("CREATE INDEX IF NOT EXISTS idx_submissions_job_id ON submissions(job_id)");
     // Sync sequence PG setelah restore backup: restore hanya memulihkan data
     // (MAX(id)), bukan posisi sequence. Kalau sequence ketinggalan, nextval
     // mengembalikan id yang sudah dipakai → INSERT gagal (PK violation / 409).

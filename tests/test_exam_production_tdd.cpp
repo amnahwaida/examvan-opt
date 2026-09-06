@@ -1189,22 +1189,20 @@ TEST(ExamProduction, DashboardRow_UsesActiveTokenAndTokenMode){
     << "dashboard harus tampilkan 'Nonaktif Otomatis' untuk tombstoned exam";
 }
 
-// Bug E/G: list_admin_exams harus mengandung field lengkap
-TEST(ExamProduction, ListExams_IncludesAllModelFields){
+// Public admin list redacts credentials while retaining operational metadata.
+TEST(ExamProduction, ListExams_RedactsCredentials){
   with_clean_store(); set_r2_env(true);
   Request cr; cr.body=form_body("FullList","/tmp/a.pdf","100");
   auto c=create_exam(cr); ASSERT_EQ(c.status,201);
-  Request rl;
+  Request rl; rl.headers["X-Internal-Admin-Id"]="0"; rl.headers["X-Internal-Admin-Super"]="1";
   auto res=list_admin_exams(rl);
   ASSERT_EQ(res.status,200);
-  EXPECT_NE(res.body.find("\"active_token\""), std::string::npos)
-    << "list harus expose active_token: " << res.body;
-  EXPECT_NE(res.body.find("\"token_mode\""), std::string::npos)
-    << "list harus expose token_mode: " << res.body;
-  EXPECT_NE(res.body.find("\"auto_approve\""), std::string::npos)
-    << "list harus expose auto_approve: " << res.body;
-  EXPECT_NE(res.body.find("\"tombstoned_at\""), std::string::npos)
-    << "list harus expose tombstoned_at: " << res.body;
+  EXPECT_EQ(res.body.find("\"token\""), std::string::npos) << res.body;
+  EXPECT_EQ(res.body.find("\"active_token\""), std::string::npos) << res.body;
+  EXPECT_EQ(res.body.find("\"file_path\""), std::string::npos) << res.body;
+  EXPECT_NE(res.body.find("\"token_mode\""), std::string::npos) << res.body;
+  EXPECT_NE(res.body.find("\"auto_approve\""), std::string::npos) << res.body;
+  EXPECT_NE(res.body.find("\"tombstoned_at\""), std::string::npos) << res.body;
 }
 
 // ======================================================================

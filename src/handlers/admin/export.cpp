@@ -2,6 +2,7 @@
 #include "config/config.hpp"
 #include "helpers/utils.hpp"
 #include "utils/log.hpp"
+#include "store/exam_store.hpp"
 #include <vector>
 #include <cstdint>
 #include <ctime>
@@ -149,6 +150,15 @@ Response export_submissions_csv(const Request&){
 
 Response export_submissions_xlsx(const Request& req){
   int filter=export_exam_id_from(req);
+  int actor_id=0; bool super_admin=false;
+  if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
+  if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
+  std::vector<int> allowed_ids;
+  if(!super_admin){
+    for(const auto& e: store::active_store()->list_all())
+      if(e.created_by==actor_id || (e.delegated_to && *e.delegated_to==actor_id)) allowed_ids.push_back(e.id);
+    if(filter>0 && std::find(allowed_ids.begin(),allowed_ids.end(),filter)==allowed_ids.end()) filter=-1;
+  }
   std::vector<SubmissionRow> rows;
 #ifdef HAS_LIBPQ
   try{
@@ -157,10 +167,17 @@ Response export_submissions_xlsx(const Request& req){
     // conninfo_from_url_or_raw (BUKAN sanitized_url — password "***" gagal auth).
     examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
     if(auto c=real.acquire()){
-      const char* sql="SELECT s.id,COALESCE(e.name,''),COALESCE(s.student_name,''),COALESCE(s.exam_number,''),"
+      std::string sql="SELECT s.id,COALESCE(e.name,''),COALESCE(s.student_name,''),COALESCE(s.exam_number,''),"
         "COALESCE(s.student_class,''),COALESCE(s.score::text,''),COALESCE(s.created_at::text,''),COALESCE(s.mac_address,'')"
-        " FROM submissions s LEFT JOIN exams e ON e.id=s.exam_id WHERE ($1=0 OR s.exam_id=$1) ORDER BY s.id";
-      auto r=real.exec_params(c.get(),sql,{std::to_string(filter)});
+        " FROM submissions s LEFT JOIN exams e ON e.id=s.exam_id WHERE ";
+      std::vector<std::string> params;
+      if(filter<0){ sql+="FALSE"; }
+      else if(filter>0){ sql+="s.exam_id=$1"; params.push_back(std::to_string(filter)); }
+      else if(super_admin){ sql+="TRUE"; }
+      else if(allowed_ids.empty()){ sql+="FALSE"; }
+      else { sql+="s.exam_id = ANY($1::int[])"; std::string ids="{"; for(size_t i=0;i<allowed_ids.size();++i){ if(i) ids+=","; ids+=std::to_string(allowed_ids[i]); } ids+="}"; params.push_back(ids); }
+      sql+=" ORDER BY s.id";
+      auto r=real.exec_params(c.get(),sql,params);
       if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
         for(int i=0;i<PQntuples(r.get());i++){
           SubmissionRow row;

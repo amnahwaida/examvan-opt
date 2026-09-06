@@ -40,6 +40,9 @@ struct SubmissionJob {
 
 struct JobResult {
   std::string job_id;
+  int exam_id{0};
+  std::string mac_address;
+  std::string identity_data;
   bool success{false};
   std::optional<double> score;
   std::string message;
@@ -84,6 +87,7 @@ public:
                            std::function<void(const std::string&,const std::string&)> set_result);
   std::string enqueue(const std::map<std::string,std::string>& data);
   std::optional<SubmissionJob> dequeue(int timeout_sec=5);
+  bool requeue(const SubmissionJob& job);
   void store_result(const JobResult& r);
 private:
   std::function<void(const std::string&,const std::string&)> lpush_;

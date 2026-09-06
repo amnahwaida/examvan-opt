@@ -596,11 +596,13 @@ TEST(ProtobufHandlers, SubmitExam_ValidProtobufResponse) {
   ASSERT_GT(eid,0);
   auto exam=store::active_store()->get_by_id(eid);
   ASSERT_TRUE(exam.has_value());
+  handlers::api::set_submit_enqueue_hook_for_test([](const queue::SubmissionJob&){});
   auto req = pb_accept();
   req.method = "POST";
   req.params["exam_id"] = std::to_string(eid);
   req.headers["X-Exam-Token"] = exam->token;
   auto res = handlers::api::submit_exam(req);
+  handlers::api::set_submit_enqueue_hook_for_test(nullptr);
   EXPECT_EQ(res.status, 202);
   EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
   ASSERT_FALSE(res.body.empty());
@@ -608,6 +610,7 @@ TEST(ProtobufHandlers, SubmitExam_ValidProtobufResponse) {
   ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid SubmitExamResponse protobuf";
   EXPECT_TRUE(pb.success());
   EXPECT_EQ(pb.status(), "queued");
+  EXPECT_FALSE(pb.job_id().empty());
 }
 
 TEST(ProtobufHandlers, SubmitExam_JsonStillWorks) {
@@ -615,9 +618,11 @@ TEST(ProtobufHandlers, SubmitExam_JsonStillWorks) {
   ASSERT_GT(eid,0);
   auto exam=store::active_store()->get_by_id(eid);
   ASSERT_TRUE(exam.has_value());
+  handlers::api::set_submit_enqueue_hook_for_test([](const queue::SubmissionJob&){});
   Request req; req.method = "POST"; req.params["exam_id"] = std::to_string(eid);
   req.headers["X-Exam-Token"] = exam->token;
   auto res = handlers::api::submit_exam(req);
+  handlers::api::set_submit_enqueue_hook_for_test(nullptr);
   EXPECT_EQ(res.status, 202);
   EXPECT_NE(res.body.find("\"status\":\"queued\""), std::string::npos);
 }

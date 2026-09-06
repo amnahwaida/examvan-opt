@@ -249,6 +249,11 @@ Response update_settings(const Request& req){
     std::string key=kSettingKeys[i];
     if(!json_has_key(req.body,key)) continue; // only present keys are written
     std::string value=raw_val(key);
+    // GET masks secrets as ***...last4; accepting that mask would destroy
+    // the stored secret when the frontend saves unrelated settings.
+    if((key=="smtp_password" || key=="turnstile_secret_key") && value.find('*')!=std::string::npos){
+      continue;
+    }
 #ifdef HAS_LIBPQ
     upsert_setting(key,value);
     written++;

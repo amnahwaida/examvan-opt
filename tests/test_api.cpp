@@ -93,9 +93,11 @@ TEST(Api, SubmitQueued) {
   ASSERT_GT(eid,0);
   auto exam=examvan::store::active_store()->get_by_id(eid);
   ASSERT_TRUE(exam.has_value());
+  handlers::api::set_submit_enqueue_hook_for_test([](const queue::SubmissionJob&){});
   Request req; req.params["exam_id"]=std::to_string(eid);
   req.headers["X-Exam-Token"]=exam->token;
   EXPECT_EQ(handlers::api::submit_exam(req).status,202);
+  handlers::api::set_submit_enqueue_hook_for_test(nullptr);
   // Submit tanpa exam_id → 400 (bukan 202 sukses palsu).
   Request bad; EXPECT_EQ(handlers::api::submit_exam(bad).status,400);
 }

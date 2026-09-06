@@ -579,16 +579,18 @@ Response cek_hasil_api(const Request& req){
                 +",\"student_name\":"+json_escape(PQgetvalue(rows.get(),i,1))
                 +",\"exam_number\":"+json_escape(PQgetvalue(rows.get(),i,2))
                 +",\"student_class\":"+json_escape(PQgetvalue(rows.get(),i,3))
-                +",\"identity_data\":"+idata
                 +",\"score\":"+score_j
                 +",\"max_score\":"+max_j
                 +",\"start_time\":"+(stime.empty()?"null":json_escape(iso_utc_from_pg(stime)))
                 +",\"created_at\":"+json_escape(iso_utc_from_pg(ctime))
                 +",\"start_time_display\":"+json_escape(wib_display(stime))
-                +",\"created_at_display\":"+json_escape(wib_display(ctime))
-                +",\"evaluated_answers\":"+eval;
+                +",\"created_at_display\":"+json_escape(wib_display(ctime));
+              // Anonymous viewers must not receive identity or per-question
+              // correctness details when show_answers is disabled.
               if(show_answers || logged){
-                s+=",\"answers\":"+(answers_raw.empty()?"{}":answers_raw);
+                s+=",\"identity_data\":"+idata
+                  +",\"evaluated_answers\":"+eval
+                  +",\"answers\":"+(answers_raw.empty()?"{}":answers_raw);
               }
               s+="}";
             }

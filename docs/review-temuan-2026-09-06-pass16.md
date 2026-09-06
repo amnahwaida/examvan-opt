@@ -1,13 +1,13 @@
 # Review Menyeluruh Seluruh Alur — Temuan Pass-16 (2026-09-06)
 
-Status: **review current-tree selesai; belum ada remediation code yang diterapkan pada pass ini**.
+Status: **remediation in progress; current tree has a verified green full suite after the first remediation batches**.
 
 ## Scope dan baseline
 
 - Repository target: `/home/vannyezha/project/sekolah/examvan-opt`.
 - Reference Go: `/home/vannyezha/project/sekolah/EXAMVAN/webui`, commit `13c05081bde133a6b681bed4865375b43ffd547f`.
 - Baseline current test binary dari root: **681/682 passed**, 1 pre-existing skip: `P7_Frontend.JsGuardCount`.
-- Current root `HEAD`: `4e4c4ac`.
+- Current root `HEAD` includes build/docs commits `83e5729` and `bd9361c`; remediation edits are currently uncommitted.
 - Uncommitted sebelum/selama review: `src/db/pool_real.hpp`, `src/handlers/auth/auth_store.cpp`, `src/server/server.cpp`, serta laporan pass-15 dan direktori `.claude/`. Perubahan kode tersebut bukan remediation pass-16 dan belum diaudit sebagai fix resmi.
 - Beberapa subagent membaca worktree lama atau branch snapshot lama; klaim yang hanya berasal dari snapshot tersebut tidak dimasukkan. Temuan di bawah diverifikasi terhadap file current root atau merupakan temuan pass-15 yang kembali diverifikasi.
 
@@ -315,4 +315,28 @@ C++ mengikuti Go saat ini, tetapi anonymous API menerima identity data dan `eval
 
 ---
 
-*Pass-16 selesai 2026-09-06. Tidak ada code fix yang diterapkan; laporan ini mendokumentasikan current-tree findings dan membedakan temuan inherited dari temuan baru.*
+
+
+## Remediation progress — 2026-09-06
+
+Implemented and verified in the current tree:
+
+- Queue workers no longer publish `done` before persistence; DB transactions check SQL results, retry/requeue failed jobs, and shutdown drains staged work. Redis enqueue failures now return a non-queued error instead of false `202`.
+- Result records now carry binding metadata and `/result` validates job/exam/device; durable fallback queries exact `job_id`.
+- `SubmitExamResponse` protobuf now includes `job_id` and `congrats_message`; generated bindings were rebuilt.
+- Public protobuf exam listing no longer emits tokens. Submit MACs are canonicalized before rate limiting, answer-key stripping handles first-member keys, and approval requests have exam/device rate limits.
+- Public results hide `identity_data`, `evaluated_answers`, and raw answers from anonymous viewers when `show_answers=false`, per product decision.
+- Canonical role parsing/session superadmin derivation is implemented; signed legacy superadmin cookies remain compatible. Admin wrapper rejects non-positive IDs, uses exact role checks, and supports separate exam access scope for assigned pengawas/same-instansi operators. Delegation routes require operator control.
+- Voucher redemption accepts the correct PostgreSQL command status; voucher activation uses transaction/row lock and rejects inactive/expired/zero-duration redemptions. Masked settings secrets are preserved, and user role arrays are allowlisted.
+- Edit PDF filenames are sanitized using the create-upload policy; submissions pages refresh CSRF through the admin renderer; system-app routes no longer fall through to unrelated SaaS settings handlers.
+- Existing and newly adjusted tests remain green in focused runs; the full current suite is green at **681/682 passed, 1 pre-existing skip**.
+
+Still open / requiring the next implementation batch:
+
+- PostgreSQL-backed tenant filtering for admin list/submission/export/dashboard/bulk routes; current immediate list redaction/scope does not replace a complete instansi query policy.
+- Full pengawas roster validation (active role/same instansi), transaction error handling, and audit endpoint/template rendering.
+- HTML page session revalidation, logout form token wiring, login account lockout/dummy-bcrypt parity, Content-Type-aware login CSRF, complete `__Host-` CSRF propagation across all page renderers, and public/catch-all redirect hardening.
+- Complete system-app CRUD, SMTP-test, pengawas-state, and audit-log route implementations or explicit UI removal.
+- PostgreSQL/Redis integration tests for durable queue commit/retry, result binding, voucher transactions, tenant authorization, and schema migrations. No finding is considered production-closed until these integration paths pass.
+
+*The original findings above remain historical; this section records implementation status and does not erase unresolved findings.*

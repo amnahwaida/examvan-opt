@@ -219,8 +219,9 @@ std::optional<SubmissionJob> SubmissionJob::from_protobuf(const std::string& s){
 #endif
 std::string JobResult::to_json() const {
   std::ostringstream ss;
-  ss<<"{\"job_id\":\""<<job_id<<"\",\"success\":"<<(success?"true":"false")
-    <<",\"message\":\""<<message<<"\",\"processed_at\":\""<<processed_at<<"\"";
+  ss<<"{\"job_id\":\""<<json_escape(job_id)<<"\",\"exam_id\":"<<exam_id
+    <<",\"mac_address\":\""<<json_escape(mac_address)<<"\",\"identity_data\":\""<<json_escape(identity_data)<<"\",\"success\":"<<(success?"true":"false")
+    <<",\"message\":\""<<json_escape(message)<<"\",\"processed_at\":\""<<json_escape(processed_at)<<"\"";
   ss<<",\"score\":";
   if(score.has_value()) ss<<*score; else ss<<"null";
   ss<<"}";
@@ -264,6 +265,19 @@ std::optional<SubmissionJob> SubmissionQueue::dequeue(int timeout){
   return SubmissionJob::from_json(*raw);
 }
 
+bool SubmissionQueue::requeue(const SubmissionJob& job){
+  if(!lpush_) return false;
+#ifdef HAS_PROTOBUF
+  auto cfg=Config::load();
+  std::string payload=cfg.protobuf_mandatory ? job.to_protobuf() : job.to_json();
+  if(payload.empty()) payload=job.to_json();
+#else
+  std::string payload=job.to_json();
+#endif
+  lpush_(kQueueKey, payload);
+  return true;
+}
+
 void SubmissionQueue::store_result(const JobResult& r){
   if(set_) set_(std::string(kResultKeyPrefix)+r.job_id, r.to_json());
 }
@@ -297,14 +311,12 @@ void Worker::run_worker(int id){
       batch_q_.push({*job, score});
     }
     cv_.notify_one();
-    JobResult r{job->job_id, true, score, "ok", helpers::format_iso_utc(std::chrono::system_clock::now())};
-    queue_->store_result(r);
     if(batch_q_.size()>=kBatchSize) cv_.notify_one();
   }
 }
 
 void Worker::run_batch(){
-  while(running_){
+  while(running_ || pending()>0){
     std::unique_lock<std::mutex> lk(mu_);
     cv_.wait_for(lk, std::chrono::seconds(5), [this]{ return !batch_q_.empty() || !running_; });
     std::vector<std::pair<SubmissionJob,std::optional<double>>> batch;
@@ -313,52 +325,43 @@ void Worker::run_batch(){
       batch_q_.pop();
     }
     lk.unlock();
-    if(!batch.empty()){
+    if(batch.empty()) continue;
 #ifdef HAS_LIBPQ
-      auto cfg = examvan::Config::load();
-      examvan::DbPool pool(cfg.database_url, 10);
-      // conninfo_from_url_or_raw (BUKAN sanitized_url — password "***" gagal auth).
-      examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-      if(auto c=real.acquire()){
-        for(auto &b: batch){
-          auto& j=b.first;
-          auto& score=b.second;
-          // M3 (paritas Go upsertSubmissionRow): skema submissions TIDAK punya
-          // unique constraint, jadi INSERT ... ON CONFLICT DO NOTHING tidak
-          // pernah menahan apa pun → worker selalu INSERT baris baru → siswa
-          // yang heartbeat-join (placeholder) LALU submit punya 2 baris, dan
-          // retry submit membuat baris ketiga. Upsert: kunci advisory lock per
-          // (exam, device), UPDATE baris terakhir utk (exam, device,
-          // exam_number bila ada) — placeholder ATAU sudah-submit — baru INSERT
-          // bila tak ada baris yang cocok. Retry menimpa baris yang sama.
-          std::string score_text = score.has_value() ? std::to_string(*score) : "";
-          real.exec_params(c.get(),
-            "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
-            {"approval:"+std::to_string(j.exam_id)+":"+j.mac_address});
-          auto up=real.exec_params(c.get(),
-            "UPDATE submissions SET answers_json=$1, score=NULLIF($2,'')::double precision,"
-            " start_time=COALESCE(start_time,NULLIF($3,'')), student_name=$4, exam_number=$5,"
-            " student_class=$6, identity_data=$7"
-            " WHERE id=(SELECT id FROM submissions WHERE exam_id=$8 AND mac_address=$9"
-            "   AND ($10='' OR exam_number=$10) ORDER BY created_at DESC LIMIT 1)"
-            " RETURNING id",
-            {map_to_json(j.answers), score_text, j.start_time, j.student_name, j.exam_number,
-             j.student_class, map_to_json(j.identity_data), std::to_string(j.exam_id), j.mac_address,
-             j.exam_number});
-          bool updated=up && PQresultStatus(up.get())==PGRES_TUPLES_OK && PQntuples(up.get())>0;
-          if(!updated){
-            real.exec_params(c.get(),
-              "INSERT INTO submissions (exam_id, student_name, exam_number, student_class, answers_json, score, start_time, mac_address, identity_data)"
-              " VALUES ($1,$2,$3,$4,$5,NULLIF($6,'')::double precision,$7,$8,$9)",
-              {std::to_string(j.exam_id), j.student_name, j.exam_number, j.student_class,
-               map_to_json(j.answers), score_text, j.start_time, j.mac_address, map_to_json(j.identity_data)});
-          }
-        }
-      }
-#else
-      (void)batch;
-#endif
+    auto cfg=examvan::Config::load();
+    examvan::DbPool pool(cfg.database_url,10);
+    examvan::db::RealPool real(examvan::db::conninfo_from_url_or_raw(pool.url),10);
+    auto c=real.acquire();
+    bool tx_ok=c && PQstatus(c.get())==CONNECTION_OK;
+    if(tx_ok){
+      auto begin=real.exec_params(c.get(),"BEGIN",{});
+      tx_ok=begin && PQresultStatus(begin.get())==PGRES_COMMAND_OK;
     }
+    std::vector<std::pair<SubmissionJob,std::optional<double>>> persisted, failed=batch;
+    if(tx_ok){
+      failed.clear();
+      for(auto& b: batch){
+        auto& j=b.first; auto& score=b.second; bool ok=true;
+        auto lock=real.exec_params(c.get(),"SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",{"approval:"+std::to_string(j.exam_id)+":"+j.mac_address});
+        ok=lock && PQresultStatus(lock.get())==PGRES_TUPLES_OK;
+        std::string score_text=score.has_value()?std::to_string(*score):"";
+        auto up=ok?real.exec_params(c.get(),
+          "UPDATE submissions SET job_id=$1, answers_json=$2, score=NULLIF($3,'')::double precision, start_time=COALESCE(start_time,NULLIF($4,'')), student_name=$5, exam_number=$6, student_class=$7, identity_data=$8 WHERE id=(SELECT id FROM submissions WHERE exam_id=$9 AND mac_address=$10 AND ($11='' OR exam_number=$11) ORDER BY created_at DESC LIMIT 1) RETURNING id",{j.job_id,map_to_json(j.answers),score_text,j.start_time,j.student_name,j.exam_number,j.student_class,map_to_json(j.identity_data),std::to_string(j.exam_id),j.mac_address,j.exam_number}):nullptr;
+        bool updated=up && PQresultStatus(up.get())==PGRES_TUPLES_OK && PQntuples(up.get())>0;
+        if(ok && !updated){
+          auto ins=real.exec_params(c.get(),"INSERT INTO submissions (job_id,exam_id,student_name,exam_number,student_class,answers_json,score,start_time,mac_address,identity_data) VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,'')::double precision,$8,$9,$10)",{j.job_id,std::to_string(j.exam_id),j.student_name,j.exam_number,j.student_class,map_to_json(j.answers),score_text,j.start_time,j.mac_address,map_to_json(j.identity_data)});
+          ok=ins && PQresultStatus(ins.get())==PGRES_COMMAND_OK;
+        }
+        if(ok) persisted.push_back(b); else failed.push_back(b);
+      }
+      auto commit=real.exec_params(c.get(),"COMMIT",{});
+      if(!commit || PQresultStatus(commit.get())!=PGRES_COMMAND_OK){ failed.insert(failed.end(),persisted.begin(),persisted.end()); persisted.clear(); }
+    } else if(c) real.exec_params(c.get(),"ROLLBACK",{});
+    if(c) real.release(c.release());
+    for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
+    for(auto& b: persisted){ JobResult r; r.job_id=b.first.job_id; r.exam_id=b.first.exam_id; r.mac_address=b.first.mac_address; r.identity_data=map_to_json(b.first.identity_data); r.success=true; r.score=b.second; r.message="ok"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); }
+#else
+    for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } }
+#endif
   }
 }
 

@@ -27,7 +27,10 @@ Response logout_handler(const Request& req){
   }
   std::string sess_csrf;
   std::string ck=get_hdr_ci_lo(req,"Cookie");
-  if(!ck.empty()) sess_csrf=extract_cookie(ck,"csrf_token");
+  if(!ck.empty()){
+    sess_csrf=extract_cookie(ck,"__Host-csrf_token");
+    if(sess_csrf.empty()) sess_csrf=extract_cookie(ck,"csrf_token");
+  }
   // JANGAN fallback ke "test-csrf-token" (dulu: token CSRF yang diketahui
   // bisa lolos saat cookie hilang). Tanpa cookie → tolak, paritas login.cpp.
   if(sess_csrf.empty()){

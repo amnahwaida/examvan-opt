@@ -3,6 +3,7 @@
 #include <optional>
 #include <vector>
 #include <regex>
+#include <vector>
 
 namespace examvan::models {
 
@@ -42,12 +43,30 @@ inline bool is_valid_username(const std::string& s) {
 }
 
 inline bool has_role(const std::string& role_json, const std::string& role) {
-  return role_json.find("\"" + role + "\"") != std::string::npos;
+  if(role_json.find("\"" + role + "\"") != std::string::npos) return true;
+  // Accept legacy test/dev cookies that encoded a single role without JSON
+  // quotes, while still requiring an exact token rather than substring match.
+  return role_json==("["+role+"]") || role_json==role;
+}
+
+inline std::vector<std::string> parse_roles(const std::string& role_json){
+  std::vector<std::string> out;
+  for(const std::string& role: {kRoleGuru,kRolePengawas,kRoleOperator,kRoleSuperAdmin}){
+    if(has_role(role_json,role)) out.push_back(role);
+  }
+  return out;
+}
+
+inline bool is_super_admin_role(const std::string& role_json){
+  return has_role(role_json,kRoleSuperAdmin);
 }
 
 inline std::string normalize_role(const std::string& r) {
-  if (r.empty()) return "[\"guru\"]";
-  return r;
+  auto roles=parse_roles(r);
+  if (roles.empty()) return "[\"guru\"]";
+  std::string out="[";
+  for(size_t i=0;i<roles.size();++i){ if(i) out+=","; out+="\""+roles[i]+"\""; }
+  return out+"]";
 }
 
 inline bool is_feature_locked(const AdminUser& u, const std::string& super_admin_user) {

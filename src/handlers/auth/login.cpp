@@ -4,6 +4,7 @@
 #include "middleware/turnstile.hpp"
 #include "helpers/utils.hpp"
 #include "helpers/password.hpp"
+#include "models/user.hpp"
 #include <openssl/rand.h>
 #include <unordered_map>
 #include <mutex>
@@ -25,7 +26,8 @@ using examvan::helpers::hash_password;
 using examvan::helpers::verify_password;
 
 std::string build_login_session_payload(int admin_id, const std::string& username, const std::string& role_json){
-  return b64_encode("admin_id="+std::to_string(admin_id)+"&username="+username+"&role="+role_json);
+  const bool is_super=examvan::models::is_super_admin_role(role_json);
+  return b64_encode("admin_id="+std::to_string(admin_id)+"&username="+username+"&role="+examvan::models::normalize_role(role_json)+"&is_super_admin="+(is_super?"1":"0"));
 }
 
 void set_user_for_test(const std::string& u, const std::string& p, const std::string& r){
@@ -68,12 +70,12 @@ Response login_page(const Request&){
     replace_attr("_csrf\" value=\"");
     replace_attr("csrf-token' content='");
     replace_attr("csrf_token' value='");
-    std::string ck="csrf_token="+csrf+"; Path=/; SameSite=Lax";
+    std::string ck=(Config::load().is_development()?"csrf_token=":"__Host-csrf_token=")+csrf+"; Path=/; SameSite=Lax";
     if(!Config::load().is_development()) ck+="; Secure";
     Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=ck;
     r.body=html; return r;
   }
-  std::string ck2="csrf_token="+csrf+"; Path=/; SameSite=Lax";
+  std::string ck2=(Config::load().is_development()?"csrf_token=":"__Host-csrf_token=")+csrf+"; Path=/; SameSite=Lax";
   if(!Config::load().is_development()) ck2+="; Secure";
   Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.headers["Set-Cookie"]=ck2;
   r.body="<html><body><form method=\"POST\" action=\"/login\"><input name=\"username\"><input name=\"password\" type=\"password\"><input type=\"hidden\" name=\"_csrf\" value=\""+csrf+"\"><button>Login</button></form></body></html>";

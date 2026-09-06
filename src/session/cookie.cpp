@@ -1,5 +1,6 @@
 #include "session/cookie.hpp"
 #include "helpers/utils.hpp"
+#include "models/user.hpp"
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
 #include <sstream>
@@ -134,7 +135,11 @@ std::optional<SessionData> verify_session_cookie(const std::string& secret, cons
   it = d.fields.find("username"); if(it!=d.fields.end()) d.username=it->second;
   it = d.fields.find("role"); if(it!=d.fields.end()) d.role=it->second;
   it = d.fields.find("instansi"); if(it!=d.fields.end()) d.instansi=it->second;
-  it = d.fields.find("is_super_admin"); if(it!=d.fields.end()) d.is_super_admin=it->second=="1"||it->second=="true";
+  it = d.fields.find("is_super_admin");
+  if(it!=d.fields.end()) d.is_super_admin=it->second=="1"||it->second=="true";
+  // Backward compatibility for signed cookies issued before the explicit
+  // flag was added: derive superadmin from the canonical role JSON.
+  if(!d.is_super_admin) d.is_super_admin=models::has_role(d.role, models::kRoleSuperAdmin);
   return d;
 }
 

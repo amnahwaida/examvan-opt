@@ -47,10 +47,22 @@ std::string html_escape(const std::string& s) {
 std::string strip_sensitive_keys(const std::string& questions_json){
   std::string out=questions_json;
   for(const std::string& k: std::vector<std::string>{"key","answer"}){
-    std::string needle=",\""+k+"\":";
-    size_t p=0;
-    while((p=out.find(needle,p))!=std::string::npos){
+    size_t search=0;
+    while(true){
+      const std::string needle="\""+k+"\":";
+      size_t p=out.find(needle,search);
+      if(p==std::string::npos) break;
+      // Only accept an object member: the byte before the name must be '{' or
+      // ',' (allowing whitespace). This also handles the first member, which
+      // the old comma-prefixed search missed.
+      size_t before=p;
+      while(before>0 && (out[before-1]==' '||out[before-1]=='\t'||out[before-1]=='\r'||out[before-1]=='\n')) --before;
+      if(before==0 || (out[before-1]!='{' && out[before-1]!=',')){
+        search=p+needle.size();
+        continue;
+      }
       size_t v=p+needle.size();
+      while(v<out.size() && (out[v]==' '||out[v]=='\t'||out[v]=='\r'||out[v]=='\n')) ++v;
       size_t end=v;
       bool in_str=false, esc=false;
       int depth=0;
@@ -61,12 +73,18 @@ std::string strip_sensitive_keys(const std::string& questions_json){
         if(c=='"'){ in_str=!in_str; continue; }
         if(in_str) continue;
         if(c=='[' || c=='{') depth++;
-        else if(c==']' || c=='}'){ if(depth==0) break; depth--; }
+        else if(c==']' || c=='}'){ if(depth==0) break; --depth; }
         else if(depth==0 && (c==',' || c=='}')) break;
       }
-      if(end>v){
-        out.erase(p, end-p);
-      } else break;
+      if(end<=v) break;
+      // Remove preceding comma for non-first members. For first members,
+      // preserve the opening brace and remove the following comma as well.
+      size_t erase_start=p;
+      size_t erase_len=end-p;
+      if(out[before-1]==',') { erase_start=before-1; ++erase_len; }
+      else if(end<out.size() && out[end]==',') ++erase_len;
+      out.erase(erase_start,erase_len);
+      search=erase_start;
     }
   }
   return out;

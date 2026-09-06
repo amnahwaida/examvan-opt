@@ -184,21 +184,26 @@ static std::string sanitize_filename(const std::string& name){
   return safe;
 }
 Response list_admin_exams(const Request& req){
-  auto snapshot = exams().list_all(); // ambil snapshot (thread-safe)
+  bool super_admin=false;
+  auto it_super=req.headers.find("X-Internal-Admin-Super");
+  if(it_super!=req.headers.end()) super_admin=it_super->second=="1";
+  int admin_id=0;
+  auto it_id=req.headers.find("X-Internal-Admin-Id");
+  if(it_id!=req.headers.end()) try{ admin_id=std::stoi(it_id->second); }catch(...){ }
+  auto all=exams().list_all();
+  std::vector<models::Exam> snapshot;
+  for(const auto& e: all){
+    if(super_admin || e.created_by==admin_id || (e.delegated_to && *e.delegated_to==admin_id)) snapshot.push_back(e);
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::AdminExamList pb;
     pb.set_success(true);
     pb.set_total(static_cast<int32_t>(snapshot.size()));
-    for(auto &e: snapshot){
+    for(const auto& e: snapshot){
       auto *ex=pb.add_exams();
-      ex->set_id(e.id);
-      ex->set_name(e.name);
-      ex->set_token(e.token);
-      ex->set_file_path(e.file_path);
-      ex->set_size_bytes(e.size_bytes);
-      ex->set_status(e.status);
-      ex->set_created_at(e.created_at);
+      ex->set_id(e.id); ex->set_name(e.name); ex->set_size_bytes(e.size_bytes);
+      ex->set_status(e.status); ex->set_created_at(e.created_at);
     }
     std::string out; pb.SerializeToString(&out);
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
@@ -207,12 +212,9 @@ Response list_admin_exams(const Request& req){
   std::string json="[";
   for(size_t i=0;i<snapshot.size();++i){
     if(i) json+=",";
-    auto &e=snapshot[i];
+    const auto& e=snapshot[i];
     json+="{\"id\":"+std::to_string(e.id)
       +",\"name\":\""+json_escape(e.name)+"\""
-      +",\"token\":\""+json_escape(e.token)+"\""
-      +",\"active_token\":\""+json_escape(e.active_token.empty()?e.token:e.active_token)+"\""
-      +",\"file_path\":\""+json_escape(e.file_path)+"\""
       +",\"size_bytes\":"+std::to_string(e.size_bytes)
       +",\"status\":\""+json_escape(e.status)+"\""
       +",\"token_mode\":\""+json_escape(e.get_token_mode())+"\""
@@ -744,6 +746,12 @@ Response update_exam(const Request& req){
       }
       if(edit_pdf_data.size()>5*1024*1024){
         Response r; r.status=413; r.json(413,"{\"error\":\"file too large, max 5MB\"}"); return r;
+      }
+      // Treat multipart filenames as untrusted browser metadata, exactly like
+      // create uploads: normalize basename, allowlist chars, force .pdf.
+      edit_pdf_name=sanitize_filename(edit_pdf_name);
+      if(edit_pdf_name.empty()){
+        Response r; r.status=400; r.json(400,"{\"error\":\"invalid PDF filename\"}"); return r;
       }
       auto cfg_r2=Config::load();
       r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};

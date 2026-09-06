@@ -9,6 +9,18 @@
 using namespace examvan;
 using namespace examvan::handlers::auth;
 
+static std::string csrf_cookie_value(const std::string& header){
+  auto v=extract_cookie(header,"__Host-csrf_token");
+  if(v.empty()) v=extract_cookie(header,"csrf_token");
+  return v;
+}
+
+static std::string csrf_cookie_header(const std::string&, const std::string& value){
+  // Include both names so tests work in development and production config;
+  // production code prefers the __Host- cookie.
+  return "__Host-csrf_token="+value+"; csrf_token="+value;
+}
+
 static std::string extract_csrf_from_html(const std::string& html){
   std::string n1="csrf-token\" content=\"";
   auto p=html.find(n1);
@@ -37,7 +49,7 @@ TEST(CsrfFix, LoginPageReplacesAllPlaceholders){
   EXPECT_FALSE(token.empty()) << "no csrf in html";
   auto it=res.headers.find("Set-Cookie");
   ASSERT_NE(it,res.headers.end());
-  std::string ck=extract_cookie(it->second,"csrf_token");
+  std::string ck=csrf_cookie_value(it->second);
   EXPECT_FALSE(ck.empty());
   EXPECT_EQ(token, ck) << "html token must match cookie";
   int count=0; size_t pos=0; while((pos=res.body.find(token,pos))!=std::string::npos){ count++; pos+=token.size(); if(count>10) break; }
@@ -48,7 +60,7 @@ TEST(CsrfFix, LoginFormCsrfTokenField){
   clear_users_for_test(); set_user_for_test("guru","pass123","guru");
   Config cfg; cfg.secret_key=std::string(32,'x');
   auto page=login_page(Request{});
-  std::string ck=extract_cookie(page.headers["Set-Cookie"],"csrf_token");
+  std::string ck=csrf_cookie_value(page.headers["Set-Cookie"]);
   ASSERT_FALSE(ck.empty());
   std::string csrf=extract_csrf_from_html(page.body);
   ASSERT_FALSE(csrf.empty());
@@ -56,7 +68,7 @@ TEST(CsrfFix, LoginFormCsrfTokenField){
   // Simulate browser encoding: need to encode token for form body
   std::string enc; for(char c: csrf){ if(c=='+') enc+="%2B"; else if(c=='/') enc+="%2F"; else if(c=='=') enc+="%3D"; else enc+=c; }
   req.body="username=guru&password=pass123&csrf_token="+enc;
-  req.headers["Cookie"]="csrf_token="+ck;
+  req.headers["Cookie"]=csrf_cookie_header(page.headers["Set-Cookie"],ck);
   req.headers["Accept"]="application/json";
   auto res=login_handler(req,cfg);
   EXPECT_EQ(res.status,200) << res.body << " csrf cookie="<<ck<<" html="<<csrf;
@@ -67,11 +79,11 @@ TEST(CsrfFix, LoginUnderscoreCsrfField){
   clear_users_for_test(); set_user_for_test("guru","pass123","guru");
   Config cfg; cfg.secret_key=std::string(32,'x');
   auto page=login_page(Request{});
-  std::string ck=extract_cookie(page.headers["Set-Cookie"],"csrf_token");
+  std::string ck=csrf_cookie_value(page.headers["Set-Cookie"]);
   std::string csrf=extract_csrf_from_html(page.body);
   std::string enc; for(char c: csrf){ if(c=='+') enc+="%2B"; else if(c=='/') enc+="%2F"; else if(c=='=') enc+="%3D"; else enc+=c; }
   Request req; req.body="username=guru&password=pass123&_csrf="+enc;
-  req.headers["Cookie"]="csrf_token="+ck;
+  req.headers["Cookie"]=csrf_cookie_header(page.headers["Set-Cookie"],ck);
   req.headers["Accept"]="application/json";
   auto res=login_handler(req,cfg);
   EXPECT_EQ(res.status,200) << res.body;
@@ -82,10 +94,10 @@ TEST(CsrfFix, LoginHeaderXCsrfToken){
   clear_users_for_test(); set_user_for_test("guru","pass123","guru");
   Config cfg; cfg.secret_key=std::string(32,'x');
   auto page=login_page(Request{});
-  std::string ck=extract_cookie(page.headers["Set-Cookie"],"csrf_token");
+  std::string ck=csrf_cookie_value(page.headers["Set-Cookie"]);
   std::string csrf=extract_csrf_from_html(page.body);
   Request req; req.body="username=guru&password=pass123";
-  req.headers["Cookie"]="csrf_token="+ck;
+  req.headers["Cookie"]=csrf_cookie_header(page.headers["Set-Cookie"],ck);
   req.headers["X-CSRF-Token"]=csrf;
   req.headers["Accept"]="application/json";
   auto res=login_handler(req,cfg);
@@ -97,10 +109,10 @@ TEST(CsrfFix, LoginHeaderCaseInsensitive){
   clear_users_for_test(); set_user_for_test("guru","pass123","guru");
   Config cfg; cfg.secret_key=std::string(32,'x');
   auto page=login_page(Request{});
-  std::string ck=extract_cookie(page.headers["Set-Cookie"],"csrf_token");
+  std::string ck=csrf_cookie_value(page.headers["Set-Cookie"]);
   std::string csrf=extract_csrf_from_html(page.body);
   Request req; req.body="username=guru&password=pass123";
-  req.headers["Cookie"]="csrf_token="+ck;
+  req.headers["Cookie"]=csrf_cookie_header(page.headers["Set-Cookie"],ck);
   req.headers["x-csrf-token"]=csrf;
   req.headers["Accept"]="application/json";
   auto res=login_handler(req,cfg);
@@ -112,11 +124,11 @@ TEST(CsrfFix, LoginJsonBody){
   clear_users_for_test(); set_user_for_test("guru","pass123","guru");
   Config cfg; cfg.secret_key=std::string(32,'x');
   auto page=login_page(Request{});
-  std::string ck=extract_cookie(page.headers["Set-Cookie"],"csrf_token");
+  std::string ck=csrf_cookie_value(page.headers["Set-Cookie"]);
   std::string csrf=extract_csrf_from_html(page.body);
   Request req;
   req.body="{\"username\":\"guru\",\"password\":\"pass123\",\"_csrf\":\""+csrf+"\"}";
-  req.headers["Cookie"]="csrf_token="+ck;
+  req.headers["Cookie"]=csrf_cookie_header(page.headers["Set-Cookie"],ck);
   req.headers["Content-Type"]="application/json";
   req.headers["Accept"]="application/json";
   auto res=login_handler(req,cfg);
