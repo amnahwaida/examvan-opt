@@ -4,6 +4,7 @@
 #include "config/config.hpp"
 #include "middleware/protobuf.hpp"
 #include "utils/log.hpp"
+#include "models/user.hpp"
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
@@ -87,6 +88,16 @@ Response list_submissions(const Request& req){
   if(per_page<1) per_page=20; else if(per_page>200) per_page=200;
   std::string exam_id=get_param(q,"exam_id");
   std::string search=get_param(q,"search");
+  int actor_id=0; bool super_admin=false;
+  if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
+  if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
+  std::string actor_role;
+  if(auto it=req.headers.find("X-Internal-Admin-Role"); it!=req.headers.end()) actor_role=it->second;
+  std::string actor_instansi;
+  if(auto it=req.headers.find("X-Internal-Admin-Instansi"); it!=req.headers.end()) actor_instansi=it->second;
+#ifndef HAS_LIBPQ
+  (void)actor_id; (void)super_admin; (void)actor_role; (void)actor_instansi;
+#endif
   std::string pagination="{\"page\":"+std::to_string(page)+",\"per_page\":"+std::to_string(per_page)+",\"total\":0,\"total_pages\":0}";
 #ifdef HAS_LIBPQ
   std::string arr="[]";
@@ -96,6 +107,15 @@ Response list_submissions(const Request& req){
     if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
     std::string where=" WHERE 1=1";
     std::vector<std::string> params;
+    if(!super_admin){
+      if(actor_role.find("operator")!=std::string::npos && !actor_instansi.empty()){
+        where+=" AND e.created_by IN (SELECT id FROM admin_users WHERE instansi=$"+std::to_string(params.size()+1)+")";
+        params.push_back(actor_instansi);
+      } else {
+        where+=" AND (e.created_by=$"+std::to_string(params.size()+1)+" OR e.delegated_to=$"+std::to_string(params.size()+1)+")";
+        params.push_back(std::to_string(actor_id));
+      }
+    }
     if(!exam_id.empty()){
       where+=" AND s.exam_id=$"+std::to_string(params.size()+1);
       params.push_back(exam_id);

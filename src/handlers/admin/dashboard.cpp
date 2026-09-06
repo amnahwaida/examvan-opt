@@ -86,7 +86,12 @@ Response dashboard_page(const Request& req){
     // Render daftar ujian LIVE dari in-memory store, ganti empty-state statis.
     // (Sebelumnya dashboard.rendered.html = snapshot statis dgn empty-state,
     //  sehingga ujian baru tak pernah muncul di tabel.)
-    auto exams=store::active_store()->list_all();
+    int actor_id=0; bool super_admin=false;
+    if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
+    if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
+    auto all_exams=store::active_store()->list_all();
+    std::vector<models::Exam> exams;
+    for(const auto& e: all_exams) if(super_admin || e.created_by==actor_id || (e.delegated_to && *e.delegated_to==actor_id)) exams.push_back(e);
     if(!exams.empty()){
       std::string table_html=build_exam_table_html(exams);
       static const std::string empty_marker="<div class=\"empty-state\">";
@@ -126,7 +131,11 @@ Response dashboard_page(const Request& req){
   return r;
 }
 Response dashboard_stats(const Request& req){
-  auto exams=store::active_store()->list_all();
+  int actor_id=0; bool super_admin=false;
+  if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
+  if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
+  std::vector<models::Exam> exams;
+  for(const auto& e: store::active_store()->list_all()) if(super_admin || e.created_by==actor_id || (e.delegated_to && *e.delegated_to==actor_id)) exams.push_back(e);
   int total=static_cast<int>(exams.size());
   int active=0;
   int64_t storage_bytes=0;

@@ -330,12 +330,21 @@ void register_full_routes(Router& r, const Config& cfg){
 #endif
     return true;
   };
-  r.add("GET","/admin/dashboard", [cfg,check_auth](const Request& req){
+  auto page_context=[cfg](const Request& req){
+    Request out=req;
+    auto it=req.headers.find("Cookie");
+    if(it!=req.headers.end()){
+      auto s=cfg.secret_prev.empty()?verify_session_cookie(cfg.secret_key,it->second):verify_session_cookie_dual(cfg.secret_key,cfg.secret_prev,it->second);
+      if(s){ out.headers["X-Internal-Admin-Id"]=std::to_string(s->admin_id); out.headers["X-Internal-Admin-Super"]=s->is_super_admin?"1":"0"; out.headers["X-Internal-Admin-Role"]=s->role; }
+    }
+    return out;
+  };
+  r.add("GET","/admin/dashboard", [cfg,check_auth,page_context](const Request& req){
     auto it=req.headers.find("Cookie");
     if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/dashboard"; return rr;
     }
-    return handlers::admin::dashboard_page(req);
+    return handlers::admin::dashboard_page(page_context(req));
   });
   r.add("GET","/admin/settings", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");
