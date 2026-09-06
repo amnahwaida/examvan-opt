@@ -4,6 +4,11 @@
 #include <cstdlib>
 #include "queue/submission_queue.hpp"
 #include "redis/client.hpp"
+// Eksplisit: blok #ifdef HAS_HIREDIS di bawah memakai examvan::redis_real.
+// Header aman di-include tanpa syarat (guard internal); tanpa include ini
+// kompilasi bergantung pada include transitif yang berbeda antar konfigurasi
+// (Docker dengan libhiredis-dev gagal: 'redis_real' has not been declared).
+#include "redis/redis_real.hpp"
 #include "handlers/api/exams.hpp"
 #include "handlers/admin/exams.hpp"
 #include "store/exam_store.hpp"

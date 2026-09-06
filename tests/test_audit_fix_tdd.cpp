@@ -57,7 +57,7 @@ TEST(AuditSocketIOJsonString, NoRawControlChar) {
   std::string s; for(int i=0;i<0x20;i++) if(i!='\n'&&i!='\r'&&i!='\t'&&i!='\b'&&i!='\f') s.push_back(char(i));
   auto j = json_string(s);
   for(char c: j){
-    if(c!='\"' && c!='\\' && c!=',' && c!=':' && c!='[' && c!=']' && c!='{' && c!='}' && c!='u' && (c>='0'&&c<='9'||c>='a'&&c<='f')) continue;
+    if(c!='\"' && c!='\\' && c!=',' && c!=':' && c!='[' && c!=']' && c!='{' && c!='}' && c!='u' && ((c>='0'&&c<='9')||(c>='a'&&c<='f'))) continue;
   }
   // ensure no raw <0x20 inside quoted string except escapes
   std::string inner = j.substr(1, j.size()-2);
