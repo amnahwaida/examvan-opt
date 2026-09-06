@@ -312,7 +312,23 @@ void register_full_routes(Router& r, const Config& cfg){
     bool ok=cfg.secret_prev.empty()?verify_session_cookie(cfg.secret_key,it->second).has_value():verify_session_cookie_dual(cfg.secret_key,cfg.secret_prev,it->second).has_value();
     if(!ok) return false;
     auto parsed=cfg.secret_prev.empty()?verify_session_cookie(cfg.secret_key,it->second):verify_session_cookie_dual(cfg.secret_key,cfg.secret_prev,it->second);
-    return parsed.has_value() && parsed->admin_id>0;
+    if(!parsed || parsed->admin_id<=0) return false;
+#ifdef HAS_LIBPQ
+    std::string db_url=Config::load().database_url;
+    if(db_url.empty()) if(auto* env=getenv("DATABASE_URL")) db_url=env;
+    if(!db_url.empty()){
+      try{
+        std::string ci=pg_conninfo_from_url(db_url); if(ci.empty()) ci=db_url;
+        examvan::db::RealPool real(ci,1);
+        if(!real.connect()) return false;
+        if(auto c=real.acquire()){
+          auto r=real.exec_params(c.get(),"SELECT status FROM admin_users WHERE id=$1",{std::to_string(parsed->admin_id)});
+          if(!r || PQresultStatus(r.get())!=PGRES_TUPLES_OK || PQntuples(r.get())==0 || std::string(PQgetvalue(r.get(),0,0))!="active") return false;
+        } else return false;
+      }catch(...){ return false; }
+    }
+#endif
+    return true;
   };
   r.add("GET","/admin/dashboard", [cfg,check_auth](const Request& req){
     auto it=req.headers.find("Cookie");

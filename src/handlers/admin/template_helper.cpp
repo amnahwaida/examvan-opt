@@ -82,7 +82,7 @@ RenderedAdminPage render_admin_page(const std::string& name, const std::string& 
     replace_hex_attr("csrf_token\" value=\"");
     replace_hex_attr("_csrf_token\" value=\"");
   }
-  std::string ck="csrf_token="+csrf+"; Path=/; SameSite=Lax";
+  std::string ck=(Config::load().is_development()?"csrf_token=":"__Host-csrf_token=")+csrf+"; Path=/; SameSite=Lax";
   if(!Config::load().is_development()) ck+="; Secure";
   out.html=html;
   out.csrf_cookie=ck;

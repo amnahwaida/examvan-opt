@@ -335,9 +335,9 @@ Implemented and verified in the current tree:
 Still open / requiring the next implementation batch:
 
 - PostgreSQL-backed tenant filtering for admin list/submission/export/dashboard/bulk routes; current immediate list redaction/scope does not replace a complete instansi query policy.
-- Full production PostgreSQL verification for pengawas roster/tenant queries and complete browser rendering of the audit tab.
-- HTML page database status revalidation and logout/form token browser verification remain; login now has process-local lockout/dummy-bcrypt protection, login JSON/form CSRF parsing is separated, and production login CSRF cookies use the `__Host-` prefix.
-- Complete system-app CRUD, SMTP-test, and pengawas-state route implementations or explicit UI removal remain; the pengawas audit route itself is now registered and implemented.
+- Full production PostgreSQL verification for pengawas roster/tenant queries and browser rendering of the audit tab.
+- HTML page database status revalidation and logout/form token browser verification remain; login now has process-local lockout/dummy-bcrypt protection, login JSON/form CSRF parsing is separated, and production login/admin-page CSRF cookies use the `__Host-` prefix.
+- Complete system-app CRUD, SMTP-test, and pengawas-state route implementations or explicit UI removal remain; the pengawas audit route is registered and implemented.
 - PostgreSQL/Redis integration tests for durable queue commit/retry, result binding, voucher transactions, tenant authorization, and schema migrations. No finding is considered production-closed until these integration paths pass.
 
 *The original findings above remain historical; this section records implementation status and does not erase unresolved findings.*
