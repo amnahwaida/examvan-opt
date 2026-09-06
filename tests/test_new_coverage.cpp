@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <cstdlib>
 #include "session/cookie.hpp"
 #include "db/pool.hpp"
 #include "redis/client.hpp"
@@ -44,8 +45,12 @@ TEST(RedisPrefix, Isolated) {
 }
 
 TEST(Turnstile, Bypass) {
+  // Hermetic: bypass token hanya lolos di luar production (paritas
+  // TDD2_C1_Turnstile) — jangan bergantung APP_ENV ambien dari shell/CI.
+  setenv("APP_ENV","development",1);
   EXPECT_TRUE(middleware::verify_turnstile("test-bypass-token","sec","1.1.1.1"));
   EXPECT_FALSE(middleware::verify_turnstile("","sec","1.1.1.1"));
+  unsetenv("APP_ENV");
 }
 
 TEST(FullRouter, Comprehensive) {

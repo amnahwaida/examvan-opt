@@ -144,7 +144,8 @@ int main(){
   sq.set_lpush_checked([&](const std::string& k, const std::string& v)->bool{
     auto& c=queue_redis(); if(!c) return false;
     auto* r=(redisReply*)redisCommand(c.get(),"LPUSH %s %b",k.c_str(),v.data(),v.size());
-    if(!r) return false; bool ok=r->type==REDIS_REPLY_INTEGER && r->integer>0;
+    if(!r) return false;
+    bool ok=r->type==REDIS_REPLY_INTEGER && r->integer>0;
     freeReplyObject(r); return ok;
   });
 #endif

@@ -382,7 +382,7 @@ void Worker::run_batch(){
 #ifdef HAS_LIBPQ
     auto cfg=examvan::Config::load();
     examvan::DbPool pool(cfg.database_url,10);
-    examvan::db::RealPool real(examvan::db::conninfo_from_url_or_raw(pool.url),10);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),10);
     auto c=real.acquire();
     bool tx_ok=c && PQstatus(c.get())==CONNECTION_OK;
     if(tx_ok){

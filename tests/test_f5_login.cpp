@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <cstdlib>
 #include "handlers/auth/login.hpp"
 using namespace examvan::handlers::auth;
 
@@ -94,8 +95,12 @@ TEST(F5Login, TurnstileBypass) {
   examvan::Request req; req.body="username=guru&password=pass&_csrf=test-csrf-token&cf-turnstile-response=test-bypass-token";
   req.headers["Cookie"]="__Host-csrf_token=test-csrf-token";
   req.headers["X-CSRF-Token"]="test-csrf-token";
+  // Hermetic: bypass token hanya lolos di luar production (paritas
+  // TDD2_C1_Turnstile) — jangan bergantung APP_ENV ambien dari shell/CI.
+  setenv("APP_ENV","development",1);
   /* sukses via form HTML = 303 redirect (bukan lagi JSON 200) */
   auto res=login_handler(req,cfg);
+  unsetenv("APP_ENV");
   EXPECT_EQ(res.status,303);
   EXPECT_NE(res.headers.find("Location"), res.headers.end());
 }

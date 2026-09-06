@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <cstdlib>
 #include "config/config.hpp"
 #include "middleware/cors.hpp"
 #include "middleware/turnstile.hpp"
@@ -38,8 +39,12 @@ TEST(P0_Turnstile, RejectsInvalidToken) {
 }
 
 TEST(P0_Turnstile, AllowsBypassStill) {
+  // Hermetic: bypass token hanya lolos di luar production (paritas
+  // TDD2_C1_Turnstile) — jangan bergantung APP_ENV ambien dari shell/CI.
+  setenv("APP_ENV","development",1);
   EXPECT_TRUE(middleware::verify_turnstile("test-bypass-token", "secret", "1.1.1.1"));
   EXPECT_FALSE(middleware::verify_turnstile("", "secret", "1.1.1.1"));
+  unsetenv("APP_ENV");
 }
 
 TEST(P0_Cors, EmptyCsvDeniesAll) {

@@ -346,6 +346,24 @@ Response pending_approvals(const Request& req){
   Response r; r.json(200,"{\"success\":true,\"data\":[],\"total\":0,\"page\":1,\"limit\":100}"); return r;
 }
 
+#ifdef HAS_LIBPQ
+// P18-H10: audit-log ditulis di sini (bukan hanya SELECT) — aksi admin
+// tercatat ke admin_audit_logs (best-effort, tak menggagalkan aksi utama).
+// Didefinisikan SEBELUM set_approval — dipakai di sana (urutan deklarasi).
+static void write_audit_log(examvan::db::RealPool& real, const std::string& exam_id,
+                            const std::string& username, const std::string& action,
+                            const std::string& detail){
+  try{
+    auto c=real.acquire();
+    if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+    real.exec_params(c.get(),
+      "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULL,$2,$3,$4)",
+      {exam_id, username, action, detail});
+    real.release(c.release());
+  }catch(...){}
+}
+#endif
+
 Response set_approval(const Request& req){
   /* M1: stub protobuf awal dihapus — "success" TANPA mengubah approval adalah
    * no-op berbahaya (pengawas percaya device disetujui). Eksekusi nyata. */
@@ -386,23 +404,6 @@ Response set_approval(const Request& req){
   }
   Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r;
 }
-
-#ifdef HAS_LIBPQ
-// P18-H10: audit-log ditulis di sini (bukan hanya SELECT) — aksi admin
-// tercatat ke admin_audit_logs (best-effort, tak menggagalkan aksi utama).
-static void write_audit_log(examvan::db::RealPool& real, const std::string& exam_id,
-                            const std::string& username, const std::string& action,
-                            const std::string& detail){
-  try{
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
-    real.exec_params(c.get(),
-      "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULL,$2,$3,$4)",
-      {exam_id, username, action, detail});
-    real.release(c.release());
-  }catch(...){}
-}
-#endif
 
 Response get_auto_approve(const Request& req){
   /* M1: stub protobuf awal dihapus — enabled=false palsu. */
@@ -459,7 +460,8 @@ Response exam_audit_logs(const Request& req){
     auto c=real.acquire(); if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
     auto q=helpers::parse_form(req.query); int limit=100;
     try{ limit=std::stoi(get_param(q,"limit")); }catch(...){ }
-    if(limit<1) limit=1; if(limit>500) limit=500;
+    if(limit<1) limit=1;
+    if(limit>500) limit=500;
     auto rows=real.exec_params(c.get(),"SELECT id,username,action,detail,created_at::text FROM admin_audit_logs WHERE exam_id=$1 ORDER BY created_at DESC LIMIT $2",{exam_id,std::to_string(limit)});
     if(rows && PQresultStatus(rows.get())==PGRES_TUPLES_OK){
       found=true; std::string s="[";

@@ -150,11 +150,44 @@ static bool enqueue_job_to_redis(const queue::SubmissionJob& job){
 #endif
 }
 
+// JSON escape untuk respons/JSON lokal: escape quote, backslash, dan kontrol
+// char. TIDAK menambah tanda kutip pembungkus — pemanggil yang membungkus.
+static std::string json_escape(const std::string& s){
+  std::string o; o.reserve(s.size()+16);
+  for(unsigned char c: s){
+    switch(c){
+      case '"': o+="\\\""; break;
+      case '\\': o+="\\\\"; break;
+      case '\b': o+="\\b"; break;
+      case '\f': o+="\\f"; break;
+      case '\n': o+="\\n"; break;
+      case '\r': o+="\\r"; break;
+      case '\t': o+="\\t"; break;
+      default:
+        if(c<0x20){ char buf[7]; snprintf(buf,sizeof(buf),"\\u%04x",c); o+=buf; }
+        else o+=char(c);
+    }
+  }
+  return o;
+}
+
+// Serialize map<string,string> → JSON object (answers/identity_data).
+// [[maybe_unused]]: hanya dipakai di jalur HAS_LIBPQ.
+[[maybe_unused]] static std::string map_to_json_local(const std::map<std::string,std::string>& m){
+  std::string o="{";
+  bool first=true;
+  for(auto& kv: m){
+    if(!first) o+=",";
+    first=false;
+    o+="\""+json_escape(kv.first)+"\":\""+json_escape(kv.second)+"\"";
+  }
+  return o+"}";
+}
+
 // P18-C3: durability submit — INSERT placeholder dulu sebelum LPUSH agar
 // jendela hilang (LPUSH-only + appendfsync everysec) tertutup. Best-effort
 // bila DB tak terkonfigurasi (memory/test); fail-closed bila DB ada tapi
 // INSERT gagal.
-static std::string json_escape(const std::string& s);
 static bool persist_submission_pending(const queue::SubmissionJob& job){
 #ifdef HAS_LIBPQ
   try{
@@ -176,36 +209,6 @@ static bool persist_submission_pending(const queue::SubmissionJob& job){
 #else
   (void)job; return true;
 #endif
-}
-
-static std::string json_escape(const std::string& s){
-  std::string o; o.reserve(s.size()+16);
-  for(unsigned char c: s){
-    switch(c){
-      case '"': o+="\\\""; break;
-      case '\\': o+="\\\\"; break;
-      case '\b': o+="\\b"; break;
-      case '\f': o+="\\f"; break;
-      case '\n': o+="\\n"; break;
-      case '\r': o+="\\r"; break;
-      case '\t': o+="\\t"; break;
-      default:
-        if(c<0x20){ char buf[7]; snprintf(buf,sizeof(buf),"\\u%04x",c); o+=buf; }
-        else o+=char(c);
-    }
-  }
-  return o;
-}
-
-[[maybe_unused]] static std::string map_to_json_local(const std::map<std::string,std::string>& m){
-  std::string o="{";
-  bool first=true;
-  for(auto& kv: m){
-    if(!first) o+=",";
-    first=false;
-    o+="\""+json_escape(kv.first)+"\":\""+json_escape(kv.second)+"\"";
-  }
-  return o+"}";
 }
 
 Response health(const Request& req){
