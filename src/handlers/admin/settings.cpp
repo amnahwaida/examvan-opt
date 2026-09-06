@@ -4,6 +4,7 @@
 #include "config/config.hpp"
 #include "middleware/protobuf.hpp"
 #include "utils/log.hpp"
+#include "helpers/smtp.hpp"
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
@@ -268,8 +269,53 @@ Response update_settings(const Request& req){
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Pengaturan berhasil disimpan\"}"); return r;
 }
 
-Response system_apps_page(const Request&){
-  Response r; r.status=200; r.headers["Content-Type"]="text/html";
-  r.body="<html><body><h1>System Apps</h1></body></html>"; return r;
+Response test_smtp_connection(const Request& req){
+  std::string host=json_string_field(req.body,"smtp_host");
+  std::string port=json_string_field(req.body,"smtp_port");
+  std::string user=json_string_field(req.body,"smtp_user");
+  std::string password=json_string_field(req.body,"smtp_password");
+#ifdef HAS_LIBPQ
+  if(password.empty() || password.find('*')!=std::string::npos){
+    auto all=load_all_settings(); auto it=all.find("smtp_password"); if(it!=all.end()) password=it->second;
+  }
+#endif
+  auto err=helpers::test_smtp_connection(host,port,user,password);
+  Response r;
+  if(!err.empty()){ r.status=400; r.json(400,"{\"success\":false,\"message\":\""+json_escape(err)+"\"}"); return r; }
+  r.json(200,"{\"success\":true,\"message\":\"Koneksi SMTP berhasil terhubung!\"}"); return r;
+}
+
+Response system_apps_page(const Request& req){
+#ifdef HAS_LIBPQ
+  try{
+    auto cfg=Config::load();
+    std::string db=cfg.database_url; if(db.empty()) if(auto* env=getenv("DATABASE_URL")) db=env;
+    if(!db.empty()){
+      examvan::DbPool pool(db,10);
+      examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),10);
+      if(real.connect()) if(auto c=real.acquire()){
+        real.exec_params(c.get(),"CREATE TABLE IF NOT EXISTS system_apps (id SERIAL PRIMARY KEY,name TEXT NOT NULL,platform TEXT NOT NULL,version TEXT NOT NULL,file_path TEXT NOT NULL,size_bytes BIGINT NOT NULL DEFAULT 0,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),UNIQUE(name,platform,version))",{});
+        if(req.method=="DELETE" || (req.method=="POST" && req.path.find("/delete")!=std::string::npos)){
+          auto it=req.params.find("id");
+          if(it==req.params.end()){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"ID tidak valid.\"}"); return r; }
+          auto del=real.exec_params(c.get(),"DELETE FROM system_apps WHERE id=$1",{it->second});
+          bool ok=del && PQresultStatus(del.get())==PGRES_COMMAND_OK && std::atoi(PQcmdTuples(del.get()))>0;
+          Response r; r.status=ok?200:404; r.json(r.status,ok?"{\"success\":true,\"message\":\"Aplikasi berhasil dihapus\"}":"{\"success\":false,\"message\":\"Aplikasi tidak ditemukan.\"}"); return r;
+        }
+        if(req.method=="POST"){
+          Response r; r.status=501; r.json(501,"{\"success\":false,\"message\":\"Upload aplikasi belum tersedia pada backend C++.\"}"); return r;
+        }
+        auto rows=real.exec_params(c.get(),"SELECT id,name,platform,version,file_path,size_bytes,created_at::text,updated_at::text FROM system_apps ORDER BY created_at DESC",{});
+        if(rows && PQresultStatus(rows.get())==PGRES_TUPLES_OK){
+          std::string out="[";
+          for(int i=0;i<PQntuples(rows.get());++i){ if(i) out+=","; out+="{\"id\":"+std::string(PQgetvalue(rows.get(),i,0))+",\"Name\":\""+json_escape(PQgetvalue(rows.get(),i,1))+"\",\"Platform\":\""+json_escape(PQgetvalue(rows.get(),i,2))+"\",\"Version\":\""+json_escape(PQgetvalue(rows.get(),i,3))+"\",\"FilePath\":\""+json_escape(PQgetvalue(rows.get(),i,4))+"\",\"SizeBytes\":"+PQgetvalue(rows.get(),i,5)+",\"CreatedAt\":\""+json_escape(PQgetvalue(rows.get(),i,6))+"\",\"UpdatedAt\":\""+json_escape(PQgetvalue(rows.get(),i,7))+"\"}"; }
+          out+="]"; Response r; r.json(200,"{\"success\":true,\"apps\":"+out+"}"); return r;
+        }
+      }
+    }
+  }catch(...){ }
+#endif
+  if(req.method=="POST") { Response r; r.status=501; r.json(501,"{\"success\":false,\"message\":\"System-app backend tidak tersedia.\"}"); return r; }
+  Response r; r.json(200,"{\"success\":true,\"apps\":[]}"); return r;
 }
 } // namespace examvan::handlers::admin

@@ -427,6 +427,8 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/admin/api/pengawas/exams/:exam_id/audit-logs", admin_api(handlers::admin::exam_audit_logs,"","exam_access"));
   r.add("GET","/admin/api/system-apps", admin_api(handlers::admin::system_apps_page, "superadmin"));
   r.add("POST","/admin/api/system-apps", admin_api(handlers::admin::system_apps_page, "superadmin"));
+  r.add("POST","/admin/api/system-apps/:id/delete", admin_api(handlers::admin::system_apps_page, "superadmin"));
+  r.add("POST","/admin/api/saas-settings/test-smtp", admin_api(handlers::admin::test_smtp_connection, "superadmin"));
 }
 
 } // namespace examvan

@@ -15,6 +15,9 @@ std::string send_smtp_message(const std::string& host,
                               const std::string& subject,
                               const std::string& html_body);
 
+std::string test_smtp_connection(const std::string& host, const std::string& port,
+                                 const std::string& user, const std::string& password);
+
 std::string send_verification_email(const std::string& host, const std::string& port,
                                     const std::string& user, const std::string& password,
                                     const std::string& sender_name, const std::string& to,

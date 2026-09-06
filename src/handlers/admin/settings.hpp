@@ -4,4 +4,5 @@ namespace examvan::handlers::admin {
 Response settings_page(const Request& req);
 Response update_settings(const Request& req);
 Response system_apps_page(const Request& req);
+Response test_smtp_connection(const Request& req);
 } // namespace examvan::handlers::admin

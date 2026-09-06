@@ -123,6 +123,31 @@ std::string send_smtp_message(const std::string& host, const std::string& port,
 #endif
 }
 
+std::string test_smtp_connection(const std::string& host, const std::string& port,
+                                 const std::string& user, const std::string& password){
+  if(host.empty() || port.empty()) return "SMTP Host dan SMTP Port tidak boleh kosong";
+#ifdef HAS_LIBCURL
+  CURL* curl=curl_easy_init(); if(!curl) return "curl init failed";
+  std::string url="smtp://"+host+":"+port;
+  std::string errbuf(CURL_ERROR_SIZE,'\0');
+  curl_easy_setopt(curl,CURLOPT_URL,url.c_str());
+  curl_easy_setopt(curl,CURLOPT_CONNECT_ONLY,1L);
+  curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT,8L);
+  curl_easy_setopt(curl,CURLOPT_TIMEOUT,10L);
+  curl_easy_setopt(curl,CURLOPT_USERNAME,user.empty()?nullptr:user.c_str());
+  curl_easy_setopt(curl,CURLOPT_PASSWORD,password.empty()?nullptr:password.c_str());
+  curl_easy_setopt(curl,CURLOPT_ERRORBUFFER,errbuf.data());
+  if(port=="465") curl_easy_setopt(curl,CURLOPT_USE_SSL,CURLUSESSL_ALL);
+  else curl_easy_setopt(curl,CURLOPT_USE_SSL,CURLUSESSL_TRY);
+  CURLcode rc=curl_easy_perform(curl);
+  std::string err;
+  if(rc!=CURLE_OK) err="smtp connection failed: "+std::string(errbuf.c_str())+" ("+curl_easy_strerror(rc)+")";
+  curl_easy_cleanup(curl); return err;
+#else
+  (void)user; (void)password; return "SMTP unavailable (no libcurl)";
+#endif
+}
+
 std::string send_verification_email(const std::string& host, const std::string& port,
                                     const std::string& user, const std::string& password,
                                     const std::string& sender_name, const std::string& to,

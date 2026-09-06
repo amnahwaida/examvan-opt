@@ -330,6 +330,7 @@ Implemented and verified in the current tree:
 - Voucher redemption accepts the correct PostgreSQL command status; voucher activation uses transaction/row lock and rejects inactive/expired/zero-duration redemptions. Masked settings secrets are preserved, and user role arrays are allowlisted.
 - Edit PDF filenames are sanitized using the create-upload policy; submissions pages refresh CSRF through the admin renderer; system-app routes no longer fall through to unrelated SaaS settings handlers.
 - Admin bulk toggle/delete now apply owner/delegate filtering and bulk delete cleans both legacy/current R2 layouts; catch-all token redirects require the exam-token allowlist.
+- Pengawas audit logs now have a protected route/handler; system-app list/delete and SMTP test routes are implemented with explicit unsupported-upload behavior instead of falling into unrelated settings.
 - Existing and newly adjusted tests remain green in focused runs; the full current suite is green at **681/682 passed, 1 pre-existing skip**.
 
 Still open / requiring the next implementation batch:
@@ -337,7 +338,7 @@ Still open / requiring the next implementation batch:
 - PostgreSQL-backed tenant filtering for admin list/submission/export/dashboard/bulk routes; current immediate list redaction/scope does not replace a complete instansi query policy.
 - Full production PostgreSQL verification for pengawas roster/tenant queries and browser rendering of the audit tab.
 - HTML page database status revalidation and logout/form token browser verification remain; login now has process-local lockout/dummy-bcrypt protection, login JSON/form CSRF parsing is separated, and production login/admin-page CSRF cookies use the `__Host-` prefix.
-- Complete system-app CRUD, SMTP-test, and pengawas-state route implementations or explicit UI removal remain; the pengawas audit route is registered and implemented.
+- Full system-app upload persistence/R2 integration and pengawas-state endpoint remain; current system-app upload returns explicit 501 until the R2 multipart/storage contract is implemented.
 - PostgreSQL/Redis integration tests for durable queue commit/retry, result binding, voucher transactions, tenant authorization, and schema migrations. No finding is considered production-closed until these integration paths pass.
 
 *The original findings above remain historical; this section records implementation status and does not erase unresolved findings.*
