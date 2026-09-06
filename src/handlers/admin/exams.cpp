@@ -1006,8 +1006,8 @@ static std::string query_pengawas_json(int exam_id, bool assigned_only){
     if(auto c=real.acquire()){
       const char* sql=assigned_only
         ? "SELECT ep.user_id,u.username,COALESCE(u.name,''),COALESCE(u.instansi,'') FROM exam_pengawas ep JOIN admin_users u ON ep.user_id=u.id WHERE ep.exam_id=$1 ORDER BY u.username"
-        : "SELECT id,username,COALESCE(name,''),COALESCE(instansi,'') FROM admin_users WHERE role ILIKE '%\"pengawas\"%' AND status='active' ORDER BY username";
-      auto r=real.exec_params(c.get(),sql,assigned_only?std::vector<std::string>{std::to_string(exam_id)}:std::vector<std::string>{});
+        : "SELECT u.id,u.username,COALESCE(u.name,''),COALESCE(u.instansi,'') FROM admin_users u WHERE u.role ILIKE '%\"pengawas\"%' AND u.status='active' AND u.instansi=(SELECT COALESCE(owner.instansi,'') FROM exams e LEFT JOIN admin_users owner ON owner.id=e.created_by WHERE e.id=$1) ORDER BY u.username";
+      auto r=real.exec_params(c.get(),sql,{std::to_string(exam_id)});
       if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
         std::string arr="[";
         for(int i=0;i<PQntuples(r.get());i++){
@@ -1129,12 +1129,26 @@ Response save_exam_questions(const Request& req){
       examvan::DbPool pool(cfg_db.database_url, 10);
       examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
       if(auto c=real.acquire()){
-        real.exec_params(c.get(),"BEGIN",{});
-        real.exec_params(c.get(),"DELETE FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
-        for(int uid: pengawas_ids){
-          real.exec_params(c.get(),"INSERT INTO exam_pengawas (exam_id,user_id) VALUES ($1,$2)",{std::to_string(id),std::to_string(uid)});
+        auto begin=real.exec_params(c.get(),"BEGIN",{});
+        bool ok=begin && PQresultStatus(begin.get())==PGRES_COMMAND_OK;
+        std::string ids="{"; for(size_t i=0;i<pengawas_ids.size();++i){ if(i) ids+=","; ids+=std::to_string(pengawas_ids[i]); } ids+="}";
+        if(ok){
+          auto valid=real.exec_params(c.get(),
+            "SELECT COUNT(*) FROM admin_users u JOIN exams e ON e.id=$1 LEFT JOIN admin_users owner ON owner.id=e.created_by WHERE u.id=ANY($2::int[]) AND u.status='active' AND u.role ILIKE '%\\\"pengawas\\\"%' AND u.instansi=COALESCE(owner.instansi,'')",
+            {std::to_string(id),ids});
+          ok=valid && PQresultStatus(valid.get())==PGRES_TUPLES_OK && PQntuples(valid.get())>0 && std::atoi(PQgetvalue(valid.get(),0,0))==(int)pengawas_ids.size();
         }
-        real.exec_params(c.get(),"COMMIT",{});
+        if(ok){
+          auto del=real.exec_params(c.get(),"DELETE FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
+          ok=del && PQresultStatus(del.get())==PGRES_COMMAND_OK;
+        }
+        if(ok) for(int uid: pengawas_ids){
+          auto ins=real.exec_params(c.get(),"INSERT INTO exam_pengawas (exam_id,user_id) VALUES ($1,$2)",{std::to_string(id),std::to_string(uid)});
+          ok=ins && PQresultStatus(ins.get())==PGRES_COMMAND_OK;
+          if(!ok) break;
+        }
+        auto end=real.exec_params(c.get(),ok?"COMMIT":"ROLLBACK",{});
+        if(!ok || !end || PQresultStatus(end.get())!=PGRES_COMMAND_OK) utils::log_error("exam_pengawas_save_failed","id="+id_str);
         real.release(c.release());
       }
     }catch(...){ utils::log_error("exam_pengawas_save_failed","id="+id_str); }
@@ -1157,8 +1171,13 @@ Response bulk_toggle_exams(const Request& req){
   if(status!="active" && status!="inactive"){
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"status must be active or inactive\"}"); return r;
   }
+  int actor_id=0; bool super_admin=false;
+  if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
+  if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
   int ok_count=0;
   for(int id: ids){
+    auto exam=exams().get_by_id(id);
+    if(!exam || (!super_admin && exam->created_by!=actor_id && (!exam->delegated_to || *exam->delegated_to!=actor_id))) continue;
     bool found=exams().update(id,[&](models::Exam& e){
       e.status=status;
       if(status=="active") e.tombstoned_at.reset(); // Go parity: re-activation clears tombstone
@@ -1178,18 +1197,21 @@ Response bulk_delete_exams(const Request& req){
   if(ids_raw.empty() || !parse_int_array(ids_raw,ids) || ids.empty()){
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"ids must be a non-empty array of numbers\"}"); return r;
   }
+  int actor_id=0; bool super_admin=false;
+  if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
+  if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
   int ok_count=0;
   for(int id: ids){
     auto exam=exams().get_by_id(id);
-    if(!exam) continue;
+    if(!exam || (!super_admin && exam->created_by!=actor_id && (!exam->delegated_to || *exam->delegated_to!=actor_id))) continue;
     auto cfg_r2=Config::load();
     r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
-    std::string key=r2::object_key_for_exam(id, exam->file_path);
+    std::vector<std::string> keys={r2::object_key_pdf_legacy(exam->file_path),r2::object_key_for_exam(id, exam->file_path)};
     if(g_upload_mock){
-      g_upload_mock(key, "");
+      for(const auto& key: keys) g_upload_mock(key, "");
     } else if(rc.enabled()){
       r2::R2Client client{rc};
-      if(!client.remove(key)) utils::log_error("exam_bulk_delete_r2_failed","id="+std::to_string(id));
+      for(const auto& key: keys) if(!client.remove(key)) utils::log_error("exam_bulk_delete_r2_failed","id="+std::to_string(id));
     } else {
       // Tanpa R2 object tidak bisa dibersihkan → lewati ujian ini (paritas delete_exam).
       continue;

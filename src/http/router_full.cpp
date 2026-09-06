@@ -282,6 +282,9 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/admin", [](const Request&){ Response rr; rr.status=302; rr.headers["Location"]="/admin/dashboard"; return rr; });
   r.add("GET","/:token", [](const Request& req){
     auto it=req.params.find("token"); std::string t=it!=req.params.end()?it->second:"";
+    if(!helpers::is_valid_exam_token(t)){
+      Response res; res.status=404; res.json(404,"{\"error\":\"token not found\"}"); return res;
+    }
     Response res; res.status=302; res.headers["Location"]="/hasil/"+t; return res;
   });
 

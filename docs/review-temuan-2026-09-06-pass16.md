@@ -329,6 +329,7 @@ Implemented and verified in the current tree:
 - Canonical role parsing/session superadmin derivation is implemented; signed legacy superadmin cookies remain compatible. Admin wrapper rejects non-positive IDs, uses exact role checks, and supports separate exam access scope for assigned pengawas/same-instansi operators. Delegation routes require operator control.
 - Voucher redemption accepts the correct PostgreSQL command status; voucher activation uses transaction/row lock and rejects inactive/expired/zero-duration redemptions. Masked settings secrets are preserved, and user role arrays are allowlisted.
 - Edit PDF filenames are sanitized using the create-upload policy; submissions pages refresh CSRF through the admin renderer; system-app routes no longer fall through to unrelated SaaS settings handlers.
+- Admin bulk toggle/delete now apply owner/delegate filtering and bulk delete cleans both legacy/current R2 layouts; catch-all token redirects require the exam-token allowlist.
 - Existing and newly adjusted tests remain green in focused runs; the full current suite is green at **681/682 passed, 1 pre-existing skip**.
 
 Still open / requiring the next implementation batch:
