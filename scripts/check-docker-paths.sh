@@ -19,6 +19,7 @@ STUBS="$ROOT/scripts/stubs"
 SRC_ROOT="$ROOT/src"
 CURL_STUB="$STUBS/curl"
 HIREDIS_STUB="$STUBS/hiredis"
+UWS_STUB="$STUBS/uws"
 # libpq-fe.h hidup di <prefix>/libpq-fe.h saat include <libpq-fe.h>
 PQ_STUB="$STUBS"
 
@@ -29,27 +30,34 @@ STD="${CXX_STD:--std=c++20}"
 FLAGS=(-fsyntax-only "$STD" -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter
        -I"$SRC_ROOT" -I"$ROOT/include"
        -isystem "$PQ_STUB" -isystem "$CURL_STUB" -isystem "$HIREDIS_STUB"
-       -DHAS_LIBPQ=1 -DHAS_HIREDIS=1 -DHAS_LIBCURL=1)
+       -I"$UWS_STUB"
+       -DHAS_LIBPQ=1 -DHAS_HIREDIS=1 -DHAS_LIBCURL=1 -DHAS_UWEBSOCKETS=1)
 
 # Kumpulkan sumber examvan_core dari CMakeLists.txt (bukan test — test dibuild
 # dengan EXAMVAN_TESTING=1 dan lingkungan gtest tersendiri).
 mapfile -t SOURCES < <(grep -oE 'src/[A-Za-z0-9_/]+\.cpp' "$ROOT/CMakeLists.txt" | sort -u)
 if [ "$#" -gt 0 ]; then SOURCES=("$@"); fi
 
+# Dual pass: Docker build = uWS ON, build lokal/CI (tanpa -DWITH_UWEBSOCKETS)
+# = uWS OFF. Keduanya jalur kompilasi nyata — keduanya wajib bersih.
 fail=0
-for f in "${SOURCES[@]}"; do
-  path="$ROOT/$f"
-  [ -f "$path" ] || { echo "MISSING: $f"; fail=1; continue; }
-  if ! out=$("$CXX" "${FLAGS[@]}" "$path" 2>&1); then
-    echo "FAIL: $f"
-    echo "$out" | sed 's/^/    /'
-    fail=1
-  fi
+for mode in uws_on uws_off; do
+  [ "$mode" = uws_on ] && EXTRA=-DHAS_UWEBSOCKETS=1 || EXTRA="-UHAS_UWEBSOCKETS"
+  echo "--- pass: $mode ($EXTRA) ---"
+  for f in "${SOURCES[@]}"; do
+    path="$ROOT/$f"
+    [ -f "$path" ] || { echo "MISSING: $f"; fail=1; continue; }
+    if ! out=$("$CXX" "${FLAGS[@]}" "$EXTRA" "$path" 2>&1); then
+      echo "FAIL [$mode]: $f"
+      echo "$out" | sed 's/^/    /'
+      fail=1
+    fi
+  done
 done
 
 if [ "$fail" -eq 0 ]; then
-  echo "OK: ${#SOURCES[@]} file(s) clean dengan flag Docker (HAS_LIBPQ+HAS_HIREDIS+HAS_LIBCURL, -Werror)."
+  echo "OK: ${#SOURCES[@]} file(s) x 2 pass bersih (HAS_LIBPQ+HAS_HIREDIS+HAS_LIBCURL, uWS on/off, -Werror)."
 else
-  echo "GAGAL: perbaiki error di atas (akan mematahkan docker compose build)." >&2
+  echo "GAGAL: perbaiki error di atas (akan mematahkan docker compose build atau build lokal)." >&2
 fi
 exit "$fail"

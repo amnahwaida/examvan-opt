@@ -11,6 +11,7 @@
 #include <memory>
 #include <chrono>
 #include <condition_variable>
+#include <iostream>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -47,6 +48,34 @@ std::string Server::describe() const {
      << " uWS=" << (has_uwebsockets() ? "yes" : "posix")
      << " routes=" << (router_ ? router_->routes().size() : 0);
   return ss.str();
+}
+
+// Aman untuk kedua mode (HAS_UWEBSOCKETS ada/tidak): dipakai try_serve_static
+// di jalur posix (#ifndef) DAN handler /static/ di jalur uWS (#ifdef, lambda
+// generik → dua-fase lookup mewajibkan deklarasi SEBELUM titik pemakaian).
+static bool static_path_safe(const std::string& path){
+  std::string dec = path;
+  for(int iter=0; iter<5; ++iter){
+    std::string nd;
+    nd.reserve(dec.size());
+    for(size_t i=0;i<dec.size();++i){
+      if(dec[i]=='%' && i+2<dec.size()){
+        auto hex=[](char c)->int{ if(c>='0'&&c<='9') return c-'0'; if(c>='a'&&c<='f') return c-'a'+10; if(c>='A'&&c<='F') return c-'A'+10; return -1; };
+        int h=hex(dec[i+1]), l=hex(dec[i+2]);
+        if(h>=0&&l>=0){ nd.push_back(char((h<<4)|l)); i+=2; } else nd.push_back(dec[i]);
+      } else nd.push_back(dec[i]);
+    }
+    if(nd==dec) break;
+    dec=nd;
+    if(dec.find('\0')!=std::string::npos) return false;
+  }
+  if(dec.find("..")!=std::string::npos) return false;
+  if(dec.find('\0')!=std::string::npos) return false;
+  std::string low=dec; for(char &ch: low) ch=tolower((unsigned char)ch);
+  if(low.find("%2e")!=std::string::npos) return false;
+  if(low.find("%252e")!=std::string::npos) return false;
+  if(dec.rfind("/static/",0)!=0 && dec.rfind("/proto/",0)!=0 && dec!="/favicon.ico") return false;
+  return true;
 }
 
 #ifndef HAS_UWEBSOCKETS
@@ -210,31 +239,6 @@ static std::string content_type_for(const std::string& p){
   if(p.size()>=6 && p.substr(p.size()-6)==".woff2") return "font/woff2";
   if(p.size()>=6 && p.substr(p.size()-6)==".proto") return "text/plain";
   return "text/plain";
-}
-
-static bool static_path_safe(const std::string& path){
-  std::string dec = path;
-  for(int iter=0; iter<5; ++iter){
-    std::string nd;
-    nd.reserve(dec.size());
-    for(size_t i=0;i<dec.size();++i){
-      if(dec[i]=='%' && i+2<dec.size()){
-        auto hex=[](char c)->int{ if(c>='0'&&c<='9') return c-'0'; if(c>='a'&&c<='f') return c-'a'+10; if(c>='A'&&c<='F') return c-'A'+10; return -1; };
-        int h=hex(dec[i+1]), l=hex(dec[i+2]);
-        if(h>=0&&l>=0){ nd.push_back(char((h<<4)|l)); i+=2; } else nd.push_back(dec[i]);
-      } else nd.push_back(dec[i]);
-    }
-    if(nd==dec) break;
-    dec=nd;
-    if(dec.find('\0')!=std::string::npos) return false;
-  }
-  if(dec.find("..")!=std::string::npos) return false;
-  if(dec.find('\0')!=std::string::npos) return false;
-  std::string low=dec; for(char &ch: low) ch=tolower((unsigned char)ch);
-  if(low.find("%2e")!=std::string::npos) return false;
-  if(low.find("%252e")!=std::string::npos) return false;
-  if(dec.rfind("/static/",0)!=0 && dec.rfind("/proto/",0)!=0 && dec!="/favicon.ico") return false;
-  return true;
 }
 
 static bool try_serve_static(int cfd, const std::string& path){
