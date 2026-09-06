@@ -98,7 +98,9 @@ static bool json_bool_field(const std::string& obj, const std::string& key){
   if(p==std::string::npos) return false;
   size_t c=obj.find(':', p);
   if(c==std::string::npos) return false;
-  return obj.compare(c+1, 4, "true")==0;
+  size_t i=c+1;
+  while(i<obj.size() && (obj[i]==' '||obj[i]=='\t'||obj[i]=='\n'||obj[i]=='\r')) i++;
+  return obj.compare(i, 4, "true")==0;
 }
 
 std::vector<Question> parse_questions(const std::string& json){

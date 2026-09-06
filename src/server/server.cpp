@@ -119,7 +119,7 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
   std::vector<char> acc; acc.reserve(8192);
   std::string frag_buf; bool frag_in=false; [[maybe_unused]] unsigned char frag_op=0;
   char tmp[4096];
-  auto flush_queue=[&](){
+  auto flush_queue=[&]()->bool{
     while (!client->send_queue.empty()) {
       std::string msg; bool binary=false;
       { std::lock_guard<std::mutex> g(client->mu); if (client->send_queue.empty()) break; msg = client->send_queue.front().first; binary = client->send_queue.front().second; client->send_queue.pop(); }
@@ -129,8 +129,15 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
       else if (msg.size() < 65536) { frame.push_back(char(126)); frame.push_back(char(msg.size() >> 8)); frame.push_back(char(msg.size() & 0xFF)); }
       else { uint64_t l=msg.size(); frame.push_back(char(127)); for(int i=7;i>=0;--i) frame.push_back(char((l>>(i*8))&0xFF)); }
       frame += msg;
-      send(cfd, frame.c_str(), frame.size(), 0);
+      // P18-H14: cek return send() — partial-write / EPIPE / EAGAIN putus.
+      size_t sent=0;
+      while(sent<frame.size()){
+        ssize_t n=send(cfd, frame.data()+sent, frame.size()-sent, MSG_NOSIGNAL);
+        if(n<=0) return false;
+        size_t send_sent=(size_t)n; sent+=send_sent;
+      }
     }
+    return true;
   };
   while (true) {
     ssize_t n = recv(cfd, tmp, sizeof(tmp), 0);
@@ -160,7 +167,15 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
         if(payload.size()<126) pong.push_back(char(payload.size()));
         else if(payload.size()<65536){ pong.push_back(char(126)); pong.push_back(char(payload.size()>>8)); pong.push_back(char(payload.size()&0xFF)); }
         else { pong.push_back(char(127)); for(int i=7;i>=0;--i) pong.push_back(char((payload.size()>>(i*8))&0xFF)); }
-        pong+=payload; send(cfd,pong.c_str(),pong.size(),0); continue;
+        pong+=payload;
+        size_t psent=0; bool pok=true;
+        while(psent<pong.size()){
+          ssize_t pn=send(cfd,pong.data()+psent,pong.size()-psent,MSG_NOSIGNAL);
+          if(pn<=0){ pok=false; break; }
+          psent+=(size_t)pn;
+        }
+        if(!pok) { acc.clear(); if(hub) hub->remove_client(client); close(cfd); return; }
+        continue;
       }
       if(opcode==0x0){
         if(!frag_in) continue;
@@ -169,13 +184,13 @@ static void handle_ws(int cfd, const std::string& req, const std::string& path,
         // tanpa batas → DoS memori. Sama dgn batas frame tunggal.
         if(frag_buf.size()+payload.size() > 5*1024*1024){ close(cfd); return; }
         frag_buf+=payload;
-        if(fin){ std::string complete=frag_buf; frag_buf.clear(); frag_in=false; if(hub) hub->handle_message(client, complete); flush_queue(); }
+        if(fin){ std::string complete=frag_buf; frag_buf.clear(); frag_in=false; if(hub) hub->handle_message(client, complete); if(!flush_queue()){ acc.clear(); if(hub) hub->remove_client(client); close(cfd); return; } }
         continue;
       }
       if(opcode==0x1 || opcode==0x2){
         if(!fin){ frag_in=true; frag_op=opcode; frag_buf=payload; if(frag_buf.size()>5*1024*1024){ close(cfd); return; } continue; }
         if(hub) hub->handle_message(client, payload);
-        flush_queue();
+        if(!flush_queue()){ acc.clear(); if(hub) hub->remove_client(client); close(cfd); return; }
         continue;
       }
     }
@@ -197,7 +212,33 @@ static std::string content_type_for(const std::string& p){
   return "text/plain";
 }
 
+static bool static_path_safe(const std::string& path){
+  std::string dec = path;
+  for(int iter=0; iter<5; ++iter){
+    std::string nd;
+    nd.reserve(dec.size());
+    for(size_t i=0;i<dec.size();++i){
+      if(dec[i]=='%' && i+2<dec.size()){
+        auto hex=[](char c)->int{ if(c>='0'&&c<='9') return c-'0'; if(c>='a'&&c<='f') return c-'a'+10; if(c>='A'&&c<='F') return c-'A'+10; return -1; };
+        int h=hex(dec[i+1]), l=hex(dec[i+2]);
+        if(h>=0&&l>=0){ nd.push_back(char((h<<4)|l)); i+=2; } else nd.push_back(dec[i]);
+      } else nd.push_back(dec[i]);
+    }
+    if(nd==dec) break;
+    dec=nd;
+    if(dec.find('\0')!=std::string::npos) return false;
+  }
+  if(dec.find("..")!=std::string::npos) return false;
+  if(dec.find('\0')!=std::string::npos) return false;
+  std::string low=dec; for(char &ch: low) ch=tolower((unsigned char)ch);
+  if(low.find("%2e")!=std::string::npos) return false;
+  if(low.find("%252e")!=std::string::npos) return false;
+  if(dec.rfind("/static/",0)!=0 && dec.rfind("/proto/",0)!=0 && dec!="/favicon.ico") return false;
+  return true;
+}
+
 static bool try_serve_static(int cfd, const std::string& path){
+  if(!static_path_safe(path)) return false;
   std::string dec = path; // url_decode loop handles %2e double encode
   for(int iter=0; iter<5; ++iter){
     std::string nd;
@@ -355,6 +396,7 @@ bool Server::listen(const ServerOpts& opts) {
      g_app->any("/*", [router_ptr](auto *res, auto *req){
       std::string path(req->getUrl());
       if(path.rfind("/static/",0)==0 || path.rfind("/proto/",0)==0 || path=="/favicon.ico"){
+        if(!static_path_safe(path)){ res->writeStatus("403"); res->end("forbidden"); return; }
         std::string fp = path=="/favicon.ico" ? "./static/favicon.png" : "."+path;
         std::ifstream f(fp, std::ios::binary);
         if(f){
@@ -364,6 +406,10 @@ bool Server::listen(const ServerOpts& opts) {
           if(fp.size()>=4 && fp.substr(fp.size()-4)==".css") ct="text/css";
           else if(fp.size()>=3 && fp.substr(fp.size()-3)==".js") ct="application/javascript";
           else if(fp.size()>=4 && fp.substr(fp.size()-4)==".png") ct="image/png";
+          else if(fp.size()>=4 && fp.substr(fp.size()-4)==".ico") ct="image/x-icon";
+          else if(fp.size()>=5 && fp.substr(fp.size()-5)==".woff") ct="font/woff";
+          else if(fp.size()>=6 && fp.substr(fp.size()-6)==".woff2") ct="font/woff2";
+          else if(fp.size()>=6 && fp.substr(fp.size()-6)==".proto") ct="text/plain";
           std::string etag="\""+std::to_string(std::hash<std::string>{}(body) & 0xffffffff)+"\"";
           res->writeHeader("Content-Type",ct);
           res->writeHeader("ETag",etag);
@@ -399,6 +445,15 @@ bool Server::listen(const ServerOpts& opts) {
       std::string xrealip(std::string_view(req->getHeader("x-real-ip")));
       std::string xuser(std::string_view(req->getHeader("x-user")));
       std::string xvers(std::string_view(req->getHeader("x-version")));
+      std::string xfproto(std::string_view(req->getHeader("x-forwarded-proto")));
+      std::string xfhost(std::string_view(req->getHeader("x-forwarded-host")));
+      std::string xappver2(std::string_view(req->getHeader("x-app-version")));
+      // P18-M4: teruskan sinyal yang dulu dibuang allowlist (X-Device-Id
+      // untuk gate PDF, Authorization, User-Agent/Referer untuk audit/426).
+      std::string xdevice(std::string_view(req->getHeader("x-device-id")));
+      std::string xauth(std::string_view(req->getHeader("authorization")));
+      std::string xua(std::string_view(req->getHeader("user-agent")));
+      std::string xreferer(std::string_view(req->getHeader("referer")));
       // State per-request (H1). Body TIDAK boleh jadi variabel global bersama:
       // uWS v20 tetap mengantar onData setelah res->end() (HttpContext memanggil
       // inStream selama pointer-nya terpasang, markDone tidak men-null-nya),
@@ -414,7 +469,7 @@ bool Server::listen(const ServerOpts& opts) {
         res->writeStatus("500");
         res->end();
       });
-      res->onData([router_ptr, res, st, method, path, cookie, xver, origin, xcsrf, accept, xreq, ctype, idem, xexam, xff, xrealip, xuser, xvers](std::string_view chunk, bool last){
+      res->onData([router_ptr, res, st, method, path, cookie, xver, origin, xcsrf, accept, xreq, ctype, idem, xexam, xff, xrealip, xuser, xvers, xfproto, xfhost, xappver2, xdevice, xauth, xua, xreferer](std::string_view chunk, bool last){
         // Request sudah dijawab (413/abort) atau koneksi batal → sisa chunk yang
         // masih di-buffer uWS untuk request INI harus diabaikan, bukan ditambah.
         if(st->responded || st->aborted) return;
@@ -445,6 +500,13 @@ bool Server::listen(const ServerOpts& opts) {
         if(!xrealip.empty()) r.headers["X-Real-IP"]=xrealip;
         if(!xuser.empty()) r.headers["X-User"]=xuser;
         if(!xvers.empty()) r.headers["X-Version"]=xvers;
+        if(!xfproto.empty()) r.headers["X-Forwarded-Proto"]=xfproto;
+        if(!xfhost.empty()) r.headers["X-Forwarded-Host"]=xfhost;
+        if(!xappver2.empty() && r.headers.find("X-App-Version")==r.headers.end()) r.headers["X-App-Version"]=xappver2;
+        if(!xdevice.empty()) r.headers["X-Device-Id"]=xdevice;
+        if(!xauth.empty()) r.headers["Authorization"]=xauth;
+        if(!xua.empty()) r.headers["User-Agent"]=xua;
+        if(!xreferer.empty()) r.headers["Referer"]=xreferer;
         st->body.clear();
         auto resp = router_ptr ? router_ptr->dispatch(r) : examvan::Response{};
         if(resp.status==0) resp.status=404;
@@ -454,10 +516,10 @@ bool Server::listen(const ServerOpts& opts) {
       });
     });
     g_app->ws<WsData>("/ws/:room_id", {
-      /* Batas payload WS eksplisit (heartbeat/exam_completed kecil) — cegah
-       * frame raksasa & jaga memori; uWS default 16KB tapi eksplisit lebih
-       * aman terhadap perubahan default. */
-      .maxPayloadLength = 64*1024,
+      /* Batas payload WS diseragamkan 5MB = jalur posix (P18-M5). HTTP body
+       * juga 5MB di kedua jalur; backpressure 1MB + getBufferedAmount guard
+       * menjaga memori saat consumer lambat. */
+      .maxPayloadLength = 5*1024*1024,
       .idleTimeout = 120,
       .maxBackpressure = 1024*1024,
       .upgrade = [hub_ptr, cfg_ptr](auto *res, auto *req, auto *context){
@@ -484,7 +546,11 @@ bool Server::listen(const ServerOpts& opts) {
         auto c = d->client;
         if(!c) return;
         hub_ptr->handle_message(c, std::string(msg));
+        // P18-H8: backpressure guard — jangan buffer tanpa batas saat
+        // consumer lambat; drop/close bila >1MB (paritas maxBackpressure).
+        if(ws->getBufferedAmount() > 1024*1024) { ws->close(); return; }
         while(!c->send_queue.empty()){
+          if(ws->getBufferedAmount() > 1024*1024) break;
           std::string m; bool binary=false;
           { std::lock_guard<std::mutex> g(c->mu); if(c->send_queue.empty()) break; m=c->send_queue.front().first; binary=c->send_queue.front().second; c->send_queue.pop(); }
           // M8: balasan protobuf dikirim sebagai BINARY, socket.io JSON sebagai TEXT.
@@ -503,7 +569,7 @@ bool Server::listen(const ServerOpts& opts) {
     });
     g_app->run();
   });
-  g_uWS_thread.detach();
+  // P18-C5: jangan detach — stop() join agar graceful shutdown bisa drain.
   running_=true; g_running=true;
   return true;
 #else

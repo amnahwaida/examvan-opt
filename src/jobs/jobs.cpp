@@ -12,13 +12,17 @@ JobRunner::~JobRunner(){ stop(); }
 void JobRunner::start(){
   running_=true;
   th_=std::thread([this]{
+    std::unique_lock<std::mutex> lk(mu_);
     while(running_){
-      std::this_thread::sleep_for(interval_);
-      if(running_) fn_();
+      cv_.wait_for(lk, interval_, [this]{ return !running_.load(); });
+      if(!running_) break;
+      lk.unlock();
+      try{ fn_(); }catch(...){}
+      lk.lock();
     }
   });
 }
-void JobRunner::stop(){ running_=false; if(th_.joinable()) th_.join(); }
+void JobRunner::stop(){ running_=false; cv_.notify_all(); if(th_.joinable()) th_.join(); }
 void run_expiry_job(){
   auto cfg = examvan::Config::load();
   RedisClient redis(cfg.redis_url);

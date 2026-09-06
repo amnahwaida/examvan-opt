@@ -48,6 +48,9 @@ class Hub {
 
  private:
   mutable std::mutex mu_;
+  // P18-H5: hiredis tidak thread-safe — callback Redis dari banyak thread
+  // WS wajib diserialisasi via mutex khusus (terpisah dari mu_ rooms).
+  mutable std::mutex redis_mu_;
   std::unordered_map<std::string, std::unordered_set<std::shared_ptr<Client>>> rooms_;
   std::function<void(const std::string&, const std::string&)> redis_set_;
   std::function<void(const std::string&)> redis_del_;

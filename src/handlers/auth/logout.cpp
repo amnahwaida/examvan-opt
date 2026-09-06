@@ -47,14 +47,21 @@ Response logout_handler(const Request& req){
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::LogoutResponse pb; pb.set_success(true); pb.set_ok(true);
     std::string out; pb.SerializeToString(&out);
-    Response r; r.status=200; r.headers["Set-Cookie"]="examvan_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax";
+    std::string clr="examvan_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax";
+    if(!Config::load().is_development()) clr+="; Secure";
+    Response r; r.status=200; r.headers["Set-Cookie"]=clr;
     r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
   }
 #endif
-  Response r; r.status=200; r.headers["Set-Cookie"]="examvan_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax";
+  std::string clr="examvan_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax";
+  if(!Config::load().is_development()) clr+="; Secure";
+  Response r; r.status=200; r.headers["Set-Cookie"]=clr;
   r.json(200,"{\"ok\":true}"); return r;
 }
 Response logout_page(const Request&){
-  Response r; r.status=302; r.headers["Location"]="/login"; return r;
+  // P18-C2: GET /logout browser juga harus clear cookie (mirror Secure prod).
+  std::string clr="examvan_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax";
+  if(!Config::load().is_development()) clr+="; Secure";
+  Response r; r.status=302; r.headers["Location"]="/login"; r.headers["Set-Cookie"]=clr; return r;
 }
 }

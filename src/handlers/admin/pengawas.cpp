@@ -370,10 +370,39 @@ Response set_approval(const Request& req){
     if(up && (PQresultStatus(up.get())==PGRES_COMMAND_OK||PQresultStatus(up.get())==PGRES_TUPLES_OK)) done=true;
     real.release(c.release());
   });
-  if(done){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Persetujuan diperbarui\"}"); return r; }
+  if(done){
+#ifdef HAS_LIBPQ
+    with_pg([&](examvan::db::RealPool& real){ write_audit_log(real, exam_id, "", "approval:"+status, mac); });
 #endif
-  Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Persetujuan diperbarui\"}"); return r;
+    Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Persetujuan diperbarui\"}"); return r;
+  }
+#endif
+  // P18-M9: tanpa PG jangan klaim sukses bila DB dikonfigurasi (prod) —
+  // mode memori/dev (tanpa DATABASE_URL, mis. unit test) tetap 200 kompatibel.
+  {
+    std::string db_url=Config::load().database_url;
+    if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+    if(db_url.empty()){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Persetujuan diperbarui\"}"); return r; }
+  }
+  Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r;
 }
+
+#ifdef HAS_LIBPQ
+// P18-H10: audit-log ditulis di sini (bukan hanya SELECT) — aksi admin
+// tercatat ke admin_audit_logs (best-effort, tak menggagalkan aksi utama).
+static void write_audit_log(examvan::db::RealPool& real, const std::string& exam_id,
+                            const std::string& username, const std::string& action,
+                            const std::string& detail){
+  try{
+    auto c=real.acquire();
+    if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+    real.exec_params(c.get(),
+      "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULL,$2,$3,$4)",
+      {exam_id, username, action, detail});
+    real.release(c.release());
+  }catch(...){}
+}
+#endif
 
 Response get_auto_approve(const Request& req){
   /* M1: stub protobuf awal dihapus — enabled=false palsu. */

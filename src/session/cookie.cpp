@@ -5,6 +5,7 @@
 #include <openssl/evp.h>
 #include <sstream>
 #include <algorithm>
+#include <chrono>
 
 namespace examvan {
 
@@ -125,11 +126,28 @@ static std::map<std::string,std::string> parse_kv(const std::string& s) {
 
 std::optional<SessionData> verify_session_cookie(const std::string& secret, const std::string& cookie_header_value) {
   std::string cookie_val = extract_cookie(cookie_header_value, "examvan_session");
-  if (cookie_val.empty()) cookie_val = cookie_header_value;
+  if (cookie_val.empty()) {
+    // P18-M6: jangan fallback seluruh header Cookie sebagai signed value.
+    // Tolak header multi-cookie / ber-spasi; terima raw value tunggal (uji).
+    if (cookie_header_value.find(';') != std::string::npos) return std::nullopt;
+    if (cookie_header_value.find(' ') != std::string::npos) return std::nullopt;
+    if (cookie_header_value.empty()) return std::nullopt;
+    cookie_val = cookie_header_value;
+  }
   auto decoded = decode_cookie_value(secret, cookie_val);
   if (!decoded) return std::nullopt;
   SessionData d;
   d.fields = parse_kv(*decoded);
+  // P18-C1: expiry server-side — tolak replay indefinite bila exp lewat.
+  auto eit = d.fields.find("exp");
+  if(eit!=d.fields.end() && !eit->second.empty()){
+    try{
+      long exp=std::stol(eit->second);
+      long now=std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+      if(exp<=now) return std::nullopt;
+    }catch(...){ return std::nullopt; }
+  }
   auto it = d.fields.find("admin_id");
   if (it!=d.fields.end()) try{d.admin_id=std::stoi(it->second);}catch(...){}
   it = d.fields.find("username"); if(it!=d.fields.end()) d.username=it->second;

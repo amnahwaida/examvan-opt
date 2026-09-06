@@ -1,12 +1,13 @@
 #include "config/config.hpp"
 #include <cstdlib>
 #include <stdexcept>
+#include <iostream>
 
 namespace examvan {
 
 int env_int(const char* key, int def) {
   if (const char* v = std::getenv(key)) {
-    try { return std::stoi(v); } catch (...) { return def; }
+    try { return std::stoi(v); } catch (...) { std::cerr << "config warn: " << key << " invalid, using default " << def << "\n"; return def; }
   }
   return def;
 }

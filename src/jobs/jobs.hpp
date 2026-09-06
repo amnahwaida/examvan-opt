@@ -3,6 +3,8 @@
 #include <atomic>
 #include <functional>
 #include <chrono>
+#include <mutex>
+#include <condition_variable>
 
 namespace examvan::jobs {
 
@@ -16,6 +18,8 @@ private:
   std::function<void()> fn_;
   std::chrono::seconds interval_;
   std::atomic<bool> running_{false};
+  std::mutex mu_;
+  std::condition_variable cv_;
   std::thread th_;
 };
 

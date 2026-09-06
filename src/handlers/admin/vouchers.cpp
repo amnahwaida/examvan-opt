@@ -309,7 +309,8 @@ Response create_vouchers_batch(const Request& req){
       std::vector<std::string> params={code,package,duration_type,std::to_string(max_usage),expires_at,notes,
         uid>0?std::to_string(uid):"NULL"};
       auto ins=real.exec_params(c.get(),sql,params);
-      if(ins && PQresultStatus(ins.get())==PGRES_TUPLES_OK) created_ok++;
+      auto st=ins?PQresultStatus(ins.get()):PGRES_FATAL_ERROR;
+      if(st==PGRES_COMMAND_OK || st==PGRES_TUPLES_OK) created_ok++;
     }
     real.release(c.release());
   });
@@ -666,6 +667,8 @@ Response activate_voucher(const Request& req){
     real.release(c.release());
   });
   if(result=="notfound"){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"Paket tidak ditemukan\"}"); return r; }
+  // P18-M10: aktivasi kadaluarsa/nonaktif = input salah (400), bukan 503.
+  if(result=="__invalid__"){ Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Paket tidak valid atau sudah kedaluwarsa\"}"); return r; }
   if(result=="__fail__"){ Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"Gagal memproses aktivasi paket\"}"); return r; }
   if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Paket berhasil diaktifkan\"}"); return r; }
 #endif

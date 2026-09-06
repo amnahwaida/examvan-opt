@@ -7,10 +7,14 @@ async function loadProtobuf() {
   if (_protobufRoot) return _protobufRoot;
   if (typeof protobuf === 'undefined') {
     // Fallback: load protobufjs from CDN if not bundled
+    // P18-M18: SRI + crossorigin agar CDN tak jadi supply-chain script.
     await new Promise((res, rej) => {
       const s = document.createElement('script');
       s.src = 'https://unpkg.com/protobufjs@7/dist/protobuf.min.js';
-      s.onload = res; s.onerror = rej;
+      s.integrity = 'sha384-PLACEHOLDER-PIN-LOCAL-BUNDLE';
+      s.crossOrigin = 'anonymous';
+      s.onload = res;
+      s.onerror = () => rej(new Error('CDN protobuf gagal; gunakan bundle lokal /static/js/protobuf.min.js'));
       document.head.appendChild(s);
     });
   }

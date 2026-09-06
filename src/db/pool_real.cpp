@@ -6,16 +6,30 @@ namespace examvan::db {
 
 RealPool::RealPool(const std::string& ci, int max_c): conninfo_(ci), max_conns_(max_c) {}
 
+RealPool::~RealPool(){
+  for(auto* c: idle_) if(c) PQfinish(c);
+  idle_.clear();
+}
+
 bool RealPool::connect(){
   auto* c = PQconnectdb(conninfo_.c_str());
   if(PQstatus(c)!=CONNECTION_OK){ PQfinish(c); return false; }
+  std::lock_guard<std::mutex> g(mu_);
+  if((int)idle_.size()>=max_conns_){ PQfinish(c); return true; }
   idle_.push_back(c);
   return true;
 }
 
 bool RealPool::ping(){
+  std::lock_guard<std::mutex> g(mu_);
   if(idle_.empty()) return false;
-  return PQstatus(idle_.front())==CONNECTION_OK;
+  // P18-M12: ping stale (cek status holder lama) → validasi aktif via SELECT 1.
+  auto* c=idle_.front();
+  if(PQstatus(c)!=CONNECTION_OK) return false;
+  auto* r=PQexec(c,"SELECT 1");
+  bool ok=r && PQresultStatus(r)==PGRES_TUPLES_OK;
+  if(r) PQclear(r);
+  return ok;
 }
 
 PgConnPtr RealPool::acquire(){

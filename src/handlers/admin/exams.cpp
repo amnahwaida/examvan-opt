@@ -1355,6 +1355,24 @@ Response delegate_exam(const Request& req){
       else
         real.exec_params(c.get(),"UPDATE exams SET delegated_to=NULL WHERE id=$1",{std::to_string(id)});
       if(!pengawas_raw.empty()){
+        // P18-H9: validasi tiap pengawas — aktif, role pengawas, instansi sama.
+        for(int pid: pengawas_ids){
+          auto pv=real.exec_params(c.get(),
+            "SELECT COALESCE(instansi,''),role,status FROM admin_users WHERE id=$1",
+            {std::to_string(pid)});
+          bool ok=pv && PQresultStatus(pv.get())==PGRES_TUPLES_OK && PQntuples(pv.get())>0;
+          if(ok){
+            std::string pi=PQgetvalue(pv.get(),0,0), pr=PQgetvalue(pv.get(),0,1), ps=PQgetvalue(pv.get(),0,2);
+            auto ui=real.exec_params(c.get(),"SELECT instansi FROM admin_users WHERE id=$1",{std::to_string(uid)});
+            std::string opinst=ui&&PQresultStatus(ui.get())==PGRES_TUPLES_OK&&PQntuples(ui.get())>0?PQgetvalue(ui.get(),0,0):"";
+            ok = (pi==opinst && ps=="active" && pr.find("pengawas")!=std::string::npos);
+          }
+          if(!ok){
+            real.exec_params(c.get(),"ROLLBACK",{});
+            real.release(c.release());
+            Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Pengawas tidak valid: id "+std::to_string(pid)+" harus Pengawas aktif di instansi yang sama\"}"); return r;
+          }
+        }
         real.exec_params(c.get(),"DELETE FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
         for(int pid: pengawas_ids){
           real.exec_params(c.get(),"INSERT INTO exam_pengawas (exam_id,user_id) VALUES ($1,$2)",{std::to_string(id),std::to_string(pid)});

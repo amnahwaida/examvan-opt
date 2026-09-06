@@ -25,6 +25,11 @@
 #include <cstdlib>
 #include <thread>
 #include <chrono>
+#include <csignal>
+#include <atomic>
+
+static std::atomic<bool> g_shutdown{false};
+static void handle_term_signal(int){ g_shutdown.store(true); }
 
 int main(){
   auto cfg = examvan::Config::load();
@@ -134,6 +139,15 @@ int main(){
     [&](const std::string&,const std::string&){});
 #endif
   examvan::queue::Worker w(&sq, scorer_fn);
+#ifdef HAS_HIREDIS
+  // P18-C4: prod wajib LPUSH tercek — gagal LPUSH → enqueue 503, bukan 202 palsu.
+  sq.set_lpush_checked([&](const std::string& k, const std::string& v)->bool{
+    auto& c=queue_redis(); if(!c) return false;
+    auto* r=(redisReply*)redisCommand(c.get(),"LPUSH %s %b",k.c_str(),v.data(),v.size());
+    if(!r) return false; bool ok=r->type==REDIS_REPLY_INTEGER && r->integer>0;
+    freeReplyObject(r); return ok;
+  });
+#endif
   if(redis.ping()) w.start();
 #if defined(HAS_HIREDIS) && defined(HAS_LIBPQ)
   // Heartbeat presence → student_access_logs (paritas Go startHeartbeatFlusher:
@@ -147,5 +161,14 @@ int main(){
   if(db.ping()){ expiry.start(); cleanup.start(); retention.start(); }
   std::cout << "Ready. uWS=" << (examvan::server::Server::has_uwebsockets()?"yes (production)":"stub (parity 100% WS hub logic)") << "\n";
   std::cout << "Dual-run: nginx map per-grup upstream lama=Go baru=C++ (dok 05 §1) — rollback sed -i 's/cpp_backend/go_backend/' && nginx -s reload\n";
-  while(true) std::this_thread::sleep_for(std::chrono::hours(24));
+  // P18-C5: graceful shutdown — SIGTERM/SIGINT drain worker+flusher+jobs.
+  std::signal(SIGTERM, handle_term_signal);
+  std::signal(SIGINT, handle_term_signal);
+  while(!g_shutdown.load()) std::this_thread::sleep_for(std::chrono::seconds(1));
+  w.stop();
+#if defined(HAS_HIREDIS) && defined(HAS_LIBPQ)
+  hb_flusher.stop();
+#endif
+  expiry.stop(); cleanup.stop(); retention.stop();
+  return 0;
 }

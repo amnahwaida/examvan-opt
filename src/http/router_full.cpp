@@ -314,7 +314,7 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/api/exams/:exam_id/submit", pb_gate(handlers::api::submit_exam));
   r.add("GET","/api/exams/:exam_id/result", handlers::api::exam_result);
   r.add("POST","/api/exams/:exam_id/access-log", pb_gate(handlers::api::access_log));
-  r.add("POST","/api/exams/:exam_id/complete", handlers::api::complete_exam);
+  r.add("POST","/api/exams/:exam_id/complete", pb_gate(handlers::api::complete_exam));
   /* /api/hasil/:token di-rate-limit 30/mnt per-IP (paritas Go; lihat doc
    alur-public). Halaman /hasil memakai endpoint ini juga. */
   static middleware::RateLimiter g_hasil_api_rl(30, std::chrono::minutes(1));

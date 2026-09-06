@@ -3,6 +3,7 @@
 #include "session/cookie.hpp"
 #include "helpers/utils.hpp"
 #include <cctype>
+#include <cstdlib>
 
 namespace examvan::handlers::auth {
 
@@ -18,6 +19,12 @@ std::string get_hdr_ci(const Request& req, const std::string& name){
 }
 
 std::string client_ip(const Request& req){
+  // P18-H4: header proxy spoofable bila backend diakses langsung (tanpa
+  // nginx overwrite). EXAMVAN_TRUST_PROXY=0 → abaikan header proxy.
+  if(auto* e=getenv("EXAMVAN_TRUST_PROXY")){
+    std::string v=e;
+    if(v=="0"||v=="false"||v=="no") return "global";
+  }
   std::string ip=get_hdr_ci(req,"X-Real-IP");
   if(ip.empty()){
     std::string fwd=get_hdr_ci(req,"X-Forwarded-For");
@@ -26,11 +33,17 @@ std::string client_ip(const Request& req){
       ip=c==std::string::npos? fwd : fwd.substr(0,c);
     }
   }
-  // Trim spasi.
+  // Trim spasi + validasi ketat (tolak injeksi header).
   size_t a=ip.find_first_not_of(" \t\r\n");
   size_t b=ip.find_last_not_of(" \t\r\n");
   if(a==std::string::npos) return "global";
-  return ip.substr(a,b-a+1);
+  std::string t=ip.substr(a,b-a+1);
+  if(t.size()>64) return "global";
+  for(char c: t){
+    if(!(isalnum((unsigned char)c)||c=='.'||c==':'||c=='_'||c=='-')) return "global";
+  }
+  if(t.empty()) return "global";
+  return t;
 }
 
 static std::string json_field(const std::string& body, const std::string& key){

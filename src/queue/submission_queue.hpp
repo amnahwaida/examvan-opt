@@ -97,6 +97,8 @@ public:
 private:
   std::function<int()> drain_;
   std::atomic<bool> running_{false};
+  std::mutex stop_mu_;
+  std::condition_variable stop_cv_;
   std::thread th_;
 };
 

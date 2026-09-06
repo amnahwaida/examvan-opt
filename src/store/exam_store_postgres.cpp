@@ -40,10 +40,71 @@ constexpr const char* kTableExams = R"SQL(CREATE TABLE IF NOT EXISTS exams (
 constexpr const char* kIdx1 = "CREATE INDEX IF NOT EXISTS exams_active_token_idx ON exams(active_token)";
 constexpr const char* kIdx2 = "CREATE INDEX IF NOT EXISTS exams_created_at_idx ON exams(created_at DESC)";
 constexpr const char* kTableIdem = R"SQL(CREATE TABLE IF NOT EXISTS exam_idempotency (
- idempotency_key TEXT PRIMARY KEY,
- request_fingerprint TEXT NOT NULL,
- exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  idempotency_key TEXT PRIMARY KEY,
+  request_fingerprint TEXT NOT NULL,
+  exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+))SQL";
+// P18-M13: fresh-DB harus bisa jalan tanpa skema Go — buat tabel inti bila
+// belum ada (kolom minimal sesuai query C++).
+constexpr const char* kTableSubmissions = R"SQL(CREATE TABLE IF NOT EXISTS submissions (
+  id SERIAL PRIMARY KEY,
+  job_id TEXT,
+  exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+  student_name TEXT NOT NULL DEFAULT '',
+  exam_number TEXT NOT NULL DEFAULT '',
+  student_class TEXT NOT NULL DEFAULT '',
+  answers_json TEXT NOT NULL DEFAULT '{}',
+  score DOUBLE PRECISION,
+  start_time TEXT NOT NULL DEFAULT '',
+  mac_address TEXT NOT NULL DEFAULT '',
+  identity_data TEXT NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+))SQL";
+constexpr const char* kTableAccessLogs = R"SQL(CREATE TABLE IF NOT EXISTS student_access_logs (
+  id SERIAL PRIMARY KEY,
+  exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+  student_identifier TEXT NOT NULL DEFAULT '',
+  student_name TEXT NOT NULL DEFAULT '',
+  exam_number TEXT NOT NULL DEFAULT '',
+  student_class TEXT NOT NULL DEFAULT '',
+  event TEXT NOT NULL DEFAULT 'heartbeat',
+  ip_address TEXT NOT NULL DEFAULT '',
+  device_info TEXT NOT NULL DEFAULT '',
+  identity_data TEXT NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+))SQL";
+constexpr const char* kTableApprovals = R"SQL(CREATE TABLE IF NOT EXISTS exam_approvals (
+  id SERIAL PRIMARY KEY,
+  exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+  mac_address TEXT NOT NULL DEFAULT '',
+  student_name TEXT NOT NULL DEFAULT '',
+  exam_number TEXT NOT NULL DEFAULT '',
+  student_class TEXT NOT NULL DEFAULT '',
+  identity_data TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+))SQL";
+constexpr const char* kTableUsers = R"SQL(CREATE TABLE IF NOT EXISTS admin_users (
+  id SERIAL PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  email TEXT NOT NULL DEFAULT '',
+  password_hash TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT '["guru"]',
+  instansi TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  operator_created BOOLEAN NOT NULL DEFAULT FALSE,
+  registered_ip TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+))SQL";
+constexpr const char* kTableAudit = R"SQL(CREATE TABLE IF NOT EXISTS admin_audit_logs (
+  id SERIAL PRIMARY KEY,
+  exam_id INTEGER,
+  user_id INTEGER,
+  username TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 ))SQL";
 }
 
@@ -148,7 +209,9 @@ std::optional<std::string> ExamStorePostgres::execute_transaction_result(
 
 bool ExamStorePostgres::migrate(){
   std::lock_guard<std::mutex> lock(mu_);
-  ready_=exec_command(kSeq) && exec_command(kTableExams) && exec_command(kIdx1) && exec_command(kIdx2) && exec_command(kTableIdem);
+  ready_=exec_command(kSeq) && exec_command(kTableExams) && exec_command(kIdx1) && exec_command(kIdx2) && exec_command(kTableIdem)
+    && exec_command(kTableSubmissions) && exec_command(kTableAccessLogs) && exec_command(kTableApprovals)
+    && exec_command(kTableUsers) && exec_command(kTableAudit);
   // Backward-compatible migration: extend exam_idempotency for durable
   // idempotency (state machine, response replay, lease tracking).
   if(ready_){

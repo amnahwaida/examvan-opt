@@ -37,6 +37,8 @@ public:
   }
   RealPool(const RealPool&) = delete;
   RealPool& operator=(const RealPool&) = delete;
+  // P18-M12: dtor menutup koneksi idle (anti leak PQfinish) + bound pool.
+  ~RealPool();
   bool connect();
   PgConnPtr acquire();
   void release(PGconn* c);

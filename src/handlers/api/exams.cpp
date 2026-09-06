@@ -1,6 +1,7 @@
 #include "handlers/api/exams.hpp"
 #include "middleware/version.hpp"
 #include "middleware/protobuf.hpp"
+#include "middleware/ratelimit.hpp"
 #include "utils/sanitize.hpp"
 #include "helpers/utils.hpp"
 #include "models/exam.hpp"
@@ -27,7 +28,9 @@
 #include <limits>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <vector>
+#include <chrono>
 
 namespace examvan::handlers::api {
 
@@ -36,6 +39,11 @@ static std::function<void(const queue::SubmissionJob&)> g_enqueue_hook;
 void set_submit_enqueue_hook_for_test(std::function<void(const queue::SubmissionJob&)> hook){
   g_enqueue_hook = std::move(hook);
 }
+// P18-C4/H1: idempotency submit via Idempotency-Key — kunci sama + exam sama
+// mengembalikan job_id yang sama tanpa enqueue ulang (anti double-charge /
+// flood queue saat retry Android).
+static std::mutex g_idem_mu;
+static std::map<std::string,std::string> g_idem_jobs;
 
 // Ambil nilai string dari JSON body (key: "x":"value").
 static std::string json_string_field(const std::string& body, const std::string& key){
@@ -142,6 +150,34 @@ static bool enqueue_job_to_redis(const queue::SubmissionJob& job){
 #endif
 }
 
+// P18-C3: durability submit — INSERT placeholder dulu sebelum LPUSH agar
+// jendela hilang (LPUSH-only + appendfsync everysec) tertutup. Best-effort
+// bila DB tak terkonfigurasi (memory/test); fail-closed bila DB ada tapi
+// INSERT gagal.
+static std::string json_escape(const std::string& s);
+static bool persist_submission_pending(const queue::SubmissionJob& job){
+#ifdef HAS_LIBPQ
+  try{
+    auto cfg=Config::load();
+    if(cfg.database_url.empty()) return true;
+    examvan::DbPool pool(cfg.database_url, 2);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 2);
+    auto c=real.acquire();
+    if(!c || PQstatus(c.get())!=CONNECTION_OK) return true;
+    auto res=real.exec_params(c.get(),
+      "INSERT INTO submissions (job_id,exam_id,student_name,exam_number,student_class,answers_json,start_time,mac_address,identity_data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (exam_id, mac_address) DO NOTHING",
+      {job.job_id, std::to_string(job.exam_id), job.student_name, job.exam_number,
+       job.student_class, map_to_json_local(job.answers), job.start_time,
+       job.mac_address, map_to_json_local(job.identity_data)});
+    bool ok=res && (PQresultStatus(res.get())==PGRES_COMMAND_OK || PQresultStatus(res.get())==PGRES_TUPLES_OK);
+    real.release(c.release());
+    return ok;
+  }catch(...){ return false; }
+#else
+  (void)job; return true;
+#endif
+}
+
 static std::string json_escape(const std::string& s){
   std::string o; o.reserve(s.size()+16);
   for(unsigned char c: s){
@@ -159,6 +195,17 @@ static std::string json_escape(const std::string& s){
     }
   }
   return o;
+}
+
+[[maybe_unused]] static std::string map_to_json_local(const std::map<std::string,std::string>& m){
+  std::string o="{";
+  bool first=true;
+  for(auto& kv: m){
+    if(!first) o+=",";
+    first=false;
+    o+="\""+json_escape(kv.first)+"\":\""+json_escape(kv.second)+"\"";
+  }
+  return o+"}";
 }
 
 Response health(const Request& req){
@@ -303,16 +350,17 @@ std::string presence_rate_key(const std::string& prefix, int exam_id,
     return prefix+std::to_string(exam_id)+":ip:"+ip;
   return prefix+std::to_string(exam_id)+":"+mac;
 }
-// Bucket Redis INCR+EXPIRE 60s (paritas Go checkRateLimit); skip saat Redis
-// tidak ada. max=10 (presence & submit).
+// Bucket Redis INCR+EXPIRE 60s (paritas Go checkRateLimit); fallback lokal
+// bila Redis tidak ada (fail-closed bertahap, bukan blind-allow).
 static bool rate_limit_allowed(const std::string& prefix, int exam_id,
                                const std::string& mac, const std::string& ip,
                                long long max){
+  static examvan::middleware::RateLimiter local_fallback(100, std::chrono::minutes(1));
 #ifdef HAS_HIREDIS
   try{
     auto cfg=Config::load();
     auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
-    if(!ctx) return true;
+    if(!ctx) return local_fallback.allow(prefix + std::to_string(exam_id) + ":" + mac + ":" + ip);
     const std::string key=presence_rate_key(prefix, exam_id, mac, ip);
     auto* r=(redisReply*)redisCommand(ctx.get(),"INCR %s", key.c_str());
     long long count=(r && r->type==REDIS_REPLY_INTEGER)? r->integer : 0;
@@ -321,10 +369,11 @@ static bool rate_limit_allowed(const std::string& prefix, int exam_id,
       auto* e=(redisReply*)redisCommand(ctx.get(),"EXPIRE %s 60", key.c_str());
       if(e) freeReplyObject(e);
     }
+    if(count==0) return local_fallback.allow(prefix + std::to_string(exam_id) + ":" + mac + ":" + ip);
     return count<=max;
-  }catch(...){ return true; }
+  }catch(...){ return local_fallback.allow(prefix + std::to_string(exam_id) + ":" + mac + ":" + ip); }
 #else
-  (void)prefix;(void)exam_id;(void)mac;(void)ip;(void)max; return true;
+  (void)exam_id; return local_fallback.allow(prefix + mac + ip);
 #endif
 }
 // Go SubmissionGraceEnd = 60 detik setelah end_time.
@@ -898,12 +947,50 @@ Response submit_exam(const Request& req){
       }
     }
   }
+  std::string idem_key;
+  auto idem_it = req.headers.find("Idempotency-Key");
+  if(idem_it != req.headers.end()) idem_key = idem_it->second;
+  std::string congrats0=exam_snapshot.congrats_message.value_or("");
+  if(congrats0.size()>2000) congrats0.resize(2000);
+  if(!idem_key.empty()){
+    std::string cache_key=std::to_string(exam_id)+"|"+idem_key;
+    std::lock_guard<std::mutex> g(g_idem_mu);
+    auto f=g_idem_jobs.find(cache_key);
+    if(f!=g_idem_jobs.end()){
+      job.job_id=f->second;
+      std::string congrats=congrats0;
+#ifdef HAS_PROTOBUF
+      if(middleware::is_protobuf_accept(req)){
+        examvan::v1::SubmitExamResponse pb;
+        pb.set_success(true); pb.set_status("queued"); pb.set_job_id(job.job_id);
+        if(!congrats.empty()) pb.set_congrats_message(congrats);
+        std::string out; pb.SerializeToString(&out);
+        Response r; r.status=202; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
+      }
+#endif
+      Response r; r.status=202;
+      r.json(202,"{\"success\":true,\"status\":\"queued\",\"job_id\":\""+json_escape(job.job_id)
+        +"\",\"congrats_message\":"+(congrats.empty()?"null":"\""+json_escape(congrats)+"\"")+"}");
+      return r;
+    }
+  }
+  // P18-C3: INSERT placeholder dulu — LPUSH tanpa persist = hilang saat
+  // Redis crash (everysec). Fail-closed bila DB ada tapi INSERT gagal.
+  if(!persist_submission_pending(job)){
+    Response r; r.status=503;
+    r.json(503,"{\"success\":false,\"error\":\"Gagal menyimpan jawaban. Silakan coba lagi.\"}");
+    return r;
+  }
   if(g_enqueue_hook){
     g_enqueue_hook(job);
   } else if(!enqueue_job_to_redis(job)){
     Response r; r.status=503;
     r.json(503,"{\"success\":false,\"error\":\"Antrean jawaban tidak tersedia. Silakan coba lagi.\"}");
     return r;
+  }
+  if(!idem_key.empty()){
+    std::lock_guard<std::mutex> g(g_idem_mu);
+    g_idem_jobs[std::to_string(exam_id)+"|"+idem_key]=job.job_id;
   }
   // C4: respons menyertakan job_id (rahasia per-submission untuk poll /result)
   // + congrats_message (paritas Go SubmitExam). Android membaca job_id dari

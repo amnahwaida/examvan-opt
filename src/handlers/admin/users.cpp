@@ -16,6 +16,7 @@
 #include <functional>
 #endif
 #include <string>
+#include <algorithm>
 #include <cctype>
 #include <optional>
 namespace examvan::handlers::admin {
@@ -86,6 +87,33 @@ static std::optional<double> json_double_field(const std::string& body, const st
 }
 
 // Parse array JSON roles and keep only canonical application roles.
+static std::string sanitize_roles_json(const std::string& roles_json, bool allow_superadmin){
+  if(allow_superadmin) return roles_json;
+  std::string out=roles_json;
+  const std::string bad="\"superadmin\"";
+  size_t p=0;
+  while((p=out.find(bad,p))!=std::string::npos){
+    size_t s=p;
+    while(s>0 && (out[s-1]==' '||out[s-1]==',')) s--;
+    size_t e=p+bad.size();
+    while(e<out.size() && (out[e]==' '||out[e]==',')) e++;
+    if(s>0 && out[s-1]=='[' && e<out.size() && out[e]==']'){ out.erase(p,bad.size()); }
+    else if(s>0 && out[s-1]=='['){ out.erase(s,e-s); if(!out.empty()&&s<out.size()&&out[s]==',') out.erase(s,1); else out.erase(p,bad.size()); p=s; continue; }
+    else { out.erase(s,e-s); }
+    p=s;
+    if(out=="[" || out=="[]") break;
+  }
+  std::string compact;
+  for(char c: out) if(c!=' '&&c!='\t'&&c!='\n'&&c!='\r') compact.push_back(c);
+  compact.erase(std::remove(compact.begin(),compact.end(),','),compact.end());
+  if(compact=="[]"||compact=="[") return "[]";
+  std::string fixed=out;
+  while(fixed.find(",,")!=std::string::npos) fixed.erase(fixed.find(",,"),1);
+  while(fixed.find("[,")!=std::string::npos) fixed.erase(fixed.find("[,")+1,1);
+  while(fixed.find(",]")!=std::string::npos) fixed.erase(fixed.find(",]"),1);
+  return fixed;
+}
+static bool strip_superadmin_marker = true;
 static std::string json_roles_join(const std::string& body){
   std::string needle="\"roles\"";
   size_t p=body.find(needle);
@@ -292,6 +320,13 @@ Response create_user(const Request& req){
   std::string email=body_field(req,"email");
   std::string instansi=body_field(req,"instansi");
   auto roles_json=json_roles_join(req.body);
+  // P18: roles_json tak boleh menyelundupkan superadmin kecuali caller superadmin.
+  bool caller_super = role=="superadmin";
+  if(!caller_super){
+    for(auto& kv:req.headers){ std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch); if(k=="x-internal-admin-role" && kv.second.find("superadmin")!=std::string::npos) caller_super=true; }
+  }
+  (void)strip_superadmin_marker;
+  roles_json=sanitize_roles_json(roles_json, caller_super);
   if(roles_json=="[]"){
     if(role!="guru") roles_json="[\""+role+"\"]";
     else roles_json="[\"guru\"]";
@@ -413,8 +448,12 @@ Response edit_user(const Request& req){
     std::string package=body_field(req,"package");
     std::string expires_at=body_field(req,"expires_at");
     auto roles_json=json_roles_join(req.body);
+    bool allow_superadmin=false;
+    for(auto& kv:req.headers){ std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch); if(k=="x-internal-admin-role" && kv.second.find("superadmin")!=std::string::npos) allow_superadmin=true; }
+    roles_json=sanitize_roles_json(roles_json, allow_superadmin);
     if(roles_json=="[]"){
       std::string rl=body_field(req,"role");
+      if(rl=="superadmin" && !allow_superadmin) rl="guru";
       if(rl.empty()) rl="guru";
       roles_json="[\""+rl+"\"]";
     }

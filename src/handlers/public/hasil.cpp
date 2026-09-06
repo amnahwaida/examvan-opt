@@ -547,7 +547,9 @@ Response cek_hasil_api(const Request& req){
           }
           std::string count_sql="SELECT COUNT(*) FROM submissions WHERE exam_id=$1 AND answers_json IS NOT NULL AND answers_json != ''";
           std::vector<std::string> args={std::to_string(exam.id)};
-          if(!search.empty()){ count_sql+=" AND student_name ILIKE '%'||$2||'%'"; args.push_back(search); }
+          // P18-L1: escape %/_/\ agar search tak jadi wildcard enum.
+          auto escape_like=[](std::string s){ std::string o; for(char c: s){ if(c=='%'||c=='_'||c=='\\') o+='\\'; o+=c; } return o; };
+          if(!search.empty()){ count_sql+=" AND student_name ILIKE '%'||$2||'%' ESCAPE '\\'"; args.push_back(escape_like(search)); }
           auto ct=real.exec_params(c.get(),count_sql,args);
           if(ct && PQntuples(ct.get())>0){ try{ total=std::stoi(PQgetvalue(ct.get(),0,0)); }catch(...){ total=0; } }
           total_pages=(total+per_page-1)/per_page; if(total_pages<1) total_pages=1;
@@ -555,7 +557,7 @@ Response cek_hasil_api(const Request& req){
           std::string sql="SELECT id, student_name, exam_number, student_class, answers_json, score, start_time, created_at, identity_data"
             " FROM submissions WHERE exam_id=$1 AND answers_json IS NOT NULL AND answers_json != ''";
           std::vector<std::string> args2={std::to_string(exam.id)};
-          if(!search.empty()){ sql+=" AND student_name ILIKE '%'||$2||'%'"; args2.push_back(search); }
+          if(!search.empty()){ sql+=" AND student_name ILIKE '%'||$2||'%' ESCAPE '\\'"; args2.push_back(escape_like(search)); }
           sql+=" ORDER BY score DESC NULLS LAST LIMIT $"+std::to_string(args2.size()+1)+" OFFSET $"+std::to_string(args2.size()+2);
           args2.push_back(std::to_string(per_page));
           args2.push_back(std::to_string((page-1)*per_page));

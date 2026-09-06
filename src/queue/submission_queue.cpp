@@ -251,7 +251,13 @@ std::string SubmissionQueue::enqueue(const std::map<std::string,std::string>& da
 #else
   std::string payload=j.to_json();
 #endif
-  if(lpush_) lpush_(kQueueKey, payload);
+  if(lpush_checked_){
+    try{
+      bool ok = lpush_checked_(kQueueKey, payload);
+      if(!ok) return "";
+    }catch(...){ return ""; }
+  } else if(lpush_) lpush_(kQueueKey, payload);
+  else return "";
   return j.job_id;
 }
 
@@ -356,7 +362,9 @@ void Worker::run_worker(int id){
       batch_q_.push({*job, score});
     }
     cv_.notify_one();
-    if(batch_q_.size()>=kBatchSize) cv_.notify_one();
+    // P18-M11: jangan akses batch_q_.size() tanpa lock (race dengan
+    // run_batch); pending() sudah mengunci.
+    if(pending()>=kBatchSize) cv_.notify_one();
   }
 }
 
@@ -424,7 +432,14 @@ void Worker::run_batch(){
       }
     } else if(c) real.exec_params(c.get(),"ROLLBACK",{});
     if(c) real.release(c.release());
-    for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries))); queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
+    // P18-M11: backoff serial memblokir batch — tidur sekali (max backoff)
+    // lalu requeue semua, bukan sleep per-job.
+    if(!failed.empty()){
+      int max_ms=0;
+      for(auto& b: failed) max_ms=std::max(max_ms, retry_backoff_ms(b.first.retries+1));
+      if(max_ms>0) std::this_thread::sleep_for(std::chrono::milliseconds(max_ms));
+    }
+    for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
     for(auto& b: persisted){ JobResult r; r.job_id=b.first.job_id; r.exam_id=b.first.exam_id; r.mac_address=b.first.mac_address; r.identity_data=map_to_json(b.first.identity_data); r.identity_hash=identity_fingerprint(b.first.identity_data); r.success=true; r.score=b.second; r.message="ok"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); }
 #else
     for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries))); queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Database tidak tersedia"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
@@ -583,12 +598,16 @@ HeartbeatFlusher::~HeartbeatFlusher(){ stop(); }
 void HeartbeatFlusher::start(){
   running_=true;
   th_=std::thread([this]{
+    std::unique_lock<std::mutex> lk(stop_mu_);
     while(running_){
-      std::this_thread::sleep_for(std::chrono::seconds(30)); // paritas Go tick 30s
-      if(running_ && drain_) drain_();
+      stop_cv_.wait_for(lk, std::chrono::seconds(30), [this]{ return !running_.load(); });
+      if(!running_) break;
+      lk.unlock();
+      try{ if(drain_) drain_(); }catch(...){}
+      lk.lock();
     }
   });
 }
-void HeartbeatFlusher::stop(){ running_=false; if(th_.joinable()) th_.join(); }
+void HeartbeatFlusher::stop(){ running_=false; stop_cv_.notify_all(); if(th_.joinable()) th_.join(); }
 
 } // namespace examvan::queue

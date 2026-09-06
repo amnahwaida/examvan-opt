@@ -189,11 +189,12 @@ void Hub::handle_heartbeat(std::shared_ptr<Client> c, const std::string& payload
     ",\"student_class\":"+json_string(student_class)+
     ",\"device_info\":"+json_string(device_info)+
     ",\"event\":\"heartbeat\",\"last_seen\":"+json_string(last_seen)+"}";
-  if(redis_set_) redis_set_(key, hb_json);
+  if(redis_set_){ std::lock_guard<std::mutex> g(redis_mu_); redis_set_(key, hb_json); }
   if(redis_lpush_){
     std::string qp="{\"exam_id\":"+std::to_string(exam_id)+",\"mac_address\":"+json_string(mac)+
       ",\"student_name\":"+json_string(student_name)+",\"exam_number\":"+json_string(exam_number)+
       ",\"student_class\":"+json_string(student_class)+",\"event\":\"heartbeat\",\"last_seen\":"+json_string(last_seen)+"}";
+    std::lock_guard<std::mutex> g(redis_mu_);
     redis_lpush_(qp);
   }
   std::string broadcast_payload="{\"student_name\":"+json_string(student_name)+
@@ -220,7 +221,7 @@ void Hub::handle_exam_completed(std::shared_ptr<Client> c, const std::string& pa
 #endif
   if(mac.empty()) return;
   std::string key="heartbeat:"+std::to_string(exam_id)+":"+mac;
-  if(redis_del_) redis_del_(key);
+  if(redis_del_){ std::lock_guard<std::mutex> g(redis_mu_); redis_del_(key); }
   std::string payload="{\"event\":\"exam_completed\",\"exam_id\":"+json_string(exam_id_str)+",\"mac_address\":"+json_string(mac)+"}";
   broadcast_to_room(c->room,"student_update",payload);
 }

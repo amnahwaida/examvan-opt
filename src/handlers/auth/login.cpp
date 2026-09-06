@@ -31,7 +31,10 @@ using examvan::helpers::verify_password;
 
 std::string build_login_session_payload(int admin_id, const std::string& username, const std::string& role_json){
   const bool is_super=examvan::models::is_super_admin_role(role_json);
-  return b64_encode("admin_id="+std::to_string(admin_id)+"&username="+username+"&role="+examvan::models::normalize_role(role_json)+"&is_super_admin="+(is_super?"1":"0"));
+  auto now=std::chrono::system_clock::now();
+  long exp=std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count()+86400;
+  long iat=std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+  return b64_encode("admin_id="+std::to_string(admin_id)+"&username="+username+"&role="+examvan::models::normalize_role(role_json)+"&is_super_admin="+(is_super?"1":"0")+"&iat="+std::to_string(iat)+"&exp="+std::to_string(exp));
 }
 
 void set_user_for_test(const std::string& u, const std::string& p, const std::string& r){
@@ -142,8 +145,15 @@ Response login_handler(const Request& req, const Config& cfg){
   std::string turnstile;
   auto tf=form.find("cf-turnstile-response"); if(tf!=form.end()) turnstile=tf->second;
   if(turnstile.empty()) turnstile=json_field(req.body,"cf-turnstile-response");
+  std::string tsecret = cfg.turnstile_secret;
+  if(tsecret.empty()) if(auto* e=getenv("TURNSTILE_SECRET")) tsecret=e;
+  bool turnstile_enabled = !tsecret.empty();
+  if(auto* ee=getenv("TURNSTILE_ENABLED")) turnstile_enabled = std::string(ee)=="1" || std::string(ee)=="true";
+  if(turnstile_enabled && turnstile.empty()){
+    Response r; r.status=403; r.json(403,"{\"error\":\"Turnstile required\"}"); return r;
+  }
   if(!turnstile.empty()){
-    std::string secret = cfg.turnstile_secret;
+    std::string secret = tsecret;
     if(secret.empty()) if(auto* e=getenv("TURNSTILE_SECRET")) secret=e;
     if(!middleware::verify_turnstile(turnstile, secret, "")){
       Response r; r.status=403; r.json(403,"{\"error\":\"Turnstile failed\"}"); return r;

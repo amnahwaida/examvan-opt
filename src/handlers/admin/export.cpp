@@ -176,7 +176,8 @@ Response export_submissions_xlsx(const Request& req){
       else if(super_admin){ sql+="TRUE"; }
       else if(allowed_ids.empty()){ sql+="FALSE"; }
       else { sql+="s.exam_id = ANY($1::int[])"; std::string ids="{"; for(size_t i=0;i<allowed_ids.size();++i){ if(i) ids+=","; ids+=std::to_string(allowed_ids[i]); } ids+="}"; params.push_back(ids); }
-      sql+=" ORDER BY s.id";
+      // P18-L4: batasi export agar tak OOM (50k baris cukup untuk XLSX browser).
+      sql+=" ORDER BY s.id LIMIT 50000";
       auto r=real.exec_params(c.get(),sql,params);
       if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
         for(int i=0;i<PQntuples(r.get());i++){
