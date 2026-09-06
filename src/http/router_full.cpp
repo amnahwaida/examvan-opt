@@ -427,6 +427,7 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("GET","/admin/api/submissions/:id/detail", admin_api(handlers::admin::submission_detail,"","submission"));
   r.add("GET","/admin/api/queue/status", admin_api(handlers::admin::queue_status));
   r.add("POST","/admin/api/submissions/:id/delete", admin_api(handlers::admin::delete_submission,"","submission"));
+  r.add("GET","/admin/api/pengawas/state", admin_api(handlers::admin::pengawas_state));
   r.add("GET","/admin/api/pengawas/exams", admin_api(handlers::admin::pengawas_exams));
   r.add("GET","/admin/api/pengawas/exams/:exam_id/submissions", admin_api(handlers::admin::pengawas_submissions,"","exam_access"));
   r.add("GET","/admin/api/pengawas/exams/:exam_id/approvals", admin_api(handlers::admin::pending_approvals,"","exam_access"));

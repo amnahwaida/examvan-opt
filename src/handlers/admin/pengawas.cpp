@@ -428,4 +428,9 @@ Response exam_audit_logs(const Request& req){
 #endif
   Response r; r.json(200,"{\"success\":true,\"data\":[]}"); return r;
 }
+
+Response pengawas_state(const Request& req){
+  (void)req;
+  Response r; r.json(200,"{\"success\":true,\"state\":{\"connected\":true,\"active_exams\":0,\"online_students\":0,\"pending_approvals\":0}}"); return r;
+}
 } // namespace examvan::handlers::admin
