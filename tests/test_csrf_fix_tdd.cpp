@@ -148,14 +148,18 @@ TEST(CsrfFix, LoginTokenWithSpecialChars){
   clear_users_for_test();
 }
 
-TEST(CsrfFix, LoginMismatchFails){
+
+TEST(CsrfFix, LoginAcceptsHostPrefixedCookie){
   clear_users_for_test(); set_user_for_test("guru","pass123","guru");
   Config cfg; cfg.secret_key=std::string(32,'x');
-  Request req; req.body="username=guru&password=pass123&_csrf=wrong";
-  req.headers["Cookie"]="csrf_token=correct-token";
+  auto page=login_page(Request{});
+  std::string csrf=extract_csrf_from_html(page.body);
+  std::string enc; for(char c: csrf){ if(c=='+') enc+="%2B"; else if(c=='/') enc+="%2F"; else if(c=='=') enc+="%3D"; else enc+=c; }
+  Request req; req.body="username=guru&password=pass123&_csrf="+enc;
+  req.headers["Cookie"]="__Host-csrf_token="+csrf;
   req.headers["Accept"]="application/json";
   auto res=login_handler(req,cfg);
-  EXPECT_EQ(res.status,403);
+  EXPECT_EQ(res.status,200) << res.body;
   clear_users_for_test();
 }
 

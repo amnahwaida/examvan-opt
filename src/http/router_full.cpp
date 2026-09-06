@@ -126,7 +126,8 @@ void register_full_routes(Router& r, const Config& cfg){
           std::string cookie_hdr;
           auto itc=req.headers.find("Cookie");
           if(itc!=req.headers.end()) cookie_hdr=itc->second;
-          std::string session_csrf=extract_cookie(cookie_hdr,"csrf_token");
+          std::string session_csrf=extract_cookie(cookie_hdr,"__Host-csrf_token");
+          if(session_csrf.empty()) session_csrf=extract_cookie(cookie_hdr,"csrf_token");
           std::string tok;
           for(auto& kv: req.headers){
             std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch);

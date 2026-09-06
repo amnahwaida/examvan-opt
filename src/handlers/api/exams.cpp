@@ -778,7 +778,7 @@ Response submit_exam(const Request& req){
   job.student_name=json_string_field(req.body,"student_name");
   job.exam_number=json_string_field(req.body,"exam_number");
   job.student_class=json_string_field(req.body,"student_class");
-  job.mac_address=json_string_field(req.body,"mac_address");
+  job.mac_address=sub_mac;
   job.answers=parse_string_map(json_raw_value(req.body,"answers"));
   job.identity_data=parse_string_map(json_raw_value(req.body,"identity_data"));
   job.enqueued_at=helpers::format_iso_utc(std::chrono::system_clock::now());
@@ -791,7 +791,7 @@ Response submit_exam(const Request& req){
     if(form.count("student_name")) job.student_name=form["student_name"];
     if(form.count("exam_number")) job.exam_number=form["exam_number"];
     if(form.count("student_class")) job.student_class=form["student_class"];
-    if(form.count("mac_address")) job.mac_address=form["mac_address"];
+    if(form.count("mac_address")) job.mac_address=sanitize_mac_like_go(form["mac_address"]);
   }
   if(g_enqueue_hook){
     g_enqueue_hook(job);

@@ -142,6 +142,17 @@ TEST(Characterization, AdminManagementRequiresSuperadmin) {
   EXPECT_NE(res3.status,403) << "guru can access exam data routes";
 }
 
+TEST(Characterization, AdminMutationAcceptsHostCsrfCookie) {
+  Config cfg; cfg.secret_key=std::string(32,'x');
+  Router r; register_full_routes(r,cfg);
+  Request req; req.method="POST"; req.path="/admin/api/saas-settings";
+  req.headers["Cookie"]=session_cookie_for(cfg,1,"superadmin")+"; __Host-csrf_token=host-token";
+  req.headers["X-CSRF-Token"]="host-token";
+  req.body="{\"footer_text\":\"ok\"}";
+  auto res=r.dispatch(req);
+  EXPECT_NE(res.status,403) << "production Host-prefixed CSRF cookie must be accepted: " << res.body;
+}
+
 TEST(Characterization, ExamOwnershipScopedToCreatorOrSuperadmin) {
   /* C7: route per-exam (questions/delete) wajib scope kepemilikan — guru yang
    * bukan pembuat (created_by) exam tsb harus 403. Tanpa scope, guru instansi

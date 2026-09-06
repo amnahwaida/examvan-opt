@@ -82,9 +82,10 @@ static std::string json_escape(const std::string& s){
   return o;
 }
 
-// Mask rahasia saat GET: tampilkan 4 karakter terakhir (paritas Go maskTokenSetting).
+// Mask secrets on GET; never return short secrets verbatim.
 static std::string mask_token(const std::string& t){
-  if(t.size()<=8) return t;
+  if(t.empty()) return "";
+  if(t.size()<=4) return std::string(t.size(),'*');
   return std::string(t.size()-4,'*')+t.substr(t.size()-4);
 }
 
@@ -339,7 +340,7 @@ Response system_apps_page(const Request& req){
             Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Field aplikasi atau file tidak valid.\"}"); return r;
           }
           name=helpers::sanitize_student_input(name);
-          if(!std::regex_match(version,std::regex(R"(^[0-9]+\\.[0-9]+\\.[0-9]+$)"))){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Format versi tidak valid.\"}"); return r; }
+          if(!std::regex_match(version,std::regex(R"(^[0-9]+\.[0-9]+\.[0-9]+$)"))){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Format versi tidak valid.\"}"); return r; }
           if(file.size()>100*1024*1024){ Response r; r.status=413; r.json(413,"{\"success\":false,\"message\":\"File terlalu besar.\"}"); return r; }
           auto dup=real.exec_params(c.get(),"SELECT id FROM system_apps WHERE name=$1 AND platform=$2 AND version=$3",{name,platform,version});
           if(dup && PQresultStatus(dup.get())==PGRES_TUPLES_OK && PQntuples(dup.get())>0){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Aplikasi dengan versi tersebut sudah ada.\"}"); return r; }

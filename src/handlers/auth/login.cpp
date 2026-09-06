@@ -127,7 +127,11 @@ Response login_handler(const Request& req, const Config& cfg){
   }
   std::string session_csrf;
   std::string cookie_hdr=get_hdr_ci(req,"Cookie");
-  if(!cookie_hdr.empty()){ auto c=extract_cookie(cookie_hdr,"csrf_token"); if(!c.empty()) session_csrf=c; }
+  if(!cookie_hdr.empty()){
+    auto c=extract_cookie(cookie_hdr,"__Host-csrf_token");
+    if(c.empty()) c=extract_cookie(cookie_hdr,"csrf_token");
+    if(!c.empty()) session_csrf=c;
+  }
   if(session_csrf.empty()){
     Response r; r.status=403; r.json(403,"{\"error\":\"CSRF token mismatch\"}"); return r;
   }
