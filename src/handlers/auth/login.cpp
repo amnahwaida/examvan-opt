@@ -13,6 +13,7 @@
 #include <crypt.h>
 #include <cctype>
 #include <algorithm>
+#include <chrono>
 #ifdef HAS_LIBPQ
 #include "db/pool_real.hpp"
 #include "db/pool.hpp"
@@ -21,7 +22,10 @@
 namespace examvan::handlers::auth {
 
 static std::unordered_map<std::string, std::string> g_users;
+static std::unordered_map<std::string, std::pair<int,std::chrono::steady_clock::time_point>> g_login_failures;
 static std::mutex g_mu;
+static constexpr int kLoginFailureLimit=5;
+static constexpr auto kLoginLockout=std::chrono::minutes(15);
 using examvan::helpers::hash_password;
 using examvan::helpers::verify_password;
 
@@ -106,15 +110,20 @@ static std::string json_field(const std::string& body, const std::string& key){
   return "";
 }
 Response login_handler(const Request& req, const Config& cfg){
-  auto form=helpers::parse_form(req.body);
+  std::string content_type=get_hdr_ci(req,"Content-Type");
+  bool json_ct=content_type.find("application/json")!=std::string::npos;
+  auto form=json_ct?std::map<std::string,std::string>{}:helpers::parse_form(req.body);
   std::string csrf_header=get_hdr_ci(req,"X-CSRF-Token");
   if(csrf_header.empty()) csrf_header=get_hdr_ci(req,"X-XSRF-Token");
   if(csrf_header.empty()){
-    auto f=form.find("csrf_token"); if(f==form.end()) f=form.find("_csrf"); if(f==form.end()) f=form.find("csrf"); if(f!=form.end()) csrf_header=f->second;
-    if(csrf_header.empty()) csrf_header=json_field(req.body,"csrf_token");
-    if(csrf_header.empty()) csrf_header=json_field(req.body,"_csrf");
-    if(csrf_header.empty()) csrf_header=json_field(req.body,"csrf");
-    if(csrf_header.empty()) csrf_header=json_field(req.body,"x-csrf-token");
+    if(json_ct){
+      csrf_header=json_field(req.body,"csrf_token");
+      if(csrf_header.empty()) csrf_header=json_field(req.body,"_csrf");
+      if(csrf_header.empty()) csrf_header=json_field(req.body,"csrf");
+      if(csrf_header.empty()) csrf_header=json_field(req.body,"x-csrf-token");
+    } else {
+      auto f=form.find("csrf_token"); if(f==form.end()) f=form.find("_csrf"); if(f==form.end()) f=form.find("csrf"); if(f!=form.end()) csrf_header=f->second;
+    }
   }
   std::string session_csrf;
   std::string cookie_hdr=get_hdr_ci(req,"Cookie");
@@ -152,12 +161,27 @@ Response login_handler(const Request& req, const Config& cfg){
     return s;
   };
   std::string uname_norm=trim_lc(username);
+  {
+    std::lock_guard<std::mutex> g(g_mu);
+    auto it=g_login_failures.find(uname_norm);
+    if(it!=g_login_failures.end()){
+      auto now=std::chrono::steady_clock::now();
+      if(now-it->second.second < kLoginLockout && it->second.first>=kLoginFailureLimit){
+        Response r; r.status=401; r.json(401,"{\"error\":\"invalid credentials\"}"); return r;
+      }
+      if(now-it->second.second >= kLoginLockout) g_login_failures.erase(it);
+    }
+  }
   std::string stored;
   { std::lock_guard<std::mutex> g(g_mu); 
     auto f=g_users.find(username); if(f!=g_users.end()) stored=f->second;
     else { auto f2=g_users.find(uname_norm); if(f2!=g_users.end()) stored=f2->second; }
   }
   bool ok = !stored.empty() && verify_password(password, stored);
+  if(stored.empty()){
+    static const std::string dummy_hash=hash_password("examvan-invalid-login-dummy");
+    (void)verify_password(password,dummy_hash);
+  }
   int sess_admin_id=1;
   std::string sess_role_json="[\"guru\"]";
   if(!ok){
@@ -194,7 +218,17 @@ Response login_handler(const Request& req, const Config& cfg){
 #endif
   }
   if(!ok){
+    {
+      std::lock_guard<std::mutex> g(g_mu);
+      auto& failure=g_login_failures[uname_norm];
+      failure.first++;
+      failure.second=std::chrono::steady_clock::now();
+    }
     Response r; r.status=401; r.json(401,"{\"error\":\"invalid credentials\"}"); return r;
+  }
+  {
+    std::lock_guard<std::mutex> g(g_mu);
+    g_login_failures.erase(uname_norm);
   }
   username=uname_norm;
   std::string payload=build_login_session_payload(sess_admin_id, username, sess_role_json);
