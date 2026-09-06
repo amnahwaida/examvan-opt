@@ -315,9 +315,15 @@ Response system_apps_page(const Request& req){
         if(req.method=="DELETE" || (req.method=="POST" && req.path.find("/delete")!=std::string::npos)){
           auto it=req.params.find("id");
           if(it==req.params.end()){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"ID tidak valid.\"}"); return r; }
+          auto row=real.exec_params(c.get(),"SELECT file_path FROM system_apps WHERE id=$1",{it->second});
+          if(!row || PQresultStatus(row.get())!=PGRES_TUPLES_OK || PQntuples(row.get())==0){ Response r; r.status=404; r.json(404,"{\"success\":false,\"message\":\"Aplikasi tidak ditemukan.\"}"); return r; }
+          std::string file_path=PQgetvalue(row.get(),0,0);
           auto del=real.exec_params(c.get(),"DELETE FROM system_apps WHERE id=$1",{it->second});
           bool ok=del && PQresultStatus(del.get())==PGRES_COMMAND_OK && std::atoi(PQcmdTuples(del.get()))>0;
-          Response r; r.status=ok?200:404; r.json(r.status,ok?"{\"success\":true,\"message\":\"Aplikasi berhasil dihapus\"}":"{\"success\":false,\"message\":\"Aplikasi tidak ditemukan.\"}"); return r;
+          if(!ok){ Response r; r.status=500; r.json(500,"{\"success\":false,\"message\":\"Gagal menghapus metadata aplikasi.\"}"); return r; }
+          auto cfg_r2=Config::load(); r2::R2Config rc{cfg_r2.r2_access_key,cfg_r2.r2_secret_key,cfg_r2.r2_endpoint,cfg_r2.r2_bucket};
+          if(rc.enabled() && !file_path.empty()){ r2::R2Client client{rc}; if(!client.remove(file_path)){ Response r; r.status=502; r.json(502,"{\"success\":false,\"message\":\"Metadata terhapus, tetapi object R2 belum dapat dibersihkan.\"}"); return r; } }
+          Response r; r.status=200; r.json(200,"{\"success\":true,\"message\":\"Aplikasi berhasil dihapus\"}"); return r;
         }
         if(req.method=="POST"){
           std::string ct;
