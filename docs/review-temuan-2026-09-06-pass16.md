@@ -336,7 +336,7 @@ Implemented and verified in the current tree:
 Still open / requiring the next implementation batch:
 
 - Full production PostgreSQL verification for all tenant queries, assigned-pengawas access, bulk authorization, and browser rendering of the audit tab.
-- HTML page database status revalidation and logout/form token browser verification remain; login now has process-local lockout/dummy-bcrypt protection, login JSON/form CSRF parsing is separated, and production login/admin-page CSRF cookies use the `__Host-` prefix.
+- HTML page guards now propagate verified actor context and revalidate positive session IDs/status when PostgreSQL is configured; logout/form token browser verification remains. Login has process-local lockout/dummy-bcrypt protection, login JSON/form CSRF parsing is separated, and production login/admin-page CSRF cookies use the `__Host-` prefix.
 - Full production verification of system-app multipart upload/R2 metadata cleanup remains. System-app list/delete/upload and SMTP test routes are implemented; upload fails closed when R2 or metadata persistence is unavailable. The legacy `/admin/api/pengawas/state` route is now registered with a stable authenticated zero-state response; live aggregate metrics still require a product/data-source contract.
 - PostgreSQL/Redis integration tests for durable queue commit/retry, result binding, voucher transactions, tenant authorization, and schema migrations. No finding is considered production-closed until these integration paths pass.
 

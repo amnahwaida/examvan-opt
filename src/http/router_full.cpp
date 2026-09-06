@@ -346,33 +346,33 @@ void register_full_routes(Router& r, const Config& cfg){
     }
     return handlers::admin::dashboard_page(page_context(req));
   });
-  r.add("GET","/admin/settings", [cfg,check_auth](const Request& req){
+  r.add("GET","/admin/settings", [cfg,check_auth,page_context](const Request& req){
     auto it=req.headers.find("Cookie");
     if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/settings"; return rr;
     }
-    return handlers::admin::settings_page(req);
+    return handlers::admin::settings_page(page_context(req));
   });
-  r.add("GET","/admin/pengawas", [cfg,check_auth](const Request& req){
+  r.add("GET","/admin/pengawas", [cfg,check_auth,page_context](const Request& req){
     auto it=req.headers.find("Cookie");
     if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/pengawas"; return rr;
     }
-    return handlers::admin::pengawas_page(req);
+    return handlers::admin::pengawas_page(page_context(req));
   });
-  r.add("GET","/admin/pengawas/:exam_id", [cfg,check_auth](const Request& req){
+  r.add("GET","/admin/pengawas/:exam_id", [cfg,check_auth,page_context](const Request& req){
     auto it=req.headers.find("Cookie");
     if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/pengawas"; return rr;
     }
-    return handlers::admin::pengawas_detail_page(req);
+    return handlers::admin::pengawas_detail_page(page_context(req));
   });
-  r.add("GET","/admin/submissions", [cfg,check_auth](const Request& req){
+  r.add("GET","/admin/submissions", [cfg,check_auth,page_context](const Request& req){
     auto it=req.headers.find("Cookie");
     if(it==req.headers.end() || !check_auth(req)){
       Response rr; rr.status=302; rr.headers["Location"]="/login?next=/admin/submissions"; return rr;
     }
-    return handlers::admin::submissions_page(req);
+    return handlers::admin::submissions_page(page_context(req));
   });
   r.add("GET","/admin/api/stats", admin_api(handlers::admin::dashboard_stats));
   r.add("GET","/admin/api/saas-settings", admin_api(handlers::admin::settings_page, "superadmin"));
