@@ -341,8 +341,12 @@ void Worker::run_batch(){
       failed.clear();
       for(auto& b: batch){
         auto& j=b.first; auto& score=b.second; bool ok=true;
-        auto lock=real.exec_params(c.get(),"SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",{"approval:"+std::to_string(j.exam_id)+":"+j.mac_address});
-        ok=lock && PQresultStatus(lock.get())==PGRES_TUPLES_OK;
+        auto save=real.exec_params(c.get(),"SAVEPOINT submission_job",{});
+        ok=save && PQresultStatus(save.get())==PGRES_COMMAND_OK;
+        if(ok){
+          auto lock=real.exec_params(c.get(),"SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",{"approval:"+std::to_string(j.exam_id)+":"+j.mac_address});
+          ok=lock && PQresultStatus(lock.get())==PGRES_TUPLES_OK;
+        }
         std::string score_text=score.has_value()?std::to_string(*score):"";
         auto up=ok?real.exec_params(c.get(),
           "UPDATE submissions SET job_id=$1, answers_json=$2, score=NULLIF($3,'')::double precision, start_time=COALESCE(start_time,NULLIF($4,'')), student_name=$5, exam_number=$6, student_class=$7, identity_data=$8 WHERE id=(SELECT id FROM submissions WHERE exam_id=$9 AND mac_address=$10 AND ($11='' OR exam_number=$11) ORDER BY created_at DESC LIMIT 1) RETURNING id",{j.job_id,map_to_json(j.answers),score_text,j.start_time,j.student_name,j.exam_number,j.student_class,map_to_json(j.identity_data),std::to_string(j.exam_id),j.mac_address,j.exam_number}):nullptr;
@@ -350,6 +354,13 @@ void Worker::run_batch(){
         if(ok && !updated){
           auto ins=real.exec_params(c.get(),"INSERT INTO submissions (job_id,exam_id,student_name,exam_number,student_class,answers_json,score,start_time,mac_address,identity_data) VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,'')::double precision,$8,$9,$10)",{j.job_id,std::to_string(j.exam_id),j.student_name,j.exam_number,j.student_class,map_to_json(j.answers),score_text,j.start_time,j.mac_address,map_to_json(j.identity_data)});
           ok=ins && PQresultStatus(ins.get())==PGRES_COMMAND_OK;
+        }
+        if(ok){
+          auto release=real.exec_params(c.get(),"RELEASE SAVEPOINT submission_job",{});
+          ok=release && PQresultStatus(release.get())==PGRES_COMMAND_OK;
+        } else {
+          real.exec_params(c.get(),"ROLLBACK TO SAVEPOINT submission_job",{});
+          real.exec_params(c.get(),"RELEASE SAVEPOINT submission_job",{});
         }
         if(ok) persisted.push_back(b); else failed.push_back(b);
       }
@@ -360,7 +371,7 @@ void Worker::run_batch(){
     for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
     for(auto& b: persisted){ JobResult r; r.job_id=b.first.job_id; r.exam_id=b.first.exam_id; r.mac_address=b.first.mac_address; r.identity_data=map_to_json(b.first.identity_data); r.success=true; r.score=b.second; r.message="ok"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); }
 #else
-    for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } }
+    for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.success=false; r.score=b.second; r.message="Database tidak tersedia"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
 #endif
   }
 }

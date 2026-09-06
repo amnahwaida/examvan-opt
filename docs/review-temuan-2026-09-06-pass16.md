@@ -321,7 +321,7 @@ C++ mengikuti Go saat ini, tetapi anonymous API menerima identity data dan `eval
 
 Implemented and verified in the current tree:
 
-- Queue workers no longer publish `done` before persistence; DB transactions check SQL results, retry/requeue failed jobs, and shutdown drains staged work. Redis enqueue failures now return a non-queued error instead of false `202`.
+- Queue persistence now uses per-job savepoints, checks each SQL result, requeues failed jobs up to the retry budget, drains staged work at shutdown, and publishes `done` only after transaction commit. Redis enqueue failures return a non-queued error instead of false `202`.
 - Result records now carry binding metadata and `/result` validates job/exam/device; durable fallback queries exact `job_id`.
 - `SubmitExamResponse` protobuf now includes `job_id` and `congrats_message`; generated bindings were rebuilt.
 - Public protobuf exam listing no longer emits tokens. Submit MACs are canonicalized before rate limiting, answer-key stripping handles first-member keys, and approval requests have exam/device rate limits.
@@ -330,7 +330,8 @@ Implemented and verified in the current tree:
 - Voucher redemption accepts the correct PostgreSQL command status; voucher activation uses transaction/row lock and rejects inactive/expired/zero-duration redemptions. Masked settings secrets are preserved, and user role arrays are allowlisted.
 - Edit PDF filenames are sanitized using the create-upload policy; submissions pages refresh CSRF through the admin renderer; system-app routes no longer fall through to unrelated SaaS settings handlers.
 - Admin list, submission list, export, dashboard rows/stats, and bulk mutations now carry verified actor context and apply owner/delegate or same-instansi operator filters in current-store/SQL paths; full PostgreSQL matrix verification remains required.
-- Pengawas audit logs now have a protected route/handler; system-app list/delete and SMTP test routes are implemented with explicit unsupported-upload behavior instead of falling into unrelated settings.
+- Pengawas audit logs now have a protected route/handler; system-app list/delete/upload and SMTP test routes are implemented with explicit unsupported-upload behavior instead of falling into unrelated settings.
+- Full page actor context is propagated to dashboard/settings/pengawas/submissions handlers; production CSRF cookies use the `__Host-` prefix and catch-all token redirects require the exam-token allowlist.
 - Existing and newly adjusted tests remain green in focused runs; the full current suite is green at **681/682 passed, 1 pre-existing skip**.
 
 Still open / requiring the next implementation batch:
