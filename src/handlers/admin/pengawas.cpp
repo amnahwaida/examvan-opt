@@ -404,4 +404,28 @@ Response set_auto_approve(const Request& req){
 #endif
   Response r; r.json(200,"{\"success\":true,\"enabled\":"+val+"}"); return r;
 }
+
+Response exam_audit_logs(const Request& req){
+  std::string exam_id;
+  auto it=req.params.find("exam_id"); if(it!=req.params.end()) exam_id=it->second;
+  if(exam_id.empty()){ Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"exam id required\"}"); return r; }
+#ifdef HAS_LIBPQ
+  std::string arr="[]"; bool found=false;
+  with_pg([&](examvan::db::RealPool& real){
+    auto c=real.acquire(); if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+    auto q=helpers::parse_form(req.query); int limit=100;
+    try{ limit=std::stoi(get_param(q,"limit")); }catch(...){ }
+    if(limit<1) limit=1; if(limit>500) limit=500;
+    auto rows=real.exec_params(c.get(),"SELECT id,username,action,detail,created_at::text FROM admin_audit_logs WHERE exam_id=$1 ORDER BY created_at DESC LIMIT $2",{exam_id,std::to_string(limit)});
+    if(rows && PQresultStatus(rows.get())==PGRES_TUPLES_OK){
+      found=true; std::string s="[";
+      for(int i=0;i<PQntuples(rows.get());++i){ if(i) s+=","; s+="{\"id\":"+std::string(PQgetvalue(rows.get(),i,0))+",\"username\":\""+json_escape_pw(PQgetvalue(rows.get(),i,1))+"\",\"action\":\""+json_escape_pw(PQgetvalue(rows.get(),i,2))+"\",\"detail\":\""+json_escape_pw(PQgetvalue(rows.get(),i,3))+"\",\"created_at\":\""+json_escape_pw(PQgetvalue(rows.get(),i,4))+"\"}"; }
+      s+="]"; arr=s;
+    }
+    real.release(c.release());
+  });
+  if(found){ Response r; r.json(200,"{\"success\":true,\"data\":"+arr+"}"); return r; }
+#endif
+  Response r; r.json(200,"{\"success\":true,\"data\":[]}"); return r;
+}
 } // namespace examvan::handlers::admin

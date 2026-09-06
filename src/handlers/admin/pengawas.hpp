@@ -5,6 +5,7 @@ Response pengawas_page(const Request& req);
 Response pengawas_detail_page(const Request& req);
 Response pengawas_exams(const Request& req);
 Response pengawas_submissions(const Request& req);
+Response exam_audit_logs(const Request& req);
 Response pending_approvals(const Request& req);
 Response set_approval(const Request& req);
 Response get_auto_approve(const Request& req);

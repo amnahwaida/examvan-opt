@@ -23,6 +23,7 @@
 #include "middleware/ratelimit.hpp"
 #include "middleware/body_limit.hpp"
 #include "middleware/cors.hpp"
+#include "helpers/utils.hpp"
 #include "store/exam_store.hpp"
 #include "models/user.hpp"
 #ifdef HAS_LIBPQ
@@ -407,6 +408,7 @@ void register_full_routes(Router& r, const Config& cfg){
   r.add("POST","/admin/api/pengawas/exams/:exam_id/approvals/:mac_address", admin_api(handlers::admin::set_approval,"","exam_access"));
   r.add("GET","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::get_auto_approve,"","exam_access"));
   r.add("POST","/admin/api/pengawas/exams/:exam_id/auto-approve", admin_api(handlers::admin::set_auto_approve,"","exam_access"));
+  r.add("GET","/admin/api/pengawas/exams/:exam_id/audit-logs", admin_api(handlers::admin::exam_audit_logs,"","exam_access"));
   r.add("GET","/admin/api/system-apps", admin_api(handlers::admin::system_apps_page, "superadmin"));
   r.add("POST","/admin/api/system-apps", admin_api(handlers::admin::system_apps_page, "superadmin"));
 }
