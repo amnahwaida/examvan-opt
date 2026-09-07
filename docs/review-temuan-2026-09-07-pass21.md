@@ -247,5 +247,65 @@ bisa di-reuse) → 400 spesifik.
 3. Failure-injection queue: matikan PG saat antrean berisi job, biarkan retry
    habis → pastikan `queue_status.failed` > 0 (setelah T5) dan JobResult
    `success:false` tersimpan.
+
+---
+
+## Addendum remediasi (2026-09-08) — T1-T9 CLOSED di `aea5e8f`
+
+**T1 — CLOSED.** `migrate()` (`exam_store_postgres.cpp`) kini membuat
+`saas_settings`, `vouchers`, `voucher_redemptions`, `package_settings`,
+`exam_pengawas` (skema mengikuti kolom yang dipakai query C++) plus
+`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS` untuk 20 kolom yang
+dipakai INSERT register (`auth_store.cpp`) dan `edit_user` — idempoten,
+skema Go yang sudah lengkap tidak tersentuh.
+
+**T2 — CLOSED.** Pool PG proses-wide baru `src/db/pool_global.hpp`
+(`global_pool()` lazy-init dari Config + `with_global_pg()` helper). Lima
+duplikat `with_pg` (pengawas/submissions/settings/vouchers/users) kini
+delegasi ke pool global; `write_audit_log` settings + `system_apps_page`
+juga. Koneksi di-reuse lintas request — bukan TCP+auth PG baru per request.
+Catatan: heartbeat flusher (`drain_heartbeats_once`) masih membangun pool
+per tick-30 dtk — churn jauh lebih kecil (1/menit vs per-request), tindak
+lanjut opsional menyusul bersama konsolidasi store pool.
+
+**T3 — CLOSED** (sekaligus menutup **B2 pass-20**): branch CDN protobufjs
+dihapus dari `protobuf-helper.js`. SRI placeholder membuat browser selalu
+menolak script CDN dan bundle lokal `/static/js/protobuf.min.js` tidak
+pernah ada — `loadProtobuf` kini menolak eksplisit. Helper tetap tidak
+di-include template mana pun (client web tidak memakai protobuf client-side).
+
+**T4 — CLOSED.** Semua literal versi di handler diganti
+`Config::load().version` (dashboard, pengawas×2, settings, submissions,
+health JSON+protobuf, template_renderer auth×3, download×2 termasuk object
+key R2 APK, hasil×4). Sumber tunggal: `config.hpp:17` default +
+`models/settings.hpp` (saas_settings default android_version).
+
+**T5 — CLOSED.** `kFailedQueueKey` baru di `submission_queue.hpp`;
+`SubmissionQueue::push_failed()` LPUSH job gagal-permanen di ketiga titik
+retry-habis (stop-drain, batch PG failed, jalur tanpa PG);
+`queue_status` membaca `kQueueKey`/`kFailedQueueKey` via konstanta.
+
+**T7 — CLOSED.** Append `X-User` di `dashboard_page` dihapus.
+
+**T8 — CLOSED.** `.gitignore` + `test-results.xml`, `.claude/`; remediasi
+pass-20 di-commit (`1ff5b06`) bersama dokumen pass-18/21.
+
+**T9 — CLOSED.** `valid_expires_at()` di `vouchers.cpp` — create dan batch
+menolak format tanggal salah dengan 400 spesifik sebelum menyentuh PG.
+
+**T6** tetap dicabut (bukan temuan). Verifikasi: TDD RED→GREEN
+`tests/test_p29_tdd.cpp` (14 test kontrak), full suite **795 tests — 794
+passed + 1 skip** (P7 kondisional, tanpa regresi), build `examvan-server`
+bersih, docker-parity `check-docker-paths.sh` 54 src × 2 mode + 71 tests
+lulus (`-Werror`). Kontrak legacy yang bentrok dengan pola baru
+diselaraskan (`PgConnectionsNeverUseSanitizedUrl`,
+`Submissions_QueueStatusFromRedis`, `Settings/Vouchers_PersistsToPostgres`,
+`P25.CdnHasSri`) — semantik perlindungannya tetap (sanitized_url dilarang,
+UPSERT tetap diwajibkan, CDN tanpa SRI asli dilarang).
+
+Sisa terbuka setelah pass ini (carried-over pass-20): H7, M7, M8, M16-sisa,
+M19-sisa (extract_contract path + version kini tersisa titik template
+replace-literal yang sah), L3, B3, B4, B5, B6 + tindak lanjut opsional
+(heartbeat-flusher pool, integration test fresh-DB bila ada env PG nyata).
 4. Smoke `download/apk` setelah versi di-single-source: object key R2 harus
    mengikuti `Config::version`, bukan literal.
