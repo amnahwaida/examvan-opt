@@ -31,6 +31,10 @@ TEST(P25, ExportHasLimit){
 }
 TEST(P25, CdnHasSri){
   auto src = read_src25("static/js/protobuf-helper.js");
-  bool sri = src.find("integrity")!=std::string::npos;
-  EXPECT_TRUE(sri);
+  /* P21-T3 (menutup B2 pass-20): branch CDN dihapus — SRI placeholder
+   * membuat browser selalu menolak script CDN, dan bundle lokal yang
+   * dijanjikan tidak ada. Kontrak baru: TIDAK ada pemuatan script eksternal
+   * tanpa hash valid (fail-closed, bukan integrity kosong). */
+  EXPECT_EQ(src.find("unpkg.com"), std::string::npos)
+    << "CDN protobufjs tanpa SRI asli dilarang — loadProtobuf harus menolak eksplisit";
 }

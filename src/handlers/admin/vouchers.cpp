@@ -11,6 +11,7 @@
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include <libpq-fe.h>
 #include <functional>
 #endif
@@ -109,18 +110,38 @@ static int session_admin_id_from(const Request& req){
   return 0;
 }
 
+/* P21-T9: validasi format expires_at SEBELUM menyentuh PG — sebelumnya
+ * string apa pun diteruskan ke $N::timestamptz dan PG menolaknya dengan
+ * error generik yang diterjemahkan 500 "Gagal menyimpan voucher" (tanpa
+ * petunjuk apa yang salah). Format yang diterima:
+ *  "YYYY-MM-DD HH:MM" (WIB, dipakai frontend), "YYYY-MM-DDTHH:MM[:SS]Z"
+ *  (ISO UTC), atau kosong (tanpa kedaluwarsa). Return false → 400 spesifik. */
+static bool valid_expires_at(const std::string& s){
+  if(s.empty()) return true;
+  // Strip detik/fraksi opsional: cukup pastikan pola tanggal+waktu wajar.
+  // Pola longgar yang dicocokkan: 10 char tanggal + separator + 5 char HH:MM
+  if(s.size()<16) return false;
+  bool ok_date=s.size()>=10 &&
+    std::isdigit((unsigned char)s[0]) && std::isdigit((unsigned char)s[1]) &&
+    s[2]=='-' &&
+    std::isdigit((unsigned char)s[3]) && std::isdigit((unsigned char)s[4]) &&
+    s[5]=='-' &&
+    std::isdigit((unsigned char)s[6]) && std::isdigit((unsigned char)s[7]) &&
+    std::isdigit((unsigned char)s[8]) && std::isdigit((unsigned char)s[9]);
+  if(!ok_date) return false;
+  char sep=s[10];
+  if(sep!=' ' && sep!='T') return false;
+  // HH:MM mulai di indeks 11 (dua digit, ':', dua digit).
+  return std::isdigit((unsigned char)s[11]) && std::isdigit((unsigned char)s[12]) &&
+         s[13]==':' &&
+         std::isdigit((unsigned char)s[14]) && std::isdigit((unsigned char)s[15]);
+}
+
 #ifdef HAS_LIBPQ
+/* P21-T2: pool proses-wide — ganti RealPool stack-lokal (churn koneksi
+ * per request) dengan db/pool_global.hpp. */
 static void with_pg(const std::function<void(examvan::db::RealPool&)>& fn){
-  auto cfg=Config::load();
-  std::string db_url=cfg.database_url;
-  if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-  if(db_url.empty()) return;
-  examvan::DbPool pool(db_url, 10);
-  examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-  auto c=real.acquire();
-  if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
-  fn(real);
-  real.release(c.release());
+  examvan::db::with_global_pg([&](examvan::db::RealPool& real){ fn(real); });
 }
 
 // Masih aktif? (is_active + belum lewat expires_at)
@@ -229,6 +250,11 @@ Response create_voucher(const Request& req){
   // normalisasi: uppercase + trim (paritas Go)
   { std::string out; for(char ch: code){ out.push_back((char)toupper((unsigned char)ch)); } code=out; }
   if(code.empty()){ Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"code wajib diisi\"}"); return r; }
+  /* P21-T9: tolak format tanggal aneh sebelum PG (500 generik tanpa petunjuk). */
+  if(!valid_expires_at(expires_at)){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Format tanggal kedaluwarsa tidak valid — gunakan YYYY-MM-DD HH:MM\"}");
+    return r;
+  }
   int max_usage=1; try{ max_usage=std::stoi(max_usage_s); }catch(...){}
   if(max_usage<1) max_usage=1;
   if(code.size()>64){ Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Kode voucher terlalu panjang\"}"); return r; }
@@ -296,6 +322,11 @@ Response create_vouchers_batch(const Request& req){
   if(max_usage<1) max_usage=1;
   int uid=session_admin_id_from(req);
   (void)uid;
+  /* P21-T9: tolak format tanggal aneh sebelum PG (500 generik tanpa petunjuk). */
+  if(!valid_expires_at(expires_at)){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Format tanggal kedaluwarsa tidak valid — gunakan YYYY-MM-DD HH:MM\"}");
+    return r;
+  }
   // normalisasi prefix: huruf besar
   { std::string out; for(char ch: prefix){ out.push_back((char)toupper((unsigned char)ch)); } prefix=out; }
   int created_ok=0;

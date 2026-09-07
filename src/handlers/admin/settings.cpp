@@ -14,6 +14,7 @@
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include <libpq-fe.h>
 #include <functional>
 #endif
@@ -90,17 +91,10 @@ static std::string mask_token(const std::string& t){
 }
 
 #ifdef HAS_LIBPQ
+/* P21-T2: pool proses-wide — ganti RealPool stack-lokal (churn koneksi
+ * per request) dengan db/pool_global.hpp. */
 static void with_pg(const std::function<void(examvan::db::RealPool&)>& fn){
-  auto cfg=Config::load();
-  std::string db_url=cfg.database_url;
-  if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-  if(db_url.empty()) return;
-  examvan::DbPool pool(db_url, 10);
-  examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-  auto c=real.acquire();
-  if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
-  fn(real);
-  real.release(c.release());
+  examvan::db::with_global_pg([&](examvan::db::RealPool& real){ fn(real); });
 }
 
 // Muat seluruh setting dari saas_settings ke map (key → value).
@@ -202,7 +196,8 @@ Response settings_page(const Request& req){
       +"}}";
     Response r; r.json(200,json); return r;
   }
-  RenderedAdminPage rp=render_admin_page("settings","2.7.2");
+  /* P21-T4: versi satu sumber — Config::version. */
+  RenderedAdminPage rp=render_admin_page("settings",Config::load().version);
   if(!rp.html.empty()){
     // C5: set cookie CSRF agar token meta cocok dengan cookie yang diverifikasi.
     Response r; r.status=200; r.headers["Content-Type"]="text/html";
@@ -316,22 +311,17 @@ static AuditIdentity audit_identity_from(const Request& req){
   }
   return id;
 }
-/* Tulis audit best-effort untuk mutasi system-app (upload/delete). */
+/* Tulis audit best-effort untuk mutasi system-app (upload/delete).
+ * P21-T2: pool proses-wide — bukan RealPool stack-lokal per panggilan. */
 static void write_audit_log(const std::string& exam_id, int user_id,
                             const std::string& username, const std::string& action,
                             const std::string& detail){
   try{
-    std::string db_url=Config::load().database_url;
-    if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-    if(db_url.empty()) return;
-    examvan::DbPool pool(db_url, 2);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 2);
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
-    real.exec_params(c.get(),
-      "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULLIF($2,'')::int,$3,$4,$5)",
-      {exam_id, std::to_string(user_id), username, action, detail});
-    real.release(c.release());
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+      real.exec_params_pooled(
+        "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULLIF($2,'')::int,$3,$4,$5)",
+        {exam_id, std::to_string(user_id), username, action, detail});
+    });
   }catch(...){}
 }
 #endif
@@ -342,9 +332,12 @@ Response system_apps_page(const Request& req){
     auto cfg=Config::load();
     std::string db=cfg.database_url; if(db.empty()) if(auto* env=getenv("DATABASE_URL")) db=env;
     if(!db.empty()){
-      examvan::DbPool pool(db,10);
-      examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),10);
-      if(real.connect()) if(auto c=real.acquire()){
+      /* P21-T2: pool proses-wide (global_pool) — sebelumnya RealPool
+       * stack-lokal per request: koneksi di-close saat handler keluar. */
+      auto* real_ptr=examvan::db::global_pool();
+      if(real_ptr){
+        auto& real=*real_ptr;
+        if(auto c=real.acquire()){
         real.exec_params(c.get(),"CREATE TABLE IF NOT EXISTS system_apps (id SERIAL PRIMARY KEY,name TEXT NOT NULL,platform TEXT NOT NULL,version TEXT NOT NULL,file_path TEXT NOT NULL,size_bytes BIGINT NOT NULL DEFAULT 0,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),UNIQUE(name,platform,version))",{});
         if(req.method=="DELETE" || (req.method=="POST" && req.path.find("/delete")!=std::string::npos)){
           auto it=req.params.find("id");
@@ -404,6 +397,9 @@ Response system_apps_page(const Request& req){
           std::string out="[";
           for(int i=0;i<PQntuples(rows.get());++i){ if(i) out+=","; out+="{\"id\":"+std::string(PQgetvalue(rows.get(),i,0))+",\"Name\":\""+json_escape(PQgetvalue(rows.get(),i,1))+"\",\"Platform\":\""+json_escape(PQgetvalue(rows.get(),i,2))+"\",\"Version\":\""+json_escape(PQgetvalue(rows.get(),i,3))+"\",\"FilePath\":\""+json_escape(PQgetvalue(rows.get(),i,4))+"\",\"SizeBytes\":"+PQgetvalue(rows.get(),i,5)+",\"CreatedAt\":\""+json_escape(PQgetvalue(rows.get(),i,6))+"\",\"UpdatedAt\":\""+json_escape(PQgetvalue(rows.get(),i,7))+"\"}"; }
           out+="]"; Response r; r.json(200,"{\"success\":true,\"apps\":"+out+"}"); return r;
+        }
+        /* P21-T2: kembali ke pool proses-wide (bukan close). */
+        real.release(c.release());
         }
       }
     }

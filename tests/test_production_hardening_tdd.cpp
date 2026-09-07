@@ -1589,15 +1589,24 @@ TEST(ProductionHardening, PgConnectionsNeverUseSanitizedUrl){
   // sanitized_url() mengganti password dengan "***" → dipakai sebagai conninfo
   // membuat SEMUA query ad-hoc gagal auth (ditemukan smoke test: FATAL
   // password authentication failed). Koneksi harus pakai conninfo_from_url_or_raw.
+  /* P21-T2: file yang pindah ke pool proses-wide (with_global_pg) tidak lagi
+   * memanggil helper secara langsung — conninfo dibangun SATU kali di
+   * db/pool_global.hpp. Kontrak: file tsb merujuk pool_global, sisanya tetap
+   * memanggil helper langsung. sanitized_url() tetap dilarang di semua file. */
   for(auto f: {"src/handlers/admin/users.cpp","src/handlers/admin/exams.cpp",
                "src/handlers/api/exams.cpp","src/jobs/jobs.cpp",
                "src/handlers/admin/export.cpp","src/queue/submission_queue.cpp"}){
     auto c=read_source_file(f);
     EXPECT_EQ(c.find("pool.sanitized_url(),"), std::string::npos)
       << f << " harus konek via conninfo_from_url_or_raw, bukan sanitized_url (password ***)";
-    EXPECT_NE(c.find("conninfo_from_url_or_raw"), std::string::npos)
-      << f << " harus memakai helper conninfo_from_url_or_raw";
+    bool ok_conn=c.find("conninfo_from_url_or_raw")!=std::string::npos ||
+                 c.find("pool_global")!=std::string::npos;
+    EXPECT_TRUE(ok_conn)
+      << f << " harus konek via conninfo_from_url_or_raw (langsung) atau pool_global (T2)";
   }
+  auto g=read_source_file("src/db/pool_global.hpp");
+  EXPECT_NE(g.find("conninfo_from_url_or_raw"), std::string::npos)
+    << "pool_global harus memakai conninfo_from_url_or_raw (password asli)";
   auto p=read_source_file("src/db/pool.cpp");
   EXPECT_NE(p.find("conninfo_from_url_or_raw"), std::string::npos)
     << "db/pool.cpp harus menyediakan conninfo_from_url_or_raw";
@@ -1637,8 +1646,12 @@ TEST(ProductionHardening, Submissions_DetailAndDeleteById){
 
 TEST(ProductionHardening, Submissions_QueueStatusFromRedis){
   auto c=read_source_file("src/handlers/admin/submissions.cpp");
-  EXPECT_NE(c.find("examvan:submissions:pending"), std::string::npos)
-    << "queue_status harus membaca antrean Redis pending (Go parity)";
+  /* P21-T5: key antrean kini via konstanta queue (kQueueKey/kFailedQueueKey)
+   * — literal duplikat dilarang supaya key tidak divergen antar TU. */
+  EXPECT_NE(c.find("queue::kQueueKey"), std::string::npos)
+    << "queue_status harus membaca antrean Redis pending via konstanta (Go parity)";
+  EXPECT_NE(c.find("queue::kFailedQueueKey"), std::string::npos)
+    << "queue_status harus membaca failed queue via konstanta (P21-T5)";
   EXPECT_NE(c.find("redis_llen"), std::string::npos)
     << "dibutuhkan helper redis_llen";
   auto rr=read_source_file("src/redis/redis_real.cpp");
@@ -1686,8 +1699,10 @@ TEST(ProductionHardening, Settings_PersistsToPostgres){
     << "UPSERT wajib pakai ON CONFLICT (key unique)";
   EXPECT_NE(c.find("SELECT key,value FROM saas_settings"), std::string::npos)
     << "settings_page harus membaca setting dari PG, bukan default hardcoded";
-  EXPECT_NE(c.find("conninfo_from_url_or_raw"), std::string::npos)
-    << "koneksi PG harus via conninfo_from_url_or_raw (bukan sanitized_url)";
+  /* P21-T2: koneksi kini via pool proses-wide (db/pool_global.hpp) yang
+   * memanggil conninfo_from_url_or_raw — kontrak koneksi tidak-stack-lokal. */
+  EXPECT_NE(c.find("pool_global"), std::string::npos)
+    << "koneksi PG harus via pool proses-wide (T2)";
 }
 
 TEST(ProductionHardening, Settings_PartialUpdateOnlyPresentKeys){
@@ -1711,8 +1726,9 @@ TEST(ProductionHardening, Vouchers_PersistsToPostgres){
     << "create voucher harus INSERT ke tabel vouchers";
   EXPECT_NE(c.find("SELECT "), std::string::npos) << "list harus SELECT dari vouchers";
   EXPECT_NE(c.find("FROM vouchers"), std::string::npos);
-  EXPECT_NE(c.find("conninfo_from_url_or_raw"), std::string::npos)
-    << "koneksi PG via conninfo_from_url_or_raw";
+  /* P21-T2: koneksi kini via pool proses-wide — bukan RealPool stack-lokal. */
+  EXPECT_NE(c.find("pool_global"), std::string::npos)
+    << "koneksi PG via pool proses-wide (T2)";
 }
 
 TEST(ProductionHardening, Vouchers_RoutesRegistered){

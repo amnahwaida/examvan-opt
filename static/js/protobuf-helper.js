@@ -1,22 +1,20 @@
 // Protobuf helper for EXAMVAN — dual JSON/Protobuf for 2c/8GB optimal
 // proto/examvan.proto -> static/js/protobuf-helper.js (fetch + encode)
 // When PROTOBUF_MANDATORY=1, all POST/PUT must use application/x-protobuf
+//
+// P21-T3: branch CDN dihapus. CDN unpkg memakai SRI placeholder
+// (sha384-PLACEHOLDER…) sehingga browser selalu menolak script-nya, dan
+// bundle lokal /static/js/protobuf.min.js yang dijanjikan pesan error tidak
+// pernah ada di repo — artinya loadProtobuf() tidak punya jalur sukses.
+// Client web saat ini tidak memakai protobuf client-side (PROTOBUF_MANDATORY
+// hanya mengenai client Android); helper menolak eksplisit daripada mencoba
+// memuat script pihak ketiga tanpa hash valid.
 
 let _protobufRoot = null;
 async function loadProtobuf() {
   if (_protobufRoot) return _protobufRoot;
   if (typeof protobuf === 'undefined') {
-    // Fallback: load protobufjs from CDN if not bundled
-    // P18-M18: SRI + crossorigin agar CDN tak jadi supply-chain script.
-    await new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = 'https://unpkg.com/protobufjs@7/dist/protobuf.min.js';
-      s.integrity = 'sha384-PLACEHOLDER-PIN-LOCAL-BUNDLE';
-      s.crossOrigin = 'anonymous';
-      s.onload = res;
-      s.onerror = () => rej(new Error('CDN protobuf gagal; gunakan bundle lokal /static/js/protobuf.min.js'));
-      document.head.appendChild(s);
-    });
+    throw new Error('protobufjs tidak tersedia di halaman ini — encode client-side dinonaktifkan');
   }
   _protobufRoot = await protobuf.load('/proto/examvan.proto');
   return _protobufRoot;

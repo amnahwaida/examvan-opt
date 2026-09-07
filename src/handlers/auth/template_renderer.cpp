@@ -162,9 +162,11 @@ RenderedAuthPage render_auth_page(const PublicAuthPage& page){
   repl_all(h, "{{.seo_description}}", html_escape(page.seo_description));
   repl_all(h, "{{.seo_title}}", html_escape(page.seo_title));
   repl_all(h, "{{ .seo_title }}", html_escape(page.seo_title));
-  repl_all(h, "{{.version}}", "2.7.2");
-  repl_all(h, "{{ .version }}", "2.7.2");
-  repl_all(h, "{{ version }}", "2.7.2");
+  /* P21-T4: versi satu sumber — Config::version, bukan literal. */
+  const std::string ver=Config::load().version;
+  repl_all(h, "{{.version}}", ver);
+  repl_all(h, "{{ .version }}", ver);
+  repl_all(h, "{{ version }}", ver);
 
   // 6. Meta csrf-token (attribute content) bila belum terisi.
   {

@@ -5,12 +5,14 @@
 #include "middleware/protobuf.hpp"
 #include "utils/log.hpp"
 #include "models/user.hpp"
+#include "queue/submission_queue.hpp"
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include <libpq-fe.h>
 #include <functional>
 #endif
@@ -31,17 +33,10 @@ static std::string get_param(const std::map<std::string,std::string>& form, cons
 }
 
 #ifdef HAS_LIBPQ
+/* P21-T2: pool proses-wide — ganti RealPool stack-lokal (churn koneksi
+ * per request) dengan db/pool_global.hpp. */
 static void with_pg(const std::function<void(examvan::db::RealPool&)>& fn){
-  auto cfg=Config::load();
-  std::string db_url=cfg.database_url;
-  if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-  if(db_url.empty()) return;
-  examvan::DbPool pool(db_url, 10);
-  examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-  auto c=real.acquire();
-  if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
-  fn(real);
-  real.release(c.release());
+  examvan::db::with_global_pg([&](examvan::db::RealPool& real){ fn(real); });
 }
 #endif
 
@@ -67,7 +62,8 @@ static std::string json_escape_ci(const std::string& s){
 #endif
 
 Response submissions_page(const Request&){
-  RenderedAdminPage rp=render_admin_page("submissions","2.7.2");
+  /* P21-T4: versi satu sumber — Config::version. */
+  RenderedAdminPage rp=render_admin_page("submissions",Config::load().version);
   if(!rp.html.empty()){
     Response r; r.status=200; r.headers["Content-Type"]="text/html";
     if(!rp.csrf_cookie.empty()) r.headers["Set-Cookie"]=rp.csrf_cookie;
@@ -223,8 +219,10 @@ Response queue_status(const Request& req){
   if(!rurl.empty()){
     auto rc=examvan::redis_real::connect_redis(rurl);
     if(rc){
-      pending=examvan::redis_real::redis_llen(rc.get(),"examvan:submissions:pending");
-      failed=examvan::redis_real::redis_llen(rc.get(),"examvan:submissions:failed");
+      /* P21-T5: baca konstanta queue (bukan literal duplikat) — failed
+       * queue kini benar-benar ditulis worker (push_failed). */
+      pending=examvan::redis_real::redis_llen(rc.get(),examvan::queue::kQueueKey);
+      failed=examvan::redis_real::redis_llen(rc.get(),examvan::queue::kFailedQueueKey);
     }
   }
 #endif

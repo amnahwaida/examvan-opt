@@ -106,6 +106,68 @@ constexpr const char* kTableAudit = R"SQL(CREATE TABLE IF NOT EXISTS admin_audit
   detail TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 ))SQL";
+// P21-T1: tabel yang dipakai handler tetapi sebelumnya hanya dimiliki skema
+// Go — fresh-DB (P18-M13) membuat server jalan lalu register/redeem/settings
+// rusak karena tabelnya tidak pernah dibuat. Skema mengikuti kolom yang
+// benar-benar dipakai query C++ (lihat handlers/admin/vouchers.cpp, settings,
+// auth/auth_store.cpp, exam_pengawas di exams.cpp/pengawas.cpp).
+constexpr const char* kTableSaasSettings = R"SQL(CREATE TABLE IF NOT EXISTS saas_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+))SQL";
+constexpr const char* kTableVouchers = R"SQL(CREATE TABLE IF NOT EXISTS vouchers (
+  id SERIAL PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  package TEXT NOT NULL DEFAULT 'free',
+  duration_type TEXT NOT NULL DEFAULT 'bulanan',
+  max_usage INTEGER NOT NULL DEFAULT 1,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  expires_at TIMESTAMPTZ,
+  notes TEXT NOT NULL DEFAULT '',
+  created_by INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  is_custom BOOLEAN NOT NULL DEFAULT FALSE,
+  custom_label TEXT NOT NULL DEFAULT '',
+  custom_max_exams INTEGER NOT NULL DEFAULT 0,
+  custom_max_concurrent_exams INTEGER NOT NULL DEFAULT 0,
+  custom_max_pdf_size BIGINT NOT NULL DEFAULT 0,
+  custom_max_storage_size BIGINT NOT NULL DEFAULT 0,
+  custom_max_users INTEGER NOT NULL DEFAULT 0,
+  custom_role TEXT NOT NULL DEFAULT ''
+))SQL";
+constexpr const char* kTableVoucherRedemptions = R"SQL(CREATE TABLE IF NOT EXISTS voucher_redemptions (
+  id SERIAL PRIMARY KEY,
+  voucher_id INTEGER NOT NULL REFERENCES vouchers(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  package TEXT NOT NULL DEFAULT '',
+  max_exams INTEGER NOT NULL DEFAULT 0,
+  max_pdf_size BIGINT NOT NULL DEFAULT 0,
+  max_concurrent_exams INTEGER NOT NULL DEFAULT 0,
+  max_storage_size BIGINT NOT NULL DEFAULT 0,
+  max_users INTEGER NOT NULL DEFAULT 0,
+  role TEXT NOT NULL DEFAULT '',
+  remaining_seconds BIGINT NOT NULL DEFAULT 0,
+  redeemed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  activated_at TIMESTAMPTZ
+))SQL";
+constexpr const char* kTablePackageSettings = R"SQL(CREATE TABLE IF NOT EXISTS package_settings (
+  pkg_key TEXT PRIMARY KEY,
+  label TEXT NOT NULL DEFAULT '',
+  max_exams INTEGER NOT NULL DEFAULT 0,
+  max_pdf_size BIGINT NOT NULL DEFAULT 0,
+  max_concurrent_exams INTEGER NOT NULL DEFAULT 0,
+  max_storage_size BIGINT NOT NULL DEFAULT 0,
+  max_users INTEGER NOT NULL DEFAULT 0,
+  role TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+))SQL";
+constexpr const char* kTableExamPengawas = R"SQL(CREATE TABLE IF NOT EXISTS exam_pengawas (
+  exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+  PRIMARY KEY (exam_id, user_id)
+))SQL";
 }
 
 bool ExamStorePostgres::exec_command(const std::string& sql, const std::vector<std::string>& params){
@@ -212,6 +274,40 @@ bool ExamStorePostgres::migrate(){
   ready_=exec_command(kSeq) && exec_command(kTableExams) && exec_command(kIdx1) && exec_command(kIdx2) && exec_command(kTableIdem)
     && exec_command(kTableSubmissions) && exec_command(kTableAccessLogs) && exec_command(kTableApprovals)
     && exec_command(kTableUsers) && exec_command(kTableAudit);
+  // P21-T1: tabel yang dipakai handler (voucher/settings/pengawas) — tanpa
+  // ini, fresh-DB membuat register/redeem/settings gagal saat runtime.
+  if(ready_){
+    ready_=exec_command(kTableSaasSettings) && exec_command(kTableVouchers)
+      && exec_command(kTableVoucherRedemptions) && exec_command(kTablePackageSettings)
+      && exec_command(kTableExamPengawas);
+  }
+  // P21-T1: admin_users versi migrate jauh lebih tipis daripada kebutuhan
+  // INSERT register (auth_store.cpp) + edit_user — tambahkan kolom yang
+  // hilang secara idempoten (skema Go yang sudah lengkap tidak tersentuh).
+  if(ready_){
+    for(const char* col_type : {"name TEXT NOT NULL DEFAULT ''",
+                                "email TEXT NOT NULL DEFAULT ''",
+                                "password_hash TEXT NOT NULL DEFAULT ''",
+                                "role TEXT NOT NULL DEFAULT '[\"guru\"]'",
+                                "instansi TEXT NOT NULL DEFAULT ''",
+                                "status TEXT NOT NULL DEFAULT 'active'",
+                                "otp_code TEXT",
+                                "otp_expiry TIMESTAMPTZ",
+                                "otp_attempts INTEGER NOT NULL DEFAULT 0",
+                                "package TEXT NOT NULL DEFAULT 'free'",
+                                "max_exams INTEGER NOT NULL DEFAULT 3",
+                                "max_pdf_size BIGINT NOT NULL DEFAULT 1048576",
+                                "max_concurrent_exams INTEGER NOT NULL DEFAULT 2",
+                                "max_storage_size BIGINT NOT NULL DEFAULT 52428800",
+                                "expires_at TIMESTAMPTZ",
+                                "registered_ip TEXT NOT NULL DEFAULT ''",
+                                "operator_created BOOLEAN NOT NULL DEFAULT FALSE",
+                                "base_role TEXT NOT NULL DEFAULT ''",
+                                "package_role TEXT NOT NULL DEFAULT ''",
+                                "whatsapp_number TEXT NOT NULL DEFAULT ''"}){
+      exec_command(std::string("ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS ")+col_type);
+    }
+  }
   // Backward-compatible migration: extend exam_idempotency for durable
   // idempotency (state machine, response replay, lease tracking).
   if(ready_){

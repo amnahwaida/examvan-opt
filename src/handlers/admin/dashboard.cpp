@@ -1,5 +1,6 @@
 #include "handlers/admin/dashboard.hpp"
 #include "handlers/admin/template_helper.hpp"
+#include "config/config.hpp"
 #include "store/exam_store.hpp"
 #include "store/exam_store_memory.hpp"
 #include "utils/sanitize.hpp"
@@ -80,7 +81,8 @@ std::string build_exam_table_html(const std::vector<models::Exam>& exams){
 } // namespace
 
 Response dashboard_page(const Request& req){
-  RenderedAdminPage rp=render_admin_page("dashboard","2.7.2");
+  /* P21-T4: versi satu sumber — Config::version, bukan literal. */
+  RenderedAdminPage rp=render_admin_page("dashboard",Config::load().version);
   std::string html=rp.html;
   if(!html.empty()){
     // Render daftar ujian LIVE dari in-memory store, ganti empty-state statis.
@@ -108,8 +110,6 @@ Response dashboard_page(const Request& req){
         }
       }
     }
-    auto it=req.headers.find("X-User");
-    if(it!=req.headers.end()) html+=html_escape(it->second);
     // C5: set cookie CSRF agar token meta cocok dengan cookie yang diverifikasi.
     Response r; r.status=200; r.headers["Content-Type"]="text/html";
     if(!rp.csrf_cookie.empty()) r.headers["Set-Cookie"]=rp.csrf_cookie;

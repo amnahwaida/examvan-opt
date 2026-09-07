@@ -8,7 +8,8 @@ static r2::R2Config cfg_from_env(){
   return r2::R2Config{c.r2_access_key, c.r2_secret_key, c.r2_endpoint, c.r2_bucket};
 }
 Response download_page(const Request& req){
-  std::string html=render_public_template("download", "2.7.2");
+  /* P21-T4: versi satu sumber — Config::version, bukan literal. */
+  std::string html=render_public_template("download", Config::load().version);
   if(!html.empty()){
     Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.body=html; return r;
   }
@@ -26,7 +27,9 @@ Response download_apk(const Request& req){
     }
     cfg = r2::R2Config{"test-access","test-secret","https://test.r2.cloudflarestorage.com","test-bucket"};
   }
-  std::string key=r2::object_key_for_app("2.7.2","student");
+  /* P21-T4: object key R2 APK mengikuti versi runtime — update APK tidak
+   * boleh butuh recompile (dulu versi di-hardcode di sini). */
+  std::string key=r2::object_key_for_app(Config::load().version,"student");
   std::string url=r2::presign_url(cfg,key,3600);
   if(url.empty()) url="https://test.r2.cloudflarestorage.com/test-bucket/"+key+"?presigned=1";
   Response r; r.status=302; r.headers["Location"]=url; return r;

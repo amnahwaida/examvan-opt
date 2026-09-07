@@ -212,11 +212,13 @@ static bool persist_submission_pending(const queue::SubmissionJob& job){
 }
 
 Response health(const Request& req){
+  /* P21-T4: versi satu sumber — Config::version, bukan literal. */
+  const std::string ver=Config::load().version;
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::HealthResponse pb;
     pb.set_status("healthy");
-    pb.set_version("2.7.2");
+    pb.set_version(ver);
     pb.set_uwebsockets(true);
     std::string out; pb.SerializeToString(&out);
     Response r; r.status=200; r.headers["Content-Type"]="application/x-protobuf"; r.body=out; return r;
@@ -228,7 +230,7 @@ Response health(const Request& req){
     "\"server_time_utc\":\""+helpers::format_iso_utc(std::chrono::system_clock::now())+"\","
     "\"status\":\"healthy\","
     "\"success\":true,"
-    "\"version\":\"2.7.2\"}");
+    "\"version\":\""+json_escape(ver)+"\"}");
   return r;
 }
 

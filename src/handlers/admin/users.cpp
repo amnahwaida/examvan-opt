@@ -12,6 +12,7 @@
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include <libpq-fe.h>
 #include <functional>
 #endif
@@ -154,17 +155,10 @@ static int session_admin_id_from(const Request& req){
 #ifdef HAS_LIBPQ
 
 // Jalankan fn dengan pool PG terbuka; fn dipanggil hanya bila koneksi OK.
+/* P21-T2: pool proses-wide — ganti RealPool stack-lokal (churn koneksi
+ * per request) dengan db/pool_global.hpp. */
 static void with_pg(const std::function<void(examvan::db::RealPool&)>& fn){
-  auto cfg=Config::load();
-  std::string db_url=cfg.database_url;
-  if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-  if(db_url.empty()) return;
-  examvan::DbPool pool(db_url, 10);
-  examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-  auto c=real.acquire();
-  if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
-  fn(real);
-  real.release(c.release());
+  examvan::db::with_global_pg([&](examvan::db::RealPool& real){ fn(real); });
 }
 
 // Bangun objek JSON user dari satu baris hasil query.

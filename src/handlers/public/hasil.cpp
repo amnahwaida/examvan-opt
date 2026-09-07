@@ -209,9 +209,11 @@ std::string render_hasil_html(const HasilCtx& ctx){
     }
   }
 
-  repl_all(h, "{{.version}}", "2.7.2");
-  repl_all(h, "{{ .version }}", "2.7.2");
-  repl_all(h, "{{ version }}", "2.7.2");
+  /* P21-T4: versi satu sumber — Config::version, bukan literal. */
+  const std::string ver=Config::load().version;
+  repl_all(h, "{{.version}}", ver);
+  repl_all(h, "{{ .version }}", ver);
+  repl_all(h, "{{ version }}", ver);
   repl_all(h, "{{ template \"public_fonts\" . }}", shared_partial("public_fonts"));
   repl_all(h, "{{ template \"public_skip_link\" . }}", shared_partial("public_skip_link"));
 
@@ -401,7 +403,9 @@ Response cek_hasil_page(const Request& req){
     for(char &c: t) c=(char)std::toupper((unsigned char)c);
     Response r; r.status=302; r.headers["Location"]="/hasil/"+t; return r;
   }
-  std::string ver="2.7.2";
+  /* P21-T4: versi satu sumber — Config::version (X-Version klien tetap
+   * menang bila eksplisit dikirim, paritas perilaku lama). */
+  std::string ver=Config::load().version;
   auto it=req.headers.find("X-Version");
   if(it!=req.headers.end()) ver=it->second;
   std::string html=render_public_template("cek_hasil", ver);

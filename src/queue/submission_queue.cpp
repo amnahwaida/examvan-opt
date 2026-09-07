@@ -306,6 +306,28 @@ void SubmissionQueue::set_lpush_checked(std::function<bool(const std::string&,co
   lpush_checked_=std::move(fn);
 }
 
+void SubmissionQueue::push_failed(const SubmissionJob& job) const{
+  /* P21-T5: dead-letter queue. Job yang melewati kMaxRetries sudah tidak
+   * akan pernah diproses ulang — tanpa jejak, operator tidak pernah tahu
+   * ada jawaban siswa yang hilang (queue_status.failed selalu 0). */
+  if(!lpush_checked_ && !lpush_) return;
+#ifdef HAS_PROTOBUF
+  std::string payload;
+  {
+    auto cfg=Config::load();
+    payload=cfg.protobuf_mandatory ? job.to_protobuf() : job.to_json();
+    if(payload.empty()) payload=job.to_json();
+  }
+#else
+  std::string payload=job.to_json();
+#endif
+  if(lpush_checked_){
+    try{ (void)lpush_checked_(kFailedQueueKey, payload); }catch(...){}
+  } else {
+    try{ lpush_(kFailedQueueKey, payload); }catch(...){}
+  }
+}
+
 void SubmissionQueue::store_result(const JobResult& r){
   if(set_) set_(std::string(kResultKeyPrefix)+r.job_id, r.to_json());
 }
@@ -339,6 +361,9 @@ void Worker::stop(){
       std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries)));
       queue_->requeue(job);
     } else {
+      /* P21-T5: gagal permanen → dead-letter queue agar queue_status
+       * melaporkannya (sebelumnya hanya JobResult, panel selalu failed:0). */
+      queue_->push_failed(job);
       JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address;
       r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data);
       r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban";
@@ -439,10 +464,10 @@ void Worker::run_batch(){
       for(auto& b: failed) max_ms=std::max(max_ms, retry_backoff_ms(b.first.retries+1));
       if(max_ms>0) std::this_thread::sleep_for(std::chrono::milliseconds(max_ms));
     }
-    for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
+    for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } else { queue_->push_failed(job); JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
     for(auto& b: persisted){ JobResult r; r.job_id=b.first.job_id; r.exam_id=b.first.exam_id; r.mac_address=b.first.mac_address; r.identity_data=map_to_json(b.first.identity_data); r.identity_hash=identity_fingerprint(b.first.identity_data); r.success=true; r.score=b.second; r.message="ok"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); }
 #else
-    for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries))); queue_->requeue(job); } else { JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Database tidak tersedia"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
+    for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries))); queue_->requeue(job); } else { queue_->push_failed(job); JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Database tidak tersedia"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
 #endif
   }
 }

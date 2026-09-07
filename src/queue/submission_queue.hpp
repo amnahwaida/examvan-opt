@@ -15,6 +15,10 @@ namespace examvan::queue {
 inline constexpr const char* kQueueKey = "examvan:submissions:pending";
 inline constexpr const char* kHeartbeatQueueKey = "examvan:heartbeats:pending";
 inline constexpr const char* kResultKeyPrefix = "examvan:submissions:result:";
+/* P21-T5: job yang melewati kMaxRetries (gagal permanen) masuk sini —
+ * queue_status admin membaca key ini; sebelumnya tidak pernah ditulis
+ * sehingga panel selalu menampilkan failed:0. */
+inline constexpr const char* kFailedQueueKey = "examvan:submissions:failed";
 inline constexpr int kMaxRetries = 3;
 inline constexpr int kWorkerCount = 8;
 inline constexpr int kBatchSize = 50;
@@ -116,6 +120,10 @@ public:
   // P17-L3: hook LPUSH tercek (dipakai bila di-set; untuk test + Redis nyata
   // yang melaporkan hasil). Bila hook mengembalikan false → requeue gagal.
   void set_lpush_checked(std::function<bool(const std::string&,const std::string&)> fn);
+  /* P21-T5: LPUSH job gagal-permanen ke kFailedQueueKey — panel queue_status
+   * admin membacanya. Menggunakan lpush_ (best-effort, tak mengubah hasil
+   * JobResult yang tetap tersimpan). */
+  void push_failed(const SubmissionJob& job) const;
  private:
   std::function<void(const std::string&,const std::string&)> lpush_;
   std::function<bool(const std::string&,const std::string&)> lpush_checked_;

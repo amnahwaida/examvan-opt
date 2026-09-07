@@ -10,6 +10,7 @@
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include <libpq-fe.h>
 #include <functional>
 #endif
@@ -65,22 +66,17 @@ static std::string json_escape_pw(const std::string& s){
 #endif
 
 #ifdef HAS_LIBPQ
+/* P21-T2: kini memakai pool proses-wide (db/pool_global.hpp) — sebelumnya
+ * RealPool stack-lokal per panggilan men-PQfinish semua koneksi saat scope
+ * keluar → TCP+auth PG baru tiap request admin. */
 static void with_pg(const std::function<void(examvan::db::RealPool&)>& fn){
-  auto cfg=Config::load();
-  std::string db_url=cfg.database_url;
-  if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-  if(db_url.empty()) return;
-  examvan::DbPool pool(db_url, 10);
-  examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-  auto c=real.acquire();
-  if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
-  fn(real);
-  real.release(c.release());
+  examvan::db::with_global_pg([&](examvan::db::RealPool& real){ fn(real); });
 }
 #endif
 
 Response pengawas_page(const Request&){
-  RenderedAdminPage rp=render_admin_page("pengawas","2.7.2");
+  /* P21-T4: versi satu sumber — Config::version. */
+  RenderedAdminPage rp=render_admin_page("pengawas",Config::load().version);
   if(!rp.html.empty()){
     Response r; r.status=200; r.headers["Content-Type"]="text/html";
     if(!rp.csrf_cookie.empty()) r.headers["Set-Cookie"]=rp.csrf_cookie;
@@ -91,7 +87,8 @@ Response pengawas_page(const Request&){
 }
 
 Response pengawas_detail_page(const Request&){
-  RenderedAdminPage rp=render_admin_page("pengawas_detail","2.7.2");
+  /* P21-T4: versi satu sumber — Config::version. */
+  RenderedAdminPage rp=render_admin_page("pengawas_detail",Config::load().version);
   if(!rp.html.empty()){
     Response r; r.status=200; r.headers["Content-Type"]="text/html";
     if(!rp.csrf_cookie.empty()) r.headers["Set-Cookie"]=rp.csrf_cookie;
