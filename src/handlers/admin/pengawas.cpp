@@ -30,6 +30,19 @@ static int session_admin_id_from(const Request& req){
   return 0;
 }
 
+/* P20-B1: atribusi audit dari header internal yang di-set router dari session
+ * terverifikasi (bukan dari input klien). Fallback "" — aksi tetap tercatat.
+ * TANPA guard HAS_LIBPQ: hanya membaca header (dipakai kedua mode build). */
+struct AuditIdentity { int user_id{0}; std::string username; };
+static AuditIdentity audit_identity_from(const Request& req){
+  AuditIdentity id;
+  for(auto& kv:req.headers){
+    std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch);
+    if(k=="x-internal-admin-id"){ try{ id.user_id=std::stoi(kv.second); }catch(...){} }
+    else if(k=="x-internal-admin-username"){ id.username=kv.second; }
+  }
+  return id;
+}
 #ifdef HAS_LIBPQ
 static std::string json_escape_pw(const std::string& s){
   std::string o; o.reserve(s.size()+16);
@@ -351,14 +364,16 @@ Response pending_approvals(const Request& req){
 // tercatat ke admin_audit_logs (best-effort, tak menggagalkan aksi utama).
 // Didefinisikan SEBELUM set_approval — dipakai di sana (urutan deklarasi).
 static void write_audit_log(examvan::db::RealPool& real, const std::string& exam_id,
-                            const std::string& username, const std::string& action,
-                            const std::string& detail){
+                            int user_id, const std::string& username,
+                            const std::string& action, const std::string& detail){
   try{
     auto c=real.acquire();
     if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+    /* P20-B1: user_id/username dari parameter (identity headers), bukan
+     * NULL/'' hardcoded — log audit kini menjawab "siapa yang melakukan". */
     real.exec_params(c.get(),
-      "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULL,$2,$3,$4)",
-      {exam_id, username, action, detail});
+      "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULLIF($2,'')::int,$3,$4,$5)",
+      {exam_id, std::to_string(user_id), username, action, detail});
     real.release(c.release());
   }catch(...){}
 }
@@ -377,6 +392,7 @@ Response set_approval(const Request& req){
   std::string status=get_param(form,"status");
   if(status.empty()) status="approved";
   if(status!="approved" && status!="rejected" && status!="pending"){ Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"status tidak valid\"}"); return r; }
+  const auto audit_id=audit_identity_from(req);
 #ifdef HAS_LIBPQ
   bool done=false;
   with_pg([&](examvan::db::RealPool& real){
@@ -390,7 +406,7 @@ Response set_approval(const Request& req){
   });
   if(done){
 #ifdef HAS_LIBPQ
-    with_pg([&](examvan::db::RealPool& real){ write_audit_log(real, exam_id, "", "approval:"+status, mac); });
+    with_pg([&](examvan::db::RealPool& real){ write_audit_log(real, exam_id, audit_id.user_id, audit_id.username, "approval:"+status, mac); });
 #endif
     Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Persetujuan diperbarui\"}"); return r;
   }
@@ -413,6 +429,7 @@ Response get_auto_approve(const Request& req){
   if(exam_id.empty()){ Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"exam id required\"}"); return r; }
   std::string enabled="false";
 #ifdef HAS_LIBPQ
+  bool pg_ok=false;
   with_pg([&](examvan::db::RealPool& real){
     auto c=real.acquire();
     if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
@@ -420,8 +437,17 @@ Response get_auto_approve(const Request& req){
     if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0){
       enabled=std::string(PQgetvalue(r.get(),0,0))=="t"?"true":"false";
     }
+    pg_ok=true;
     real.release(c.release());
   });
+  /* P20-M9: fail-closed — PG down tidak boleh dilaporkan sebagai enabled=false
+   * yang valid (pengawas menyangka auto-approve mati padahal DB down). Bila DB
+   * dikonfigurasi (prod): 503. Memory/dev tanpa DATABASE_URL: 200 kompatibel. */
+  if(!pg_ok){
+    std::string db_url=Config::load().database_url;
+    if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+    if(!db_url.empty()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
+  }
 #endif
   Response r; r.json(200,"{\"success\":true,\"enabled\":"+enabled+"}"); return r;
 }
@@ -445,8 +471,20 @@ Response set_auto_approve(const Request& req){
     if(up && (PQresultStatus(up.get())==PGRES_COMMAND_OK||PQresultStatus(up.get())==PGRES_TUPLES_OK)) done=true;
     real.release(c.release());
   });
-  if(done){ Response r; r.json(200,"{\"success\":true,\"enabled\":"+val+",\"message\":\"Auto-approve diperbarui\"}"); return r; }
+  if(done){
+    /* P20-B1: aksi admin (ubah auto-approve) tercatat dengan atribusi caller. */
+    const auto audit_id=audit_identity_from(req);
+    with_pg([&](examvan::db::RealPool& real){ write_audit_log(real, exam_id, audit_id.user_id, audit_id.username, "auto_approve:"+val, ""); });
+    Response r; r.json(200,"{\"success\":true,\"enabled\":"+val+",\"message\":\"Auto-approve diperbarui\"}"); return r;
+  }
 #endif
+  /* P20-M9: fail-closed — bila DB dikonfigurasi (prod) tapi UPDATE tak tereksekusi,
+   * JANGAN klaim sukses: 503. Memory/dev tanpa DATABASE_URL: 200 kompatibel. */
+  {
+    std::string db_url=Config::load().database_url;
+    if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+    if(!db_url.empty()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
+  }
   Response r; r.json(200,"{\"success\":true,\"enabled\":"+val+"}"); return r;
 }
 

@@ -303,6 +303,39 @@ Response test_smtp_connection(const Request& req){
   return "";
 }
 
+#ifdef HAS_LIBPQ
+/* P20-B1: atribusi audit dari header internal (paritas helper di
+ * pengawas.cpp/exams.cpp) — fallback "" agar aksi tetap tercatat. */
+struct AuditIdentity { int user_id{0}; std::string username; };
+static AuditIdentity audit_identity_from(const Request& req){
+  AuditIdentity id;
+  for(auto& kv:req.headers){
+    std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch);
+    if(k=="x-internal-admin-id"){ try{ id.user_id=std::stoi(kv.second); }catch(...){} }
+    else if(k=="x-internal-admin-username"){ id.username=kv.second; }
+  }
+  return id;
+}
+/* Tulis audit best-effort untuk mutasi system-app (upload/delete). */
+static void write_audit_log(const std::string& exam_id, int user_id,
+                            const std::string& username, const std::string& action,
+                            const std::string& detail){
+  try{
+    std::string db_url=Config::load().database_url;
+    if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+    if(db_url.empty()) return;
+    examvan::DbPool pool(db_url, 2);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 2);
+    auto c=real.acquire();
+    if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+    real.exec_params(c.get(),
+      "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULLIF($2,'')::int,$3,$4,$5)",
+      {exam_id, std::to_string(user_id), username, action, detail});
+    real.release(c.release());
+  }catch(...){}
+}
+#endif
+
 Response system_apps_page(const Request& req){
 #ifdef HAS_LIBPQ
   try{
@@ -322,6 +355,13 @@ Response system_apps_page(const Request& req){
           auto del=real.exec_params(c.get(),"DELETE FROM system_apps WHERE id=$1",{it->second});
           bool ok=del && PQresultStatus(del.get())==PGRES_COMMAND_OK && std::atoi(PQcmdTuples(del.get()))>0;
           if(!ok){ Response r; r.status=500; r.json(500,"{\"success\":false,\"message\":\"Gagal menghapus metadata aplikasi.\"}"); return r; }
+          /* P20-B1: delete system-app (termasuk R2 object) — aksi destruktif
+           * superadmin, wajib tercatat dengan atribusi caller. */
+          {
+            const auto audit_id=audit_identity_from(req);
+            write_audit_log("", audit_id.user_id, audit_id.username,
+                            "system_app_delete", "id="+it->second+" file="+file_path);
+          }
           auto cfg_r2=Config::load(); r2::R2Config rc{cfg_r2.r2_access_key,cfg_r2.r2_secret_key,cfg_r2.r2_endpoint,cfg_r2.r2_bucket};
           if(rc.enabled() && !file_path.empty()){ r2::R2Client client{rc}; if(!client.remove(file_path)){ Response r; r.status=502; r.json(502,"{\"success\":false,\"message\":\"Metadata terhapus, tetapi object R2 belum dapat dibersihkan.\"}"); return r; } }
           Response r; r.status=200; r.json(200,"{\"success\":true,\"message\":\"Aplikasi berhasil dihapus\"}"); return r;
@@ -351,6 +391,12 @@ Response system_apps_page(const Request& req){
           if(!client.upload(key,file,"application/octet-stream") || !client.verify(key)){ Response r; r.status=502; r.json(502,"{\"success\":false,\"error_code\":\"UPLOAD_FAILED\",\"message\":\"Gagal mengupload file aplikasi.\"}"); return r; }
           auto ins=real.exec_params(c.get(),"INSERT INTO system_apps (name,platform,version,file_path,size_bytes) VALUES ($1,$2,$3,$4,$5)",{name,platform,version,key,std::to_string(file.size())});
           if(!ins || PQresultStatus(ins.get())!=PGRES_COMMAND_OK){ client.remove(key); Response r; r.status=500; r.json(500,"{\"success\":false,\"message\":\"Gagal menyimpan metadata aplikasi.\"}"); return r; }
+          /* P20-B1: upload system-app (hingga 100MB ke R2) — wajib tercatat. */
+          {
+            const auto audit_id=audit_identity_from(req);
+            write_audit_log("", audit_id.user_id, audit_id.username,
+                            "system_app_upload", "name="+name+" platform="+platform+" version="+version+" bytes="+std::to_string(file.size()));
+          }
           Response r; r.status=201; r.json(201,"{\"success\":true,\"message\":\"Aplikasi berhasil diunggah\"}"); return r;
         }
         auto rows=real.exec_params(c.get(),"SELECT id,name,platform,version,file_path,size_bytes,created_at::text,updated_at::text FROM system_apps ORDER BY created_at DESC",{});

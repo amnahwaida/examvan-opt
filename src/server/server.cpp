@@ -29,6 +29,12 @@ namespace examvan::server {
 static std::atomic<bool> g_running{false};
 #ifndef HAS_UWEBSOCKETS
 static int g_fd{-1};
+/* P20-C5: state antrean posix — static agar worker joinable + stop() dapat
+ * notify_all CV (worker keluar dari wait, drain sisa antrean, lalu join).
+ * shared_ptr dipakai worker loop, paritas kode lama. */
+static auto g_posix_q = std::make_shared<std::queue<int>>();
+static auto g_posix_qmu = std::make_shared<std::mutex>();
+static auto g_posix_qcv = std::make_shared<std::condition_variable>();
 #endif
 
 Server::Server(const Config& cfg, Hub* hub, Router* router) : cfg_(cfg), hub_(hub), router_(router) {}
@@ -373,6 +379,27 @@ static void handle_client(int cfd, examvan::Router* router, const examvan::Confi
   close(cfd);
 }
 
+/* P20-C5: loop worker posix — ambil koneksi dari antrean statik, layani.
+ * Saat shutdown (g_running false): worker tetap DRAIN sisa koneksi yang
+ * sudah diterima acceptor (paritas uWS drain), lalu keluar — thread-nya
+ * joinable dan di-join oleh Server::stop(). Router/cfg/hub diteruskan
+ * dari lambda spawn (captures this) karena fungsi ini static bebas. */
+static void posix_worker_loop(examvan::Router* router, const examvan::Config* cfg, examvan::Hub* hub){
+  for(;;){
+    int cfd=-1;
+    {
+      std::unique_lock<std::mutex> lk(*g_posix_qmu);
+      g_posix_qcv->wait(lk, [&]{ return !g_posix_q->empty() || !g_running.load(); });
+      if(!g_posix_q->empty()){
+        cfd=g_posix_q->front(); g_posix_q->pop();
+      } else if(!g_running.load()){
+        return; /* shutdown + antrean kosong → selesai, siap di-join */
+      }
+    }
+    if(cfd>=0) handle_client(cfd, router, cfg, hub);
+  }
+}
+
 #endif // !HAS_UWEBSOCKETS
 
 #ifdef HAS_UWEBSOCKETS
@@ -585,27 +612,22 @@ bool Server::listen(const ServerOpts& opts) {
   if(::listen(g_fd, SOMAXCONN)<0){ close(g_fd); g_fd=-1; return false; }
   g_running=true;
   running_=true;
-  auto q = std::make_shared<std::queue<int>>();
-  auto qmu = std::make_shared<std::mutex>();
-  auto qcv = std::make_shared<std::condition_variable>();
+  /* P20-C5: state antrean pindah ke static g_posix_* — worker disimpan di
+   * posix_threads_ (member joinable) supaya stop() bisa drain + join. */
   int workers = std::thread::hardware_concurrency(); if(workers<4) workers=4; if(workers>16) workers=16;
   for(int i=0;i<workers;i++){
-    std::thread([this,q,qmu,qcv]{
-      while(g_running){
-        int cfd=-1;
-        { std::unique_lock<std::mutex> lk(*qmu); qcv->wait(lk, [&]{ return !q->empty() || !g_running.load(); }); if(!g_running && q->empty()) break; if(q->empty()) continue; cfd=q->front(); q->pop(); }
-        handle_client(cfd, router_, &cfg_, hub_);
-      }
-    }).detach();
+    posix_threads_.emplace_back([this]{
+      posix_worker_loop(router_, &cfg_, hub_);
+    });
   }
-  std::thread([this,q,qmu,qcv]{
+  posix_threads_.emplace_back([]{
     while(g_running){
       int cfd=accept(g_fd,nullptr,nullptr);
       if(cfd<0){ if(!g_running) break; continue; }
-      { std::lock_guard<std::mutex> lk(*qmu); q->push(cfd); }
-      qcv->notify_one();
+      { std::lock_guard<std::mutex> lk(*g_posix_qmu); g_posix_q->push(cfd); }
+      g_posix_qcv->notify_one();
     }
-  }).detach();
+  });
   return true;
 #endif
 }
@@ -625,6 +647,14 @@ void Server::stop() {
   if(g_uWS_thread.joinable()) g_uWS_thread.join();
 #else
   if(g_fd>=0){ shutdown(g_fd, SHUT_RDWR); close(g_fd); g_fd=-1; }
+  /* P20-C5: bangunkan worker (keluar dari wait), drain sisa koneksi yang
+   * sudah diterima, lalu join semua thread posix (worker + acceptor) —
+   * paritas graceful shutdown jalur uWS. */
+  if(g_posix_qcv) g_posix_qcv->notify_all();
+  for(auto& t : posix_threads_){
+    if(t.joinable()) t.join();
+  }
+  posix_threads_.clear();
 #endif
 }
 

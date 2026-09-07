@@ -251,6 +251,14 @@ Response delete_submission(const Request& req){
   if(result=="__fail__"){ Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"Gagal menghapus submission\"}"); return r; }
   if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Submission dihapus\"}"); return r; }
 #endif
+  /* P20-M9: fail-closed — bila DB dikonfigurasi (prod) tapi `with_pg` tak bisa
+   * mengeksekusi (koneksi gagal/PQ down), JANGAN klaim sukses: 503. Mode
+   * memory/dev tanpa DATABASE_URL (unit test) tetap 200 kompatibel. */
+  {
+    std::string db_url=Config::load().database_url;
+    if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+    if(!db_url.empty()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
+  }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Submission dihapus\"}"); return r;
 }
 } // namespace examvan::handlers::admin

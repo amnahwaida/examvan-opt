@@ -23,6 +23,41 @@
 #include <algorithm>
 namespace examvan::handlers::admin {
 using namespace examvan::utils;
+/* P20-B1: atribusi audit dari header internal yang di-set router dari session
+ * terverifikasi (paritas helper di pengawas.cpp). Fallback "" — aksi tetap
+ * tercatat meski header tak tersedia. TANPA guard HAS_LIBPQ: hanya membaca
+ * header (dipakai kedua mode build). */
+struct AuditIdentity { int user_id{0}; std::string username; };
+static AuditIdentity audit_identity_from(const Request& req){
+  AuditIdentity id;
+  for(auto& kv:req.headers){
+    std::string k=kv.first; for(char& ch:k) ch=tolower((unsigned char)ch);
+    if(k=="x-internal-admin-id"){ try{ id.user_id=std::stoi(kv.second); }catch(...){} }
+    else if(k=="x-internal-admin-username"){ id.username=kv.second; }
+  }
+  return id;
+}
+#ifdef HAS_LIBPQ
+/* Tulis audit best-effort (pool baru per panggilan — pola with_pg pengawas.cpp).
+ * Tak menggagalkan aksi utama bila PG down: audit infra, bukan jalur data. */
+static void write_audit_log(const std::string& exam_id, int user_id,
+                            const std::string& username, const std::string& action,
+                            const std::string& detail){
+  try{
+    std::string db_url=Config::load().database_url;
+    if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+    if(db_url.empty()) return;
+    examvan::DbPool pool(db_url, 2);
+    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 2);
+    auto c=real.acquire();
+    if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+    real.exec_params(c.get(),
+      "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULLIF($2,'')::int,$3,$4,$5)",
+      {exam_id, std::to_string(user_id), username, action, detail});
+    real.release(c.release());
+  }catch(...){}
+}
+#endif
 static std::string get_param(const std::map<std::string,std::string>& form, const std::string& k){
   auto it=form.find(k); return it!=form.end()? it->second : "";
 }
@@ -1174,6 +1209,7 @@ Response bulk_toggle_exams(const Request& req){
   int actor_id=0; bool super_admin=false;
   if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
   if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
+  const auto audit_id=audit_identity_from(req); /* P20-B1 */
   int ok_count=0;
   for(int id: ids){
     auto exam=exams().get_by_id(id);
@@ -1182,7 +1218,14 @@ Response bulk_toggle_exams(const Request& req){
       e.status=status;
       if(status=="active") e.tombstoned_at.reset(); // Go parity: re-activation clears tombstone
     });
-    if(found) ok_count++;
+    if(found){
+      ok_count++;
+#ifdef HAS_LIBPQ
+      /* P20-B1: bulk-toggle menonaktifkan ujian — destructive, wajib tercatat. */
+      write_audit_log(std::to_string(id), audit_id.user_id, audit_id.username,
+                      "bulk_toggle:"+status, "");
+#endif
+    }
   }
   utils::log_info("exams_bulk_toggled","count="+std::to_string(ok_count)+" status="+status);
   Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"updated\":"+std::to_string(ok_count)+",\"message\":\"Status "+std::to_string(ok_count)+" ujian berhasil diperbarui\"}"); return r;
@@ -1200,6 +1243,7 @@ Response bulk_delete_exams(const Request& req){
   int actor_id=0; bool super_admin=false;
   if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
   if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
+  const auto audit_id=audit_identity_from(req); /* P20-B1 */
   int ok_count=0;
   for(int id: ids){
     auto exam=exams().get_by_id(id);
@@ -1216,7 +1260,14 @@ Response bulk_delete_exams(const Request& req){
       // Tanpa R2 object tidak bisa dibersihkan → lewati ujian ini (paritas delete_exam).
       continue;
     }
-    if(exams().remove(id)) ok_count++;
+    if(exams().remove(id)){
+      ok_count++;
+#ifdef HAS_LIBPQ
+      /* P20-B1: bulk-delete menghapus ujian + R2 — destructive, wajib tercatat. */
+      write_audit_log(std::to_string(id), audit_id.user_id, audit_id.username,
+                      "bulk_delete", "keys="+std::to_string(keys.size()));
+#endif
+    }
   }
   utils::log_info("exams_bulk_deleted","count="+std::to_string(ok_count));
   Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"deleted\":"+std::to_string(ok_count)+",\"message\":\""+std::to_string(ok_count)+" ujian dihapus\"}"); return r;

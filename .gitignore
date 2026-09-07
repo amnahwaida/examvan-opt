@@ -9,3 +9,5 @@ build-uws/
 soak-logs/
 internal/
 ccache
+test-results.xml
+.claude/

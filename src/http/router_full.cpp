@@ -233,6 +233,8 @@ void register_full_routes(Router& r, const Config& cfg){
       // create_exam memakainya untuk created_by (FK exams_created_by_fkey).
       Request r2=req;
       r2.headers["X-Internal-Admin-Id"]=std::to_string(sess.admin_id);
+      // P20-B1: username session untuk atribusi audit-log (write_audit_log).
+      r2.headers["X-Internal-Admin-Username"]=sess.username;
       r2.headers["X-Internal-Admin-Role"]=sess.role;
       r2.headers["X-Internal-Admin-Instansi"]=sess.instansi;
       r2.headers["X-Internal-Admin-Super"]=sess.is_super_admin?"1":"0";

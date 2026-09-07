@@ -166,6 +166,9 @@ int main(){
   std::signal(SIGTERM, handle_term_signal);
   std::signal(SIGINT, handle_term_signal);
   while(!g_shutdown.load()) std::this_thread::sleep_for(std::chrono::seconds(1));
+  /* P20-C5: stop server (tutup listener + join uWS/posix threads) — tanpa
+   * ini uWS thread tak pernah di-join dan posix fd tak ditutup rapi. */
+  srv.stop();
   w.stop();
 #if defined(HAS_HIREDIS) && defined(HAS_LIBPQ)
   hb_flusher.stop();
