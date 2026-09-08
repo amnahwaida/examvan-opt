@@ -1196,6 +1196,59 @@ Response save_exam_questions(const Request& req){
 // ===== Bulk toggle ==========================================================
 // POST /admin/api/exams/bulk-toggle {ids:[...], status:"active"|"inactive"}
 // (frontend bulkToggleExams). Sebelumnya route tidak ada → 404.
+
+/* P22-M8: scope bulk = scope single-assign (router_full.cpp "exam_access"):
+ * superadmin | created_by | delegated_to | pengawas assigned (exam_pengawas)
+ * | operator same-instansi pemilik. Sebelumnya bulk hanya created_by/delegated
+ * — pengawas yang sah tidak bisa toggle ujian yang diampunya, beda dengan
+ * path per-exam (mis. set_approval) yang menerima mereka.
+ * Return: true = boleh mutasi (atau PG tidak aktif → fail-open konsisten
+ * dengan revalidasi session router / gate router C7 lama di dev). */
+static bool exam_bulk_scope_ok(int exam_id, int actor_id, bool super_admin,
+                               const std::string& actor_instansi, bool is_operator,
+                               const models::Exam& exam){
+  if(super_admin) return true;
+  if(exam.created_by==actor_id) return true;
+  if(exam.delegated_to && *exam.delegated_to==actor_id) return true;
+#ifdef HAS_LIBPQ
+  if(actor_id>0){
+    try{
+      std::string db_url=Config::load().database_url;
+      if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
+      if(!db_url.empty()){
+        examvan::DbPool pool(db_url, 2);
+        examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 2);
+        if(auto c=real.acquire()){
+          if(PQstatus(c.get())==CONNECTION_OK){
+            // Pengawas assigned pada ujian ini (junction exam_pengawas).
+            auto pw=real.exec_params(c.get(),
+              "SELECT 1 FROM exam_pengawas WHERE exam_id=$1 AND user_id=$2 LIMIT 1",
+              {std::to_string(exam_id),std::to_string(actor_id)});
+            if(pw && PQresultStatus(pw.get())==PGRES_TUPLES_OK && PQntuples(pw.get())>0){
+              real.release(c.release());
+              return true;
+            }
+            // Operator same-instansi pemilik ujian (bukan personal).
+            if(is_operator && !actor_instansi.empty() && actor_instansi!="personal"){
+              auto op=real.exec_params(c.get(),
+                "SELECT 1 FROM admin_users me JOIN admin_users owner ON owner.id=$2"
+                " WHERE me.id=$1 AND me.instansi=$3 AND me.instansi<>'' AND me.instansi<>'personal'",
+                {std::to_string(actor_id),std::to_string(exam.created_by),actor_instansi});
+              if(op && PQresultStatus(op.get())==PGRES_TUPLES_OK && PQntuples(op.get())>0){
+                real.release(c.release());
+                return true;
+              }
+            }
+          }
+          real.release(c.release());
+        }
+      }
+    }catch(...){}
+  }
+#endif
+  return false;
+}
+
 Response bulk_toggle_exams(const Request& req){
   std::string ids_raw=json_raw_value(req.body,"ids");
   std::string status=json_string_field(req.body,"status");
@@ -1210,10 +1263,16 @@ Response bulk_toggle_exams(const Request& req){
   if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
   if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
   const auto audit_id=audit_identity_from(req); /* P20-B1 */
+  // P22-M8: role/instansi session — dipakai scope pengawas-assigned +
+  // operator same-instansi (paritas router "exam_access").
+  std::string actor_role, actor_instansi;
+  if(auto it=req.headers.find("X-Internal-Admin-Role"); it!=req.headers.end()) actor_role=it->second;
+  if(auto it=req.headers.find("X-Internal-Admin-Instansi"); it!=req.headers.end()) actor_instansi=it->second;
+  bool is_operator=actor_role.find("operator")!=std::string::npos;
   int ok_count=0;
   for(int id: ids){
     auto exam=exams().get_by_id(id);
-    if(!exam || (!super_admin && exam->created_by!=actor_id && (!exam->delegated_to || *exam->delegated_to!=actor_id))) continue;
+    if(!exam || !exam_bulk_scope_ok(id, actor_id, super_admin, actor_instansi, is_operator, *exam)) continue;
     bool found=exams().update(id,[&](models::Exam& e){
       e.status=status;
       if(status=="active") e.tombstoned_at.reset(); // Go parity: re-activation clears tombstone
@@ -1244,10 +1303,16 @@ Response bulk_delete_exams(const Request& req){
   if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
   if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
   const auto audit_id=audit_identity_from(req); /* P20-B1 */
+  // P22-M8: scope bulk-delete = scope bulk-toggle (pengawas assigned +
+  // operator same-instansi ikut dihitung — sebelumnya hanya pemilik/delegasi).
+  std::string actor_role, actor_instansi;
+  if(auto it=req.headers.find("X-Internal-Admin-Role"); it!=req.headers.end()) actor_role=it->second;
+  if(auto it=req.headers.find("X-Internal-Admin-Instansi"); it!=req.headers.end()) actor_instansi=it->second;
+  bool is_operator=actor_role.find("operator")!=std::string::npos;
   int ok_count=0;
   for(int id: ids){
     auto exam=exams().get_by_id(id);
-    if(!exam || (!super_admin && exam->created_by!=actor_id && (!exam->delegated_to || *exam->delegated_to!=actor_id))) continue;
+    if(!exam || !exam_bulk_scope_ok(id, actor_id, super_admin, actor_instansi, is_operator, *exam)) continue;
     auto cfg_r2=Config::load();
     r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
     std::vector<std::string> keys={r2::object_key_pdf_legacy(exam->file_path),r2::object_key_for_exam(id, exam->file_path)};

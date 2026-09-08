@@ -41,6 +41,30 @@ static void with_pg(const std::function<void(examvan::db::RealPool&)>& fn){
 #endif
 
 #ifdef HAS_LIBPQ
+/* P22-M7: cek scope submission DI HANDLER (bukan hanya di router) —
+ * defense-in-depth paritas checkExamOwnership Go. Router tetap menjalankan
+ * cek C8-nya; handler kini tidak memercayai itu sendirian: resolve
+ * submission → exam → created_by/delegated_to vs actor (superadmin lolos).
+ * Tanpa PG (unit test / dev memory) fail-open, konsisten dengan revalidasi
+ * session router. Return: true = akses diizinkan (atau PG tidak aktif). */
+static bool submission_scope_ok(examvan::db::RealPool& real, PGconn* c,
+                                const std::string& submission_id, int actor_id,
+                                bool super_admin){
+  if(super_admin) return true;
+  auto r=real.exec_params(c,
+    "SELECT e.created_by, e.delegated_to FROM submissions s JOIN exams e ON e.id=s.exam_id WHERE s.id=$1",
+    {submission_id});
+  if(!r || PQresultStatus(r.get())!=PGRES_TUPLES_OK || PQntuples(r.get())==0)
+    return false; // submission tak ditemukan → 404 dijalur utama, bukan scope
+  if(PQgetisnull(r.get(),0,0)) return false;
+  int created_by=0; try{ created_by=std::stoi(PQgetvalue(r.get(),0,0)); }catch(...){}
+  if(created_by==actor_id) return true;
+  if(!PQgetisnull(r.get(),0,1)){
+    int delegated=0; try{ delegated=std::stoi(PQgetvalue(r.get(),0,1)); }catch(...){}
+    if(delegated==actor_id) return true;
+  }
+  return false;
+}
 static std::string json_escape_ci(const std::string& s){
   std::string o; o.reserve(s.size()+16);
   for(unsigned char c: s){
@@ -168,12 +192,29 @@ Response submission_detail(const Request& req){
   auto it=req.params.find("id");
   if(it!=req.params.end() && !it->second.empty()) id_str=it->second;
   if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"id required\"}"); return r; }
+  // P22-M7: actor dari session (header internal router) — dipakai cek scope
+  // di handler, TIDAK memercayai gate router sendirian (defense-in-depth).
+  int actor_id=0; bool super_admin=false;
+  if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
+  if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
+#ifndef HAS_LIBPQ
+  (void)actor_id; (void)super_admin; // scope handler hanya relevan bila PG aktif
+#endif
 #ifdef HAS_LIBPQ
   std::string subj;
-  bool found=false;
+  bool found=false; bool scope_denied=false;
   with_pg([&](examvan::db::RealPool& real){
     auto c=real.acquire();
     if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+    // P22-M7: scope submission dicek DI handler — router C8 tetap jalan,
+    // tapi bila dua gate pernah divergen (mis. beda store), handler tidak
+    // bocor. Submission tak ditemukan → 404 jalur utama (bukan scope-deny).
+    if(!submission_scope_ok(real, c.get(), id_str, actor_id, super_admin)){
+      auto exist=real.exec_params(c.get(),"SELECT 1 FROM submissions WHERE id=$1",{id_str});
+      if(exist && PQresultStatus(exist.get())==PGRES_TUPLES_OK && PQntuples(exist.get())>0)
+        scope_denied=true; // ada tapi bukan milik actor → 403
+      return;
+    }
     auto r=real.exec_params(c.get(),
       "SELECT s.id,s.exam_id,e.name,s.student_name,s.exam_number,s.student_class,s.score,s.start_time,s.mac_address,s.answers_json,s.created_at,s.identity_data FROM submissions s LEFT JOIN exams e ON e.id=s.exam_id WHERE s.id=$1",
       {id_str});
@@ -200,6 +241,7 @@ Response submission_detail(const Request& req){
     }
     real.release(c.release());
   });
+  if(scope_denied){ Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"forbidden\"}"); return r; }
   if(found){ Response r; r.json(200,"{\"success\":true,\"submission\":"+subj+"}"); return r; }
   Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"submission not found\"}"); return r;
 #else
@@ -236,16 +278,33 @@ Response delete_submission(const Request& req){
   auto it=req.params.find("id");
   if(it!=req.params.end() && !it->second.empty()) id_str=it->second;
   if(id_str.empty()){ Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"id required\"}"); return r; }
+  // P22-M7: actor dari session — scope dicek juga di handler (defense-in-depth).
+  int actor_id=0; bool super_admin=false;
+  if(auto it=req.headers.find("X-Internal-Admin-Id"); it!=req.headers.end()) try{ actor_id=std::stoi(it->second); }catch(...){ }
+  if(auto it=req.headers.find("X-Internal-Admin-Super"); it!=req.headers.end()) super_admin=it->second=="1";
+#ifndef HAS_LIBPQ
+  (void)actor_id; (void)super_admin; // scope handler hanya relevan bila PG aktif
+#endif
 #ifdef HAS_LIBPQ
   std::string result="";
   with_pg([&](examvan::db::RealPool& real){
     auto c=real.acquire();
     if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+    // P22-M7: hapus submission hanya bila exam-nya milik actor (superadmin |
+    // created_by | delegated_to) — paritas checkExamOwnership Go. Submission
+    // milik orang lain → scope_denied (403), TIDAK diteruskan ke DELETE.
+    if(!submission_scope_ok(real, c.get(), id_str, actor_id, super_admin)){
+      auto exist=real.exec_params(c.get(),"SELECT 1 FROM submissions WHERE id=$1",{id_str});
+      if(exist && PQresultStatus(exist.get())==PGRES_TUPLES_OK && PQntuples(exist.get())>0)
+        result="__scope__";
+      return;
+    }
     auto del=real.exec_params(c.get(),"DELETE FROM submissions WHERE id=$1",{id_str});
     if(del && PQresultStatus(del.get())==PGRES_COMMAND_OK){ result="ok"; }
     else { utils::log_error("submission_delete_failed",PQresultErrorMessage(del.get())); result="__fail__"; }
     real.release(c.release());
   });
+  if(result=="__scope__"){ Response r; r.status=403; r.json(403,"{\"success\":false,\"error\":\"forbidden\"}"); return r; }
   if(result=="__fail__"){ Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"Gagal menghapus submission\"}"); return r; }
   if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Submission dihapus\"}"); return r; }
 #endif

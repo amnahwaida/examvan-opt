@@ -149,6 +149,14 @@ void Hub::handle_message(std::shared_ptr<Client> c, const std::string& raw){
 }
 
 void Hub::handle_heartbeat(std::shared_ptr<Client> c, const std::string& payload_json){
+  /* P22-H7 (keputusan paritas Go, hub.go:378-385): WS heartbeat/exam_completed
+   * HANYA untuk klien privileged (admin/pengawas/operator — session-auth).
+   * Siswa tidak melaporkan presence via WS: token ujian dishare satu kelas
+   * (mode statis), jadi token-holder mana pun bisa menyuntik heartbeat palsu
+   * / menghapus presence teman (phantom student / phantom offline). Presence
+   * siswa dilaporkan via HTTP AccessLog (push_heartbeat_presence di
+   * api/exams.cpp — paritas setStudentHeartbeat exams.go:1570). JANGAN
+   * "buka" gate ini tanpa mengubah Go juga — uji end-to-end: P30.H7_*. */
   if(!c->privileged) return;
   std::string exam_id_str = c->room;
   int exam_id=0; try{exam_id=std::stoi(exam_id_str);}catch(...){return;}

@@ -83,11 +83,12 @@ static std::string json_escape(const std::string& s){
   return o;
 }
 
-// Mask secrets on GET; fixed mask for short secrets (P17-L5: sized mask leaks length).
+// Mask secrets on GET — P22-L3 (lanjutan P17-L5): mask FIXED-length.
+// Sized mask (std::string(t.size()-4,'*')) membocorkan panjang secret ke
+// frontend; kini cukup 4 asterisk untuk semua secret, apa pun panjangnya.
 static std::string mask_token(const std::string& t){
   if(t.empty()) return "";
-  if(t.size()<=4) return "****";
-  return std::string(t.size()-4,'*')+t.substr(t.size()-4);
+  return "****";
 }
 
 #ifdef HAS_LIBPQ
