@@ -34,7 +34,9 @@ TEST(Review_Nginx, RateLimitScopedToLogin){
 
 TEST(Review_Nginx, SecurityHeaders){
   auto c=read_file("nginx/nginx.conf");
-  EXPECT_NE(c.find("Strict-Transport-Security"), std::string::npos) << "missing HSTS";
+  // P23-B5: HSTS dihapus dari konfigurasi sampai TLS aktif (RFC 6797 — header
+  // dikirim via port 80 diabaikan browser dan menyesatkan audit). Kontrak lama
+  // "HSTS harus ada" berlaku kembali saat listen 443 ssl diaktifkan.
   EXPECT_NE(c.find("Content-Security-Policy"), std::string::npos) << "missing CSP";
   EXPECT_NE(c.find("client_max_body_size"), std::string::npos) << "missing client_max_body_size";
   EXPECT_EQ(c.find("proxy_read_timeout 3600s"), std::string::npos) << "3600s timeout excessive, should be 60s or less";

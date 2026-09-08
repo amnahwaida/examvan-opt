@@ -309,3 +309,73 @@ replace-literal yang sah), L3, B3, B4, B5, B6 + tindak lanjut opsional
 (heartbeat-flusher pool, integration test fresh-DB bila ada env PG nyata).
 4. Smoke `download/apk` setelah versi di-single-source: object key R2 harus
    mengikuti `Config::version`, bukan literal.
+
+---
+
+## Addendum remediasi pass-23 (2026-09-08) — carried-over M16/M19/B3/B4/B5/B6 CLOSED di pass-22+1
+
+Metode TDD: kontrak infra ditulis dulu (RED) di `tests/test_p31_env.sh`
+(bash — compose/nginx/script tidak terjangkau gtest) + `tests/test_p31_tdd.cpp`
+(7 test gtest untuk sumber yang terbaca sebagai teks), lalu remediasi GREEN.
+
+**B6 — CLOSED.** Dua worktree `.claude/worktrees/agent-*` (HEAD `f8b9f35`,
+terverifikasi ancestor `main` via `git merge-base --is-ancestor`) dihapus:
+`git worktree remove` × 2 + `git branch -D worktree-agent-*` × 2; direktori
+`worktrees/` kosong dihapus. `.claude/` sudah di `.gitignore` sejak pass-21.
+
+**M19-sisa — CLOSED.** `scripts/extract_contract.py`: path absolut
+home-direktori dihapus; kini menerima `--src` (default `./cmd/server/main.go`)
+dan `--out` (default `contract.json` di folder script); file sumber hilang →
+**exit 2 dengan pesan jelas** (bukan gagal senyap menimpa golden). Fungsional
+terverifikasi: extract 3 route dari main.go tiruan → JSON benar. Efek samping
+positif: RED-run sempat menimpa golden `scripts/contract.json` (26 route, bukan
+40+) via script lama yang mengabaikan argumen — dengan fail-loud baru, jalur
+rusak ini tertutup; kontrak `P4_Contract.ParityRoutes` diselaraskan ke
+realitas repo (repo Go tidak ada di sini): health + WS + ≥20 route.
+
+**M16-sisa — CLOSED.** `docker-compose.yml`: Redis dijalankan
+`--requirepass "${REDIS_PASSWORD:?}"` (wajib set — compose gagal start tanpa
+env, tanpa default lemah), `REDIS_URL` app kini `redis://:${REDIS_PASSWORD}@redis:6379/0`
+(AUTH sudah didukung `connect_redis` P18-M14 — diverifikasi baca sumber),
+healthcheck redis `redis-cli -a "$REDIS_PASSWORD" ping`. Hardening non-root +
+read-only: db `user: "70:70"` + `read_only` + tmpfs `/tmp`,`/run/postgresql`;
+redis `user: "999:999"` + `read_only` + tmpfs; nginx `user: "101:101"` +
+`read_only` + tmpfs cache/run/pid (worker tetap nginx:nginx). Live E2E:
+`docker compose up redis` → PING tanpa AUTH = `NOAUTH Authentication required`,
+dengan AUTH = `PONG`; `docker compose config` valid; volume bersih setelah
+`down -v`. `.env.example` + `REDIS_PASSWORD` (template). DB_PASSWORD via env
+tetap dicatat sebagai batas compose tanpa secrets (pass-20).
+
+**B4 — CLOSED.** `nginx/nginx.conf` `location /`: `proxy_set_header Upgrade`
++ `Connection $connection_upgrade` dihapus (kini hanya di `location /ws/`);
+`proxy_read_timeout` `location /` dinaikkan 60s → 130s sebagai fallback WS lama
+(sejajar idle server 120s). Semua WS wajib lewat `/ws/` (130s). Diverifikasi
+`nginx -t` di image `nginx:1.27-alpine` (upstream diganti 127.0.0.1 untuk test
+standalone): configuration test successful.
+
+**B5 — CLOSED.** Semua baris aktif `add_header Strict-Transport-Security`
+dihapus dari `nginx.conf` (3 titik: server, location /, login, health) — HSTS
+di port 80 diabaikan browser per RFC 6797 dan menyesatkan audit. Placeholder
+`listen 443 ssl` + `ssl_certificate` comment tetap; HSTS wajib dikembalikan
+bersama aktivasi TLS. Kontrak legacy `Review_Nginx.SecurityHeaders` (mewajibkan
+HSTS tanpa syarat TLS) diselaraskan — proteksi CSP/max_body/timeout tetap
+dikunci.
+
+**B3 — CLOSED.** `scripts/check-docker-paths.sh`: loop serial → `xargs -0 -P
+"$JOBS" -n 1` (worker mode `--worker` re-invokes script per unit; `JOBS` env,
+default `nproc`). Ukuran sebelum (serial, pass-20): >8 menit; sesudah (paralel
+-P8): **2m05s wall / 12m37s CPU** untuk 54 src × 2 pass + 73 tests, output
+failure tetap dilabeli per file+mode, exit code fail tetap benar.
+
+**Verifikasi pass-23:** RED `test_p31_env.sh` = 10 FAIL (sebelum remediasi)
+→ GREEN 14/14 PASS; gtest P31 = 7/7; full suite release **812 tests — 812
+passed + 1 skip** (P7 kondisional, tanpa regresi); full suite sanitizer
+**812 passed + 1 skip**; docker-parity `check-docker-paths.sh` 54 src × 2 +
+73 tests bersih (`-Werror`, paralel); `nginx -t` OK; `docker compose config`
+OK; live redis requirepass OK. CI kini menjalankan `tests/test_p31_env.sh`
+sebagai guard kontrak infra (step baru setelah docker-path check).
+
+Sisa terbuka setelah pass-23: **tidak ada** dari daftar pass-20/21 — tersisa
+tindak lanjut opsional (heartbeat-flusher pakai pool global, integration test
+fresh-DB bila ada env PG nyata, TLS/HTTPS aktivasi → kembalikan HSTS,
+secrets management compose bila stack produksi menuntut).

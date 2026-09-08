@@ -33,6 +33,8 @@ jobs:
         with: { node-version: 20 }
       - name: Docker-path syntax check (HAS_LIBPQ/HIREDIS/CURL via stubs)
         run: scripts/check-docker-paths.sh
+      - name: Env contract (pass-23 infra TDD — compose/nginx/scripts)
+        run: bash tests/test_p31_env.sh
       - name: Install deps
         run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev clang-format libpq-dev libhiredis-dev libcurl4-openssl-dev
       - name: Format check
