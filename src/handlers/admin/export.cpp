@@ -10,7 +10,9 @@
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include <libpq-fe.h>
+#include <cstdlib>
 #endif
 namespace examvan::handlers::admin {
 
@@ -162,11 +164,11 @@ Response export_submissions_xlsx(const Request& req){
   std::vector<SubmissionRow> rows;
 #ifdef HAS_LIBPQ
   try{
-    auto cfg_db=Config::load();
-    examvan::DbPool pool(cfg_db.database_url, 10);
-    // conninfo_from_url_or_raw (BUKAN sanitized_url — password "***" gagal auth).
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-    if(auto c=real.acquire()){
+    /* P33-Ec: pool proses-wide — dulu RealPool stack-lokal (10 koneksi)
+     * per request export: burst export → connection churn + latensi PG. */
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
       std::string sql="SELECT s.id,COALESCE(e.name,''),COALESCE(s.student_name,''),COALESCE(s.exam_number,''),"
         "COALESCE(s.student_class,''),COALESCE(s.score::text,''),COALESCE(s.created_at::text,''),COALESCE(s.mac_address,'')"
         " FROM submissions s LEFT JOIN exams e ON e.id=s.exam_id WHERE ";
@@ -190,7 +192,7 @@ Response export_submissions_xlsx(const Request& req){
         }
       }
       real.release(c.release());
-    }
+    });
   }catch(...){ /* best-effort: tanpa PG rows kosong → XLSX header-only tetap valid */ }
 #else
   (void)filter;

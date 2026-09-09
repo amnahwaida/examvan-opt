@@ -131,22 +131,28 @@ TEST(ProtobufHandlers, ListUsers_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, CreateUser_JsonMutationStillWorks) {
+  // P33-Ea: fail-closed — PG dikonfigurasi (host down deterministik, pola
+  // fixture P32) tapi tidak terjangkau → 503 jujur, BUKAN sukses palsu 201.
+  // Alur sukses (201) diverifikasi integration test PG
+  // (test_pg_integration_tdd.cpp, auto-SKIP tanpa PG hidup).
+  setenv("DATABASE_URL", "postgresql://examvan_p33_down:test@127.0.0.1:59999/examvan", 1);
   Request req;
   req.method = "POST";
   req.body = "username=testmig&password=pass12345&role=guru";
   auto res = handlers::admin::create_user(req);
-  EXPECT_EQ(res.status, 201);
-  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
+  EXPECT_EQ(res.status, 503);
+  EXPECT_NE(res.body.find("Database tidak tersedia"), std::string::npos);
 }
 
 TEST(ProtobufHandlers, CreateUser_EditUser_DeleteUser_StubStillWorks) {
-  // handlers bukan stub lagi: butuh id (path /users/:id/...).
+  // P33-Ea: fail-closed — tulis admin tidak lagi fake-200 saat PG down.
+  setenv("DATABASE_URL", "postgresql://examvan_p33_down:test@127.0.0.1:59999/examvan", 1);
   Request e; e.path="/admin/api/users/1/edit"; e.params["id"]="1";
   auto res_edit = handlers::admin::edit_user(e);
-  EXPECT_EQ(res_edit.status, 200);
+  EXPECT_EQ(res_edit.status, 503);
   Request d; d.path="/admin/api/users/1/delete"; d.params["id"]="1";
   auto res_del = handlers::admin::delete_user(d);
-  EXPECT_EQ(res_del.status, 200);
+  EXPECT_EQ(res_del.status, 503);
 }
 
 // ======================================================================
@@ -306,12 +312,17 @@ TEST(ProtobufHandlers, SettingsPage_JsonStillWorks) {
 TEST(ProtobufHandlers, UpdateSettings_JsonStillWorks) {
   // handler bukan stub lagi: partial update butuh minimal satu key yang hadir
   // (paritas Go pointer fields — body kosong → 400).
-  Request req; req.body="{\"smtp_host\":\"smtp.test.local\"}";
-  auto res = handlers::admin::update_settings(req);
-  EXPECT_EQ(res.status, 200);
-  EXPECT_NE(res.body.find("\"success\":true"), std::string::npos);
+  // P33-Eg: fail-closed — PG dikonfigurasi (host down deterministik, pola
+  // fixture P32) tapi upsert gagal → 503 jujur, BUKAN fake-200. Alur sukses
+  // (200) diverifikasi integration test PG. Empty body → 400 validasi
+  // input (DB-independent).
   auto empty = handlers::admin::update_settings(Request{});
   EXPECT_EQ(empty.status, 400);
+  setenv("DATABASE_URL", "postgresql://examvan_p33_down:test@127.0.0.1:59999/examvan", 1);
+  Request req; req.body="{\"smtp_host\":\"smtp.test.local\"}";
+  auto res = handlers::admin::update_settings(req);
+  EXPECT_EQ(res.status, 503);
+  EXPECT_NE(res.body.find("Database tidak tersedia"), std::string::npos);
 }
 
 // ======================================================================
@@ -364,6 +375,10 @@ TEST(ProtobufHandlers, PendingApprovals_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, SetApproval_JsonStillWorks) {
+  // Mode memori eksplisit (deterministik terhadap urutan suite): tanpa
+  // DATABASE_URL kontrak M9 memori → 200. Dengan PG configured+down → 503
+  // (dikunci ProductionHardening).
+  unsetenv("DATABASE_URL");
   Request req; req.params["exam_id"]="1"; req.params["mac_address"]="AA:BB:CC"; req.body="status=approved";
   auto res = handlers::admin::set_approval(req);
   EXPECT_EQ(res.status, 200);
@@ -371,6 +386,7 @@ TEST(ProtobufHandlers, SetApproval_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, GetAutoApprove_JsonStillWorks) {
+  unsetenv("DATABASE_URL");
   Request req; req.params["exam_id"]="1";
   auto res = handlers::admin::get_auto_approve(req);
   EXPECT_EQ(res.status, 200);
@@ -378,6 +394,7 @@ TEST(ProtobufHandlers, GetAutoApprove_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, SetAutoApprove_JsonStillWorks) {
+  unsetenv("DATABASE_URL");
   Request req; req.params["exam_id"]="1"; req.body="enabled=true";
   auto res = handlers::admin::set_auto_approve(req);
   EXPECT_EQ(res.status, 200);
@@ -435,6 +452,7 @@ TEST(ProtobufHandlers, QueueStatus_JsonStillWorks) {
 }
 
 TEST(ProtobufHandlers, DeleteSubmission_JsonStillWorks) {
+  unsetenv("DATABASE_URL"); // mode memori eksplisit (lihat SetApproval)
   Request req; req.params["id"]="1";
   auto res = handlers::admin::delete_submission(req);
   EXPECT_EQ(res.status, 200);
@@ -735,17 +753,39 @@ TEST(ProtobufHandlers, CompleteExam_JsonStillWorks) {
 // ======================================================================
 
 TEST(ProtobufHandlers, Webhook_ValidProtobufResponse) {
-  auto req = pb_accept();
-  req.method = "POST";
-  req.body = "some payload";
-  auto res = handlers::api::webhook(req);
-  EXPECT_EQ(res.status, 200);
-  EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
-  ASSERT_FALSE(res.body.empty());
-  examvan::v1::WebhookResponse pb;
-  ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid WebhookResponse protobuf";
-  EXPECT_TRUE(pb.success());
-  EXPECT_EQ(pb.status(), "ok");
+  // Kontrak fail-closed channel protobuf (P33/F1): ack hanya SETELAH validasi.
+  // (a) Body bukan JSON valid → parse gate menolak (paritas channel JSON :751),
+  //     bukan di-ack buta success=true.
+  // (b) Format valid tapi PG tidak terkonfigurasi (DATABASE_URL di-unset oleh
+  //     fixture suite ini) → "Database tidak tersedia", bukan ack buta.
+  {
+    auto req = pb_accept();
+    req.method = "POST";
+    req.body = "some payload";
+    auto res = handlers::api::webhook(req);
+    EXPECT_EQ(res.status, 200);
+    EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
+    ASSERT_FALSE(res.body.empty());
+    examvan::v1::WebhookResponse pb;
+    ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid WebhookResponse protobuf";
+    EXPECT_FALSE(pb.success());
+    EXPECT_NE(pb.status().find("Payload tidak lengkap"), std::string::npos)
+        << "body non-JSON wajib ditolak parse gate, bukan di-ack";
+  }
+  {
+    auto req = pb_accept();
+    req.method = "POST";
+    req.body = "{\"sender\":\"+62812\",\"message\":\"verifikasi pendaftaran username: budi kode: ABC123\"}";
+    auto res = handlers::api::webhook(req);
+    EXPECT_EQ(res.status, 200);
+    EXPECT_EQ(res.headers.at("Content-Type"), "application/x-protobuf");
+    ASSERT_FALSE(res.body.empty());
+    examvan::v1::WebhookResponse pb;
+    ASSERT_TRUE(pb.ParseFromString(res.body)) << "body is not valid WebhookResponse protobuf";
+    EXPECT_FALSE(pb.success());
+    EXPECT_NE(pb.status().find("Database tidak tersedia"), std::string::npos)
+        << "PG down wajib fail-closed di channel protobuf, bukan ack buta";
+  }
 }
 
 TEST(ProtobufHandlers, Webhook_JsonStillWorks) {

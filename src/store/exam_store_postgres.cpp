@@ -304,7 +304,8 @@ bool ExamStorePostgres::migrate(){
                                 "operator_created BOOLEAN NOT NULL DEFAULT FALSE",
                                 "base_role TEXT NOT NULL DEFAULT ''",
                                 "package_role TEXT NOT NULL DEFAULT ''",
-                                "whatsapp_number TEXT NOT NULL DEFAULT ''"}){
+                                "whatsapp_number TEXT NOT NULL DEFAULT ''",
+                                "created_by INTEGER NOT NULL DEFAULT 0"}){
       exec_command(std::string("ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS ")+col_type);
     }
   }
@@ -394,6 +395,15 @@ bool ExamStorePostgres::token_exists(const std::string& token,int exclude_id){
   return !query_exams(sql,p).empty();
 }
 bool ExamStorePostgres::claim_token(const std::string& token){ return !token_exists(token); }
+/* P35-D3: atomik thd proses (mu_ + satu query) — kolisi exam lain
+ * (id<>exclude_id) → false. UNIQUE token di schema PG menahan persist
+ * lintas-proses. */
+bool ExamStorePostgres::claim_token_if_absent(const std::string& token,int exclude_id){
+  std::lock_guard<std::mutex> lock(mu_);
+  std::string sql="SELECT "+std::string(kColumns)+" FROM exams WHERE token=$1";
+  std::vector<std::string> p={token}; if(exclude_id>0){sql+=" AND id<>$2";p.push_back(std::to_string(exclude_id));} sql+=" LIMIT 1";
+  return query_exams(sql,p).empty();
+}
 void ExamStorePostgres::unclaim_token(const std::string&) {}
 bool ExamStorePostgres::update(int id,const std::function<void(models::Exam&)>& mutator){
   std::lock_guard<std::mutex> lock(mu_);

@@ -20,7 +20,16 @@
 #include <optional>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 namespace examvan::handlers::admin {
+
+/* P33-Eh: gate fail-closed jalur tulis voucher — PG dikonfigurasi (Config
+ * atau env DATABASE_URL) tapi tidak terjangkau → 503, BUKAN fake-200. */
+static bool pg_configured_from_env(){
+  bool pg_configured = !Config::load().database_url.empty();
+  if(!pg_configured){ if(auto* e=getenv("DATABASE_URL")) pg_configured=(*e)!='\0'; }
+  return pg_configured;
+}
 
 static std::string get_param(const std::map<std::string,std::string>& form, const std::string& key){
   auto it=form.find(key); return it!=form.end()? it->second : "";
@@ -148,8 +157,11 @@ static void with_pg(const std::function<void(examvan::db::RealPool&)>& fn){
 static bool voucher_usable(const std::string& is_active, const std::string& expires_at){
   if(is_active!="t") return false;
   if(!expires_at.empty()){
-    auto tp=helpers::parse_iso_utc(expires_at);
-    if(tp && *tp < std::chrono::system_clock::now()) return false;
+    /* P33-Ef: parser PG-aware ketat + fail-closed — parse gagal = voucher
+     * TIDAK usable (bukan melewati cek kedaluwarsa seperti dulu). */
+    auto tp=helpers::parse_pg_or_iso_utc(expires_at);
+    if(!tp) return false;
+    if(*tp < std::chrono::system_clock::now()) return false;
   }
   return true;
 }
@@ -303,6 +315,11 @@ Response create_voucher(const Request& req){
     Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Voucher berhasil dibuat\"}"); return r;
   }
 #endif
+  /* P33-Eh: PG dikonfigurasi tapi tidak terjangkau → fail-closed 503,
+   * jangan 200 palsu "Voucher berhasil dibuat". */
+  if(pg_configured_from_env()){
+    Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r;
+  }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Voucher berhasil dibuat\"}"); return r;
 }
 
@@ -387,6 +404,11 @@ Response toggle_voucher(const Request& req){
     Response r; r.json(200,"{\"success\":true,\"ok\":true,\"is_active\":"+result+",\"message\":\"Status voucher diubah\"}"); return r;
   }
 #endif
+  /* P33-Eh: PG dikonfigurasi tapi tidak terjangkau → fail-closed 503,
+   * jangan 200 palsu "Status voucher diubah". */
+  if(pg_configured_from_env()){
+    Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r;
+  }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Status voucher diubah\"}"); return r;
 }
 

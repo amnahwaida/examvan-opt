@@ -14,6 +14,8 @@ bool redis_ping(redisContext* c);
 bool redis_set(redisContext* c, const std::string& key, const std::string& val, int ttl_sec=300);
 bool redis_setnx(redisContext* c, const std::string& key, const std::string& val, int ttl_sec=60);
 std::string redis_get(redisContext* c, const std::string& key);
+// DEL key — true bila command terkirim tanpa error (1/0 kembalian diabaikan).
+bool redis_del(redisContext* c, const std::string& key);
 // Panjang list Redis (LLEN) — dipakai queue_status untuk antrean pending.
 long long redis_llen(redisContext* c, const std::string& key);
 

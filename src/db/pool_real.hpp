@@ -41,6 +41,9 @@ public:
   ~RealPool();
   bool connect();
   PgConnPtr acquire();
+  // P34-G3: PQconnectdb di luar mutex — dideklarasikan terpisah agar window
+  // acquire() bebas PQconnectdb (kontrak test P34).
+  PgConnPtr new_connection();
   void release(PGconn* c);
   bool ping();
   PgResultPtr exec_params(PGconn* c, const std::string& sql, const std::vector<std::string>& params);

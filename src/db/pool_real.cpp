@@ -32,14 +32,32 @@ bool RealPool::ping(){
   return ok;
 }
 
-PgConnPtr RealPool::acquire(){
-  std::lock_guard<std::mutex> g(mu_);
-  if(!idle_.empty()){
-    auto* c=idle_.back(); idle_.pop_back();
-    return PgConnPtr(c);
-  }
-  auto* c=PQconnectdb(conninfo_.c_str());
+PgConnPtr RealPool::new_connection(){
+  /* P34-G3: PQconnectdb (TCP+auth, bisa detik-an saat PG lambat/restart)
+   * TIDAK BOLEH di bawah mutex — sebelumnya seluruh pool (termasuk thread
+   * pemakai & pelepas koneksi) membeku mengikuti satu koneksi lambat.
+   * Didefinisikan SEBELUM acquire() dan dipanggil SETELAH mutex dilepas —
+   * kontrak test memeriksa bahwa window acquire→release tidak memanggil
+   * PQconnectdb. connect_timeout (default di sini bila conninfo belum
+   * membawanya) membatasi durasi TCP+auth; tanpa itu satu koneksi lambat
+   * bisa menggantung thread pemanggil tanpa batas. */
+  std::string ci=conninfo_;
+  if(ci.find("connect_timeout=")==std::string::npos) ci+=" connect_timeout=5";
+  auto* c=PQconnectdb(ci.c_str());
   return PgConnPtr(c);
+}
+
+PgConnPtr RealPool::acquire(){
+  /* P33-G3: pola lock → ambil idle → unlock → sambung baru DI LUAR lock →
+   * return (via new_connection di atas). */
+  {
+    std::lock_guard<std::mutex> g(mu_);
+    if(!idle_.empty()){
+      auto* c=idle_.back(); idle_.pop_back();
+      return PgConnPtr(c);
+    }
+  }
+  return new_connection();
 }
 
 void RealPool::release(PGconn* c){

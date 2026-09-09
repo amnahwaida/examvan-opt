@@ -7,7 +7,9 @@
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include <libpq-fe.h>
+#include <cstdlib>
 #endif
 
 namespace examvan::handlers::auth {
@@ -149,16 +151,13 @@ std::string get_setting(const std::string& key, const std::string& def){ return 
 #else
 
 #ifdef HAS_LIBPQ
-// Helper: buka RealPool dari env/config (kosong → PG tidak tersedia).
-static bool open_pool(examvan::db::RealPool& out){
-  auto cfg=Config::load();
-  std::string db=cfg.database_url;
-  if(db.empty()) if(auto* e=getenv("DATABASE_URL")) db=e;
-  if(db.empty()) return false;
-  std::string ci=pg_conninfo_from_url(db);
-  if(ci.empty()) ci=db;
-  out=examvan::db::RealPool(ci, 2);
-  return out.connect();
+/* P33: pool PROSES-WIDE — dulu setiap operasi auth membangun RealPool
+ * stack-lokal 2-koneksi (×7 operasi = churn + budget koneksi dobel dengan
+ * global_pool). fn dipanggil hanya bila PG terkonfigurasi & koneksi hidup;
+ * return false → PG tidak tersedia (pemanggil pakai fallback memori). */
+template <typename Fn>
+static bool with_pg(Fn&& fn){
+  return examvan::db::with_global_pg([&](examvan::db::RealPool& real){ fn(real); });
 }
 
 static bool row_to_user(const examvan::db::PgResultPtr& r, int i, RegisteredUser& out){
@@ -188,13 +187,14 @@ bool find_registered_user(const std::string& username, RegisteredUser& out){
   if(mem_find(username, out)) return true;
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return false;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
-    auto r=real.exec_params(c.get(), kSelectUserSql, {username});
-    bool ok=row_to_user(r, 0, out);
-    real.release(c.release());
+    bool ok=false;
+    with_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto r=real.exec_params(c.get(), kSelectUserSql, {username});
+      ok=row_to_user(r, 0, out);
+      real.release(c.release());
+    });
     return ok;
   }catch(...){}
 #endif
@@ -205,16 +205,17 @@ bool find_registered_user_by_email(const std::string& email, RegisteredUser& out
   if(mem_find_by_email(email, out)) return true;
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return false;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
-    auto r=real.exec_params(c.get(),
-      "SELECT id, username, COALESCE(email,''), password_hash, status, COALESCE(otp_code,''), "
-      "COALESCE(otp_attempts,0), COALESCE(EXTRACT(EPOCH FROM otp_expiry)::bigint,0) "
-      "FROM admin_users WHERE LOWER(email)=LOWER($1) AND email <> '' LIMIT 1",{email});
-    bool ok=row_to_user(r, 0, out);
-    real.release(c.release());
+    bool ok=false;
+    with_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto r=real.exec_params(c.get(),
+        "SELECT id, username, COALESCE(email,''), password_hash, status, COALESCE(otp_code,''), "
+        "COALESCE(otp_attempts,0), COALESCE(EXTRACT(EPOCH FROM otp_expiry)::bigint,0) "
+        "FROM admin_users WHERE LOWER(email)=LOWER($1) AND email <> '' LIMIT 1",{email});
+      ok=row_to_user(r, 0, out);
+      real.release(c.release());
+    });
     return ok;
   }catch(...){}
 #endif
@@ -225,17 +226,17 @@ int count_recent_registrations_by_ip(const std::string& ip){
   // Peta memori tidak melacak IP → fallback ke 0 (mode uji/dev tanpa PG).
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return 0;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return 0;
-    auto r=real.exec_params(c.get(),
-      "SELECT COUNT(*) FROM admin_users WHERE registered_ip=$1 AND created_at > now() - interval '24 hours'",{ip});
     int n=0;
-    if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0){
-      try{ n=std::stoi(PQgetvalue(r.get(),0,0)); }catch(...){}
-    }
-    real.release(c.release());
+    with_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto r=real.exec_params(c.get(),
+        "SELECT COUNT(*) FROM admin_users WHERE registered_ip=$1 AND created_at > now() - interval '24 hours'",{ip});
+      if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0){
+        try{ n=std::stoi(PQgetvalue(r.get(),0,0)); }catch(...){}
+      }
+      real.release(c.release());
+    });
     return n;
   }catch(...){}
 #endif
@@ -247,40 +248,39 @@ bool insert_registered_user(const RegisteredUser& u){
   bool pg_ok=false;
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(open_pool(real)){
+    with_pg([&](examvan::db::RealPool& real){
       auto c=real.acquire();
-      if(c && PQstatus(c.get())==CONNECTION_OK){
-        // Paritas Go CreateUser: kolom + kuota default dari saas_settings.
-        const char* sql=
-          "INSERT INTO admin_users (username,name,password_hash,status,instansi,role,"
-          "max_exams,max_pdf_size,max_concurrent_exams,max_storage_size,whatsapp_number,email,"
-          "expires_at,otp_code,otp_expiry,package,registered_ip,operator_created,created_by) "
-          "VALUES ($1,'',$2,$3,'personal','[\"guru\"]',$4,$5,$6,$7,'',$8,"
-          "now() + make_interval(days => $9),"
-          "$10, CASE WHEN $11::bigint>0 THEN to_timestamp($11) ELSE NULL END,"
-          "'free',$12,'false',0)";
-        std::vector<std::string> params={
-          u.username,            // $1
-          u.password_hash,       // $2
-          u.status,              // $3
-          std::to_string(u.max_exams),                 // $4
-          std::to_string(u.max_pdf_size),              // $5
-          std::to_string(u.max_concurrent_exams),      // $6
-          std::to_string(u.max_storage_size),          // $7
-          u.email,               // $8
-          std::to_string(u.active_days),               // $9
-          u.otp_code,            // $10
-          u.otp_expiry_epoch>0? std::to_string(u.otp_expiry_epoch):"0", // $11
-          u.registered_ip,       // $12
-        };
-        auto r=real.exec_params(c.get(), sql, params);
-        // INSERT tanpa RETURNING → status COMMAND_OK (bukan TUPLES_OK).
-        bool ok=r && (PQresultStatus(r.get())==PGRES_COMMAND_OK || PQresultStatus(r.get())==PGRES_TUPLES_OK);
-        if(ok){ pg_ok=true; real.release(c.release()); return true; }
-        real.release(c.release());
-      }
-    }
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      // Paritas Go CreateUser: kolom + kuota default dari saas_settings.
+      const char* sql=
+        "INSERT INTO admin_users (username,name,password_hash,status,instansi,role,"
+        "max_exams,max_pdf_size,max_concurrent_exams,max_storage_size,whatsapp_number,email,"
+        "expires_at,otp_code,otp_expiry,package,registered_ip,operator_created,created_by) "
+        "VALUES ($1,'',$2,$3,'personal','[\"guru\"]',$4,$5,$6,$7,'',$8,"
+        "now() + make_interval(days => $9),"
+        "$10, CASE WHEN $11::bigint>0 THEN to_timestamp($11) ELSE NULL END,"
+        "'free',$12,'false',0)";
+      std::vector<std::string> params={
+        u.username,            // $1
+        u.password_hash,       // $2
+        u.status,              // $3
+        std::to_string(u.max_exams),                 // $4
+        std::to_string(u.max_pdf_size),              // $5
+        std::to_string(u.max_concurrent_exams),      // $6
+        std::to_string(u.max_storage_size),          // $7
+        u.email,               // $8
+        std::to_string(u.active_days),               // $9
+        u.otp_code,            // $10
+        u.otp_expiry_epoch>0? std::to_string(u.otp_expiry_epoch):"0", // $11
+        u.registered_ip,       // $12
+      };
+      auto r=real.exec_params(c.get(), sql, params);
+      // INSERT tanpa RETURNING → status COMMAND_OK (bukan TUPLES_OK).
+      bool ok=r && (PQresultStatus(r.get())==PGRES_COMMAND_OK || PQresultStatus(r.get())==PGRES_TUPLES_OK);
+      if(ok) pg_ok=true;
+      real.release(c.release());
+    });
+    if(pg_ok) return true;
   }catch(...){}
 #endif
   (void)pg_ok;
@@ -293,16 +293,17 @@ bool update_user_otp(const std::string& username, const std::string& otp_code, l
   if(mem_find(username, u)) return mem_update_otp(username, otp_code, otp_expiry_epoch);
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return false;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
-    auto r=real.exec_params(c.get(),
-      "UPDATE admin_users SET otp_code=$1, otp_expiry=to_timestamp($2::bigint), otp_attempts=0 "
-      "WHERE LOWER(username)=LOWER($3)",
-      {otp_code, std::to_string(otp_expiry_epoch), username});
-    bool ok=r && PQresultStatus(r.get())==PGRES_COMMAND_OK;
-    real.release(c.release());
+    bool ok=false;
+    with_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto r=real.exec_params(c.get(),
+        "UPDATE admin_users SET otp_code=$1, otp_expiry=to_timestamp($2::bigint), otp_attempts=0 "
+        "WHERE LOWER(username)=LOWER($3)",
+        {otp_code, std::to_string(otp_expiry_epoch), username});
+      ok=r && PQresultStatus(r.get())==PGRES_COMMAND_OK;
+      real.release(c.release());
+    });
     return ok;
   }catch(...){}
 #endif
@@ -314,15 +315,16 @@ bool activate_registered_user(const std::string& username){
   if(mem_find(username, u)) return mem_activate(username);
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return false;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
-    auto r=real.exec_params(c.get(),
-      "UPDATE admin_users SET status='active', otp_code=NULL, otp_expiry=NULL WHERE LOWER(username)=LOWER($1)",
-      {username});
-    bool ok=r && PQresultStatus(r.get())==PGRES_COMMAND_OK;
-    real.release(c.release());
+    bool ok=false;
+    with_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto r=real.exec_params(c.get(),
+        "UPDATE admin_users SET status='active', otp_code=NULL, otp_expiry=NULL WHERE LOWER(username)=LOWER($1)",
+        {username});
+      ok=r && PQresultStatus(r.get())==PGRES_COMMAND_OK;
+      real.release(c.release());
+    });
     return ok;
   }catch(...){}
 #endif
@@ -334,20 +336,20 @@ int bump_otp_attempts(const std::string& username){
   if(mem_find(username, u)) return mem_bump_attempts(username);
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return -1;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return -1;
-    // M6: increment atomik + RETURNING — handler mendapat JUMLAH BARU, bukan
-    // bool, sehingga keputusan disable tidak bergantung pada baca yang basi.
-    auto r=real.exec_params(c.get(),
-      "UPDATE admin_users SET otp_attempts = otp_attempts + 1 WHERE LOWER(username)=LOWER($1) RETURNING otp_attempts",
-      {username});
     int n=-1;
-    if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0){
-      try{ n=std::stoi(PQgetvalue(r.get(),0,0)); }catch(...){ n=-1; }
-    }
-    real.release(c.release());
+    with_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      // M6: increment atomik + RETURNING — handler mendapat JUMLAH BARU, bukan
+      // bool, sehingga keputusan disable tidak bergantung pada baca yang basi.
+      auto r=real.exec_params(c.get(),
+        "UPDATE admin_users SET otp_attempts = otp_attempts + 1 WHERE LOWER(username)=LOWER($1) RETURNING otp_attempts",
+        {username});
+      if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0){
+        try{ n=std::stoi(PQgetvalue(r.get(),0,0)); }catch(...){ n=-1; }
+      }
+      real.release(c.release());
+    });
     return n;
   }catch(...){}
 #endif
@@ -359,16 +361,17 @@ bool update_user_password(const std::string& username, const std::string& passwo
   if(mem_find(username, u)) return mem_update_password(username, password_hash);
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return false;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
-    auto r=real.exec_params(c.get(),
-      "UPDATE admin_users SET password_hash=$1, otp_code=NULL, otp_expiry=NULL, otp_attempts=0 "
-      "WHERE LOWER(username)=LOWER($2)",
-      {password_hash, username});
-    bool ok=r && PQresultStatus(r.get())==PGRES_COMMAND_OK;
-    real.release(c.release());
+    bool ok=false;
+    with_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto r=real.exec_params(c.get(),
+        "UPDATE admin_users SET password_hash=$1, otp_code=NULL, otp_expiry=NULL, otp_attempts=0 "
+        "WHERE LOWER(username)=LOWER($2)",
+        {password_hash, username});
+      ok=r && PQresultStatus(r.get())==PGRES_COMMAND_OK;
+      real.release(c.release());
+    });
     return ok;
   }catch(...){}
 #endif
@@ -380,14 +383,15 @@ bool delete_registered_user(const std::string& username){
   if(mem_find(username, u)) return mem_delete(username);
 #ifdef HAS_LIBPQ
   try{
-    examvan::db::RealPool real;
-    if(!open_pool(real)) return false;
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
-    auto r=real.exec_params(c.get(),
-      "DELETE FROM admin_users WHERE LOWER(username)=LOWER($1)", {username});
-    bool ok=r && PQresultStatus(r.get())==PGRES_COMMAND_OK;
-    real.release(c.release());
+    bool ok=false;
+    with_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto r=real.exec_params(c.get(),
+        "DELETE FROM admin_users WHERE LOWER(username)=LOWER($1)", {username});
+      ok=r && PQresultStatus(r.get())==PGRES_COMMAND_OK;
+      real.release(c.release());
+    });
     return ok;
   }catch(...){}
 #endif
@@ -416,17 +420,15 @@ std::string get_setting(const std::string& key, const std::string& def){
     }
     // Muat ulang (di luar kunci — satu pemenang, sisanya pakai cache lama).
     std::unordered_map<std::string,std::string> fresh;
-    examvan::db::RealPool real;
-    if(open_pool(real)){
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
       auto c=real.acquire();
-      if(c && PQstatus(c.get())==CONNECTION_OK){
-        auto r=real.exec_params(c.get(),"SELECT key,value FROM saas_settings",{});
-        if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
-          for(int i=0;i<PQntuples(r.get());i++) fresh[PQgetvalue(r.get(),i,0)]=PQgetvalue(r.get(),i,1);
-        }
-        real.release(c.release());
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto r=real.exec_params(c.get(),"SELECT key,value FROM saas_settings",{});
+      if(r && PQresultStatus(r.get())==PGRES_TUPLES_OK){
+        for(int i=0;i<PQntuples(r.get());i++) fresh[PQgetvalue(r.get(),i,0)]=PQgetvalue(r.get(),i,1);
       }
-    }
+      real.release(c.release());
+    });
     {
       std::lock_guard<std::mutex> g(mu);
       if(!fresh.empty()){ cache=std::move(fresh); loaded=now; ever_loaded=true; }

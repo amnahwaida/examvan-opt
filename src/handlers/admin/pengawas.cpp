@@ -117,25 +117,19 @@ Response pengawas_exams(const Request& req){
   (void)is_priv; (void)is_super; (void)caller_instansi;
 #ifdef HAS_LIBPQ
   {
-    auto cfg2=Config::load();
-    std::string db2=cfg2.database_url;
-    if(db2.empty()) if(auto* e=getenv("DATABASE_URL")) db2=e;
-    if(!db2.empty()){
-      examvan::DbPool p2(db2, 2);
-      examvan::db::RealPool rp2(examvan::conninfo_from_url_or_raw(p2.url), 2);
-      if(auto c2=rp2.acquire()){
-        if(PQstatus(c2.get())==CONNECTION_OK){
-          auto me=rp2.exec_params(c2.get(),"SELECT role, COALESCE(instansi,'') FROM admin_users WHERE id=$1",{std::to_string(uid)});
-          if(me && PQresultStatus(me.get())==PGRES_TUPLES_OK && PQntuples(me.get())>0){
-            std::string role=PQgetvalue(me.get(),0,0);
-            caller_instansi=PQgetvalue(me.get(),0,1);
-            if(role.find("superadmin")!=std::string::npos){ is_priv=true; is_super=true; }
-            else if(role.find("operator")!=std::string::npos){ is_priv=true; }
-          }
-        }
-        rp2.release(c2.release());
+    /* P34: pool proses-wide (global_pool) — bukan RealPool stack-lokal. */
+    examvan::db::with_global_pg([&](examvan::db::RealPool& rp2){
+      auto c2=rp2.acquire();
+      if(!c2 || PQstatus(c2.get())!=CONNECTION_OK) return;
+      auto me=rp2.exec_params(c2.get(),"SELECT role, COALESCE(instansi,'') FROM admin_users WHERE id=$1",{std::to_string(uid)});
+      if(me && PQresultStatus(me.get())==PGRES_TUPLES_OK && PQntuples(me.get())>0){
+        std::string role=PQgetvalue(me.get(),0,0);
+        caller_instansi=PQgetvalue(me.get(),0,1);
+        if(role.find("superadmin")!=std::string::npos){ is_priv=true; is_super=true; }
+        else if(role.find("operator")!=std::string::npos){ is_priv=true; }
       }
-    }
+      rp2.release(c2.release());
+    });
   }
   std::string arr="[]";
   bool got=false;

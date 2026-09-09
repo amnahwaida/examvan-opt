@@ -21,6 +21,8 @@ public:
   std::vector<models::Exam> list_all() override;
   bool token_exists(const std::string& token, int exclude_id = 0) override;
   bool claim_token(const std::string& token) override;
+  // P35-D3: atomik — kolisi exam lain (id<>exclude_id) → false.
+  bool claim_token_if_absent(const std::string& token, int exclude_id) override;
   void unclaim_token(const std::string& token) override;
   bool update(int id, const std::function<void(models::Exam&)>& mutator) override;
   bool remove(int id) override;

@@ -30,6 +30,7 @@
 #ifdef HAS_LIBPQ
 #include "db/pool_real.hpp"
 #include "db/pool.hpp"
+#include "db/pool_global.hpp"
 #endif
 #include <fstream>
 #include <sstream>
@@ -83,27 +84,22 @@ void register_full_routes(Router& r, const Config& cfg){
       // saat PG tidak dikonfigurasi/tak terjangkau (dev in-memory, unit test).
 #ifdef HAS_LIBPQ
       {
+        /* P33-F5: pool proses-wide (dulu RealPool 1-koneksi per request). */
         bool pg_up=false, pg_ok=true;
         try{
-          std::string db_url=Config::load().database_url;
-          if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-          if(!db_url.empty()){
-            std::string ci=pg_conninfo_from_url(db_url);
-            if(ci.empty()) ci=db_url;
-            examvan::db::RealPool real(ci, 1);
-            if(real.connect()){
-              if(auto c=real.acquire()){
-                pg_up=true;
-                auto res=real.exec_params(c.get(),"SELECT status FROM admin_users WHERE id=$1",{std::to_string(sess.admin_id)});
-                if(!res || PQresultStatus(res.get())!=PGRES_TUPLES_OK || PQntuples(res.get())==0){
-                  pg_ok=false; // user sudah dihapus
-                } else {
-                  std::string st=PQgetvalue(res.get(),0,0);
-                  if(st!="active") pg_ok=false; // suspended / pending_otp
-                }
-              }
+          examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+            pg_up=true;
+            auto c=real.acquire();
+            if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+            auto res=real.exec_params(c.get(),"SELECT status FROM admin_users WHERE id=$1",{std::to_string(sess.admin_id)});
+            if(!res || PQresultStatus(res.get())!=PGRES_TUPLES_OK || PQntuples(res.get())==0){
+              pg_ok=false; // user sudah dihapus
+            } else {
+              std::string st=PQgetvalue(res.get(),0,0);
+              if(st!="active") pg_ok=false; // suspended / pending_otp
             }
-          }
+            real.release(c.release());
+          });
         }catch(...){}
         if(pg_up && !pg_ok){
           Response rr; rr.status=401; rr.json(401,"{\"success\":false,\"message\":\"unauthorized\"}"); return rr;
@@ -167,18 +163,16 @@ void register_full_routes(Router& r, const Config& cfg){
               owner_ok=e->created_by==sess.admin_id || (e->delegated_to && *e->delegated_to==sess.admin_id);
 #ifdef HAS_LIBPQ
               if(scope=="exam_access" || models::has_role(sess.role,models::kRoleOperator)){
-                std::string db_url=Config::load().database_url;
-                if(db_url.empty()) if(auto* env=getenv("DATABASE_URL")) db_url=env;
-                if(!db_url.empty()){
-                  std::string ci=pg_conninfo_from_url(db_url); if(ci.empty()) ci=db_url;
-                  examvan::db::RealPool real(ci,2);
-                  if(real.connect()) if(auto c=real.acquire()){
+                /* P33-F5: pool proses-wide. */
+                examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+                  if(auto c=real.acquire()){
                     auto access=real.exec_params(c.get(),
                       "SELECT EXISTS(SELECT 1 FROM exam_pengawas WHERE exam_id=$1 AND user_id=$2) OR EXISTS(SELECT 1 FROM admin_users me JOIN admin_users owner ON owner.id=$3 WHERE me.id=$2 AND me.role ILIKE '%\\\"operator\\\"%' AND me.instansi<>'' AND me.instansi<>'personal' AND me.instansi=owner.instansi)",
                       {std::to_string(exam_id),std::to_string(sess.admin_id),std::to_string(e->created_by)});
                     if(access && PQresultStatus(access.get())==PGRES_TUPLES_OK && PQntuples(access.get())>0 && std::string(PQgetvalue(access.get(),0,0))=="t") owner_ok=true;
+                    real.release(c.release());
                   }
-                }
+                });
               }
 #endif
             }
@@ -200,27 +194,22 @@ void register_full_routes(Router& r, const Config& cfg){
         if(!sub_ok && !sid.empty()){
 #ifdef HAS_LIBPQ
           try{
-            std::string db_url=Config::load().database_url;
-            if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-            if(!db_url.empty()){
-              std::string ci=pg_conninfo_from_url(db_url);
-              if(ci.empty()) ci=db_url;
-              examvan::db::RealPool real(ci, 2);
-              if(real.connect()){
-                if(auto c=real.acquire()){
-                  auto res=real.exec_params(c.get(),
-                    "SELECT exam_id FROM submissions WHERE id=$1",{sid});
-                  if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0){
-                    int exam_id=0; try{ exam_id=std::stoi(PQgetvalue(res.get(),0,0)); }catch(...){}
-                    auto e=store::active_store()->get_by_id(exam_id);
-                    if(e){
-                      if(e->created_by==sess.admin_id) sub_ok=true;
-                      if(!sub_ok && e->delegated_to && *e->delegated_to==sess.admin_id) sub_ok=true;
-                    }
+            /* P33-F5: pool proses-wide. */
+            examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+              if(auto c=real.acquire()){
+                auto res=real.exec_params(c.get(),
+                  "SELECT exam_id FROM submissions WHERE id=$1",{sid});
+                if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0){
+                  int exam_id=0; try{ exam_id=std::stoi(PQgetvalue(res.get(),0,0)); }catch(...){}
+                  auto e=store::active_store()->get_by_id(exam_id);
+                  if(e){
+                    if(e->created_by==sess.admin_id) sub_ok=true;
+                    if(!sub_ok && e->delegated_to && *e->delegated_to==sess.admin_id) sub_ok=true;
                   }
                 }
+                real.release(c.release());
               }
-            }
+            });
           }catch(...){}
 #endif
         }
@@ -321,7 +310,10 @@ void register_full_routes(Router& r, const Config& cfg){
    alur-public). Halaman /hasil memakai endpoint ini juga. */
   static middleware::RateLimiter g_hasil_api_rl(30, std::chrono::minutes(1));
   r.add("GET","/api/hasil/:token", rl_wrap(g_hasil_api_rl, handlers::public_::cek_hasil_api));
-  r.add("POST","/api/webhook", handlers::api::webhook);
+  /* P33-F1(d): webhook OTP wajib di-rate-limit per-IP (anti brute-force
+   * OTP sustained; paritas jalur /login & /register). */
+  static middleware::RateLimiter g_webhook_rl(20, std::chrono::minutes(1));
+  r.add("POST","/api/webhook", rl_wrap(g_webhook_rl, handlers::api::webhook));
 
   auto check_auth=[cfg](const Request& req)->bool{
     auto it=req.headers.find("Cookie");
@@ -332,18 +324,17 @@ void register_full_routes(Router& r, const Config& cfg){
     auto parsed=cfg.secret_prev.empty()?verify_session_cookie(cfg.secret_key,it->second):verify_session_cookie_dual(cfg.secret_key,cfg.secret_prev,it->second);
     if(!parsed || parsed->admin_id<=0) return false;
 #ifdef HAS_LIBPQ
-    std::string db_url=Config::load().database_url;
-    if(db_url.empty()) if(auto* env=getenv("DATABASE_URL")) db_url=env;
-    if(!db_url.empty()){
-      try{
-        std::string ci=pg_conninfo_from_url(db_url); if(ci.empty()) ci=db_url;
-        examvan::db::RealPool real(ci,1);
-        if(!real.connect()) return false;
-        if(auto c=real.acquire()){
-          auto r=real.exec_params(c.get(),"SELECT status FROM admin_users WHERE id=$1",{std::to_string(parsed->admin_id)});
-          if(!r || PQresultStatus(r.get())!=PGRES_TUPLES_OK || PQntuples(r.get())==0 || std::string(PQgetvalue(r.get(),0,0))!="active") return false;
-        } else return false;
-      }catch(...){ return false; }
+    /* P33-F5: pool proses-wide (dulu RealPool 1-koneksi per request auth). */
+    {
+      auto* pool=examvan::db::global_pool();
+      if(pool){
+        auto c=pool->acquire();
+        if(!c || PQstatus(c.get())!=CONNECTION_OK) return false;
+        auto r=pool->exec_params(c.get(),"SELECT status FROM admin_users WHERE id=$1",{std::to_string(parsed->admin_id)});
+        bool active=r && PQresultStatus(r.get())==PGRES_TUPLES_OK && PQntuples(r.get())>0 && std::string(PQgetvalue(r.get(),0,0))=="active";
+        pool->release(c.release());
+        return active;
+      }
     }
 #endif
     return true;

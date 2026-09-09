@@ -2,6 +2,7 @@
 #include "config/config.hpp"
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include "redis/client.hpp"
 #include "store/exam_store.hpp"
 #include "helpers/utils.hpp"
@@ -60,13 +61,16 @@ void run_approval_cleanup(){
   auto cfg = examvan::Config::load();
   RedisClient redis(cfg.redis_url);
   if(!redis.try_acquire_job("approval_cleanup",1800)) return;
-  DbPool pool(cfg.database_url,60);
+  (void)cfg;
 #ifdef HAS_LIBPQ
-  db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),60);
-  if(auto c=real.acquire()){
-    // Paritas Go models.PurgeStaleExamApprovals — tabel = exam_approvals
-    // (bukan approvals; tidak ada kolom expires_at di schema Go). Rejected
-    // TIDAK pernah disentuh; submissions & access logs juga tidak.
+  /* P34: pool proses-wide (global_pool) — bukan RealPool stack-lokal per job.
+   * Semua statement via PQexecParams/exec_params (libpq) pada koneksi pool:
+   * DELETE FROM exam_approvals ... (paritas Go models.PurgeStaleExamApprovals —
+   * tabel = exam_approvals, bukan approvals; tidak ada kolom expires_at di
+   * schema Go). DbPool lama digantikan global_pool. */
+  examvan::db::with_global_pg([&](db::RealPool& real){
+    auto c=real.acquire();
+    if(!c || PQstatus(c.get())!=CONNECTION_OK){ return; }
     real.exec_params(c.get(),
       "DELETE FROM exam_approvals a USING exams e WHERE a.exam_id=e.id AND a.status='pending' AND e.end_time IS NOT NULL AND e.end_time < now() - interval '1 hour'",{});
     real.exec_params(c.get(),
@@ -75,9 +79,8 @@ void run_approval_cleanup(){
       "DELETE FROM exam_approvals a USING exams e WHERE a.exam_id=e.id AND a.status='pending' AND e.status='inactive' AND a.created_at < now() - interval '24 hours'",{});
     real.exec_params(c.get(),
       "DELETE FROM exam_approvals a USING exams e WHERE a.exam_id=e.id AND a.status='approved' AND e.status='inactive' AND a.created_at < now() - interval '24 hours'",{});
-  }
-#else
-  (void)pool;
+    real.release(c.release());
+  });
 #endif
   redis.release_job("approval_cleanup");
 }
@@ -85,20 +88,21 @@ void run_access_log_retention(){
   auto cfg = examvan::Config::load();
   RedisClient redis(cfg.redis_url);
   if(!redis.try_acquire_job("access_log_retention",86400)) return;
-  DbPool pool(cfg.database_url,60);
+  (void)cfg;
 #ifdef HAS_LIBPQ
-  db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),60);
-  if(auto c=real.acquire()){
-    // Paritas Go PurgeOldStudentAccessLogs — tabel = student_access_logs
-    // (bukan access_log). Transaksional via libpq: BEGIN → DELETE → COMMIT.
+  /* P34: pool proses-wide (global_pool) — bukan RealPool stack-lokal per job.
+   * Paritas Go PurgeOldStudentAccessLogs — tabel = student_access_logs
+   * (bukan access_log). Transaksional via PQexecParams (libpq):
+   * BEGIN → DELETE → COMMIT pada koneksi pool DbPool/global_pool. */
+  examvan::db::with_global_pg([&](db::RealPool& real){
+    auto c=real.acquire();
+    if(!c || PQstatus(c.get())!=CONNECTION_OK){ return; }
     real.exec_params(c.get(),"BEGIN",{});
     real.exec_params(c.get(),"DELETE FROM student_access_logs WHERE created_at < now() - interval '90 days'",{});
     real.exec_params(c.get(),"COMMIT",{});
-  }
-#else
-  (void)pool;
+    real.release(c.release());
+  });
 #endif
-  // PQexecParams
   redis.release_job("access_log_retention");
 }
 } // namespace examvan::jobs

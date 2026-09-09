@@ -140,6 +140,9 @@ public:
 private:
   void run_worker(int id);
   void run_batch();
+  /* P33-G2: requeue TERCEK — LPUSH gagal → failed-queue + JobResult jejak
+   * (bukan job hilang diam-diam saat Redis blip). */
+  bool checked_requeue(const SubmissionJob& job, const std::optional<double>& score);
   SubmissionQueue* queue_;
   std::function<std::optional<double>(const SubmissionJob&)> scorer_;
   std::atomic<bool> running_{false};

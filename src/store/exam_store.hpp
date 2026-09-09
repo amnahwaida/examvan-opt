@@ -53,6 +53,11 @@ public:
   // Juga cek terhadap exams_[] token yang sudah ada (termasuk custom token).
   // Mengembalikan false jika sudah ada (collision).
   virtual bool claim_token(const std::string& token) = 0;
+  // P35-D3: claim ATOMIK di bawah lock store — false bila token dipakai
+  // exam lain (id<>exclude_id). Mengganti pola token_exists → update →
+  // claim_token di handler edit-token (TOCTOU: dua admin lolos cek lalu dua
+  // ujian aktif berbagi token; kegagalan claim juga ditelan diam-diam).
+  virtual bool claim_token_if_absent(const std::string& token, int exclude_id = 0) = 0;
 
   // Lepaskan token dari seen_tokens_ (dipanggil setelah claim_token sukses
   // namun operasi berikutnya gagal).

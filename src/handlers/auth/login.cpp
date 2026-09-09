@@ -16,6 +16,7 @@
 #include <chrono>
 #ifdef HAS_LIBPQ
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include "db/pool.hpp"
 #endif
 
@@ -207,8 +208,9 @@ Response login_handler(const Request& req, const Config& cfg){
       if(!db_url.empty()){
         std::string ci=pg_conninfo_from_url(db_url);
         if(ci.empty()) ci=db_url;
-        db::RealPool pool(ci, 2);
-        if(pool.connect()){
+        /* P34: pool proses-wide (global_pool) — bukan RealPool stack-lokal
+         * per percobaan login (churn TCP+auth tiap request). */
+        examvan::db::with_global_pg([&](db::RealPool& pool){
           if(auto c=pool.acquire()){
             // Ambil id + role ASLI (bukan hanya password_hash): session harus
             // membawa identitas user sungguhan, bukan admin_id=1 hardcoded.
@@ -227,7 +229,7 @@ Response login_handler(const Request& req, const Config& cfg){
               }
             }
           }
-        }
+        });
       }
     }catch(...){}
 #endif

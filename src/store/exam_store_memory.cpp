@@ -66,6 +66,21 @@ bool ExamStoreMemory::claim_token(const std::string& token){
   return true;
 }
 
+/* P35-D3: claim ATOMIK di bawah satu lock — dipakai handler edit-token
+ * (claim SEBELUM mutasi store). Bila token dipakai exam lain (id tidak
+ * sama dengan exclude_id) → false TANPA menambah seen_tokens_; bila
+ * exclude_id mengenai diri sendiri → re-claim sah. */
+bool ExamStoreMemory::claim_token_if_absent(const std::string& token, int exclude_id){
+  std::lock_guard<std::mutex> g(mu_);
+  if(seen_tokens_.count(token)) return false;
+  for(auto& e: exams_){
+    if(exclude_id>0 && e.id==exclude_id) continue;
+    if(e.token==token) return false;
+  }
+  seen_tokens_.insert(token);
+  return true;
+}
+
 void ExamStoreMemory::unclaim_token(const std::string& token){
   std::lock_guard<std::mutex> g(mu_);
   seen_tokens_.erase(token);

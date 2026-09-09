@@ -20,6 +20,7 @@
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #endif
 #include <string>
 #include <algorithm>
@@ -190,20 +191,22 @@ static std::string json_escape(const std::string& s){
 // INSERT gagal.
 static bool persist_submission_pending(const queue::SubmissionJob& job){
 #ifdef HAS_LIBPQ
+  /* P33-F5: pool proses-wide (dulu pool stack 2-koneksi per submit). */
   try{
-    auto cfg=Config::load();
-    if(cfg.database_url.empty()) return true;
-    examvan::DbPool pool(cfg.database_url, 2);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 2);
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return true;
-    auto res=real.exec_params(c.get(),
-      "INSERT INTO submissions (job_id,exam_id,student_name,exam_number,student_class,answers_json,start_time,mac_address,identity_data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (exam_id, mac_address) DO NOTHING",
-      {job.job_id, std::to_string(job.exam_id), job.student_name, job.exam_number,
-       job.student_class, map_to_json_local(job.answers), job.start_time,
-       job.mac_address, map_to_json_local(job.identity_data)});
-    bool ok=res && (PQresultStatus(res.get())==PGRES_COMMAND_OK || PQresultStatus(res.get())==PGRES_TUPLES_OK);
-    real.release(c.release());
+    bool pg_used=false, ok=false;
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+      pg_used=true;
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto res=real.exec_params(c.get(),
+        "INSERT INTO submissions (job_id,exam_id,student_name,exam_number,student_class,answers_json,start_time,mac_address,identity_data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (exam_id, mac_address) DO NOTHING",
+        {job.job_id, std::to_string(job.exam_id), job.student_name, job.exam_number,
+         job.student_class, map_to_json_local(job.answers), job.start_time,
+         job.mac_address, map_to_json_local(job.identity_data)});
+      ok=res && (PQresultStatus(res.get())==PGRES_COMMAND_OK || PQresultStatus(res.get())==PGRES_TUPLES_OK);
+      real.release(c.release());
+    });
+    if(!pg_used) return true; // memory/test tanpa DATABASE_URL
     return ok;
   }catch(...){ return false; }
 #else
@@ -397,33 +400,41 @@ void set_device_approved_hook_for_test(std::function<bool(int, const std::string
 static bool device_approved(int exam_id, const std::string& mac){
   if(g_device_approved_hook) return g_device_approved_hook(exam_id, mac);
 #ifdef HAS_LIBPQ
+  /* P33-F5: pool proses-wide. */
   try{
-    auto cfg=Config::load();
-    examvan::DbPool pool(cfg.database_url, 10);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-    if(auto c=real.acquire()){
+    bool found=false, approved=false;
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
       auto res=real.exec_params(c.get(),
         "SELECT status FROM exam_approvals WHERE exam_id=$1 AND mac_address=$2",
         {std::to_string(exam_id), mac});
-      if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0)
-        return std::string(PQgetvalue(res.get(),0,0))=="approved";
-    }
+      if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0){
+        found=true;
+        approved=std::string(PQgetvalue(res.get(),0,0))=="approved";
+      }
+      real.release(c.release());
+    });
+    if(found) return approved;
   }catch(...){}
 #endif
   (void)exam_id;(void)mac; return false;
 }
 static bool device_has_approval(int exam_id, const std::string& mac){
 #ifdef HAS_LIBPQ
+  /* P33-F5: pool proses-wide. */
   try{
-    auto cfg=Config::load();
-    examvan::DbPool pool(cfg.database_url, 10);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-    if(auto c=real.acquire()){
+    bool has=false;
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
       auto res=real.exec_params(c.get(),
         "SELECT 1 FROM exam_approvals WHERE exam_id=$1 AND mac_address=$2 LIMIT 1",
         {std::to_string(exam_id), mac});
-      if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0) return true;
-    }
+      if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0) has=true;
+      real.release(c.release());
+    });
+    if(has) return true;
   }catch(...){}
 #endif
   (void)exam_id;(void)mac; return false;
@@ -560,9 +571,8 @@ Response request_approval(const Request& req){
   // ---- Persist ke exam_approvals (best-effort; paritas Go SQL) ----
 #ifdef HAS_LIBPQ
   try{
-    auto cfg_db=Config::load();
-    examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
+    /* P33-F5: pool proses-wide. */
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
     if(auto c=real.acquire()){
       // Cap approved per exam (paritas Go: saas_settings max_approvals_per_exam,
       // default 500) — cegah token bocor mencetak device approved tak terbatas.
@@ -605,6 +615,7 @@ Response request_approval(const Request& req){
       real.exec_params(c.get(),"COMMIT",{});
       real.release(c.release());
     }
+    });
   }catch(...){ /* best-effort: status fallback (pending/approved) tetap dipakai */ }
 #endif
 #ifdef HAS_PROTOBUF
@@ -673,9 +684,8 @@ Response exam_by_token(const Request& req){
       bool pg_rotated=false, pg_fresh=false;
 #ifdef HAS_LIBPQ
       try{
-        auto cfg_db=Config::load();
-        examvan::DbPool pool(cfg_db.database_url, 10);
-        examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
+        /* P33-F5: pool proses-wide. */
+        examvan::db::with_global_pg([&](examvan::db::RealPool& real){
         if(auto c=real.acquire()){
           real.exec_params(c.get(),"BEGIN",{});
           auto cur=real.exec_params(c.get(),
@@ -705,6 +715,7 @@ Response exam_by_token(const Request& req){
           }
           real.release(c.release());
         }
+        });
       }catch(...){ pg_rotated=false; pg_fresh=false; }
 #endif
       if(pg_rotated){
@@ -1127,12 +1138,12 @@ Response exam_result(const Request& req){
   }
   // --- Fallback DB: submission yang sudah ditulis worker (Redis result bisa
   //     kedaluwarsa). Butuh job_id (rahasia per-submission) + mac. ---
+  Response result{}; // P33-F5: respons dari lambda pool-global
   if(!job_id.empty() && mac!="unknown" && !mac.empty()){
 #ifdef HAS_LIBPQ
     try{
-      auto cfg=Config::load();
-      examvan::DbPool pool(cfg.database_url, 10);
-      examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
+      /* P33-F5: pool proses-wide. */
+      examvan::db::with_global_pg([&](examvan::db::RealPool& real){
       if(auto c=real.acquire()){
         auto res=real.exec_params(c.get(),
           "SELECT score FROM submissions WHERE job_id=$1 AND exam_id=$2 AND mac_address=$3 AND answers_json IS NOT NULL AND answers_json != ''"
@@ -1141,13 +1152,17 @@ Response exam_result(const Request& req){
         if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0){
           std::string score=PQgetvalue(res.get(),0,0);
           if(!score.empty()){
+            real.release(c.release());
             Response r; r.status=200;
             r.json(200,"{\"success\":true,\"status\":\"done\",\"score\":"+score+",\"message\":\"Jawaban berhasil disimpan\"}");
-            return r;
+            result=std::move(r);
+            return;
           }
         }
         real.release(c.release());
       }
+      });
+      if(result.status!=0) return result;
     }catch(...){}
 #endif
     (void)identity;
@@ -1266,9 +1281,8 @@ Response access_log(const Request& req){
   // Gagal insert TIDAK menggagalkan response — response tetap 200 logged.
 #ifdef HAS_LIBPQ
   try{
-    auto cfg_db=Config::load();
-    examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
+    /* P33-F5: pool proses-wide. */
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
     if(auto c=real.acquire()){
       // Paritas Go: heartbeat TIDAK ditulis ke DB (Redis-only, hemat IO).
       // Kolom = schema Go student_access_logs (student_identifier = mac).
@@ -1280,6 +1294,7 @@ Response access_log(const Request& req){
       }
       real.release(c.release());
     }
+    });
   }catch(...){ /* best-effort: jangan sampai access-log mematikan handler */ }
 #endif
   // Heartbeat presence (paritas Go setStudentHeartbeat + LPUSH): SET

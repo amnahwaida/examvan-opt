@@ -20,7 +20,17 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <cstdlib>
 namespace examvan::handlers::admin {
+
+/* P33-Ea: gate fail-closed jalur tulis admin — PG dikonfigurasi (Config atau
+ * env DATABASE_URL) tapi tidak terjangkau → pemanggil wajib 503, BUKAN
+ * fake-200 (pola M9 pass-20, diperluas ke seluruh handler tulis users.cpp). */
+static bool pg_configured_from_env(){
+  bool pg_configured = !Config::load().database_url.empty();
+  if(!pg_configured){ if(auto* e=getenv("DATABASE_URL")) pg_configured=(*e)!='\0'; }
+  return pg_configured;
+}
 
 static std::string get_param(const std::map<std::string,std::string>& form, const std::string& key){
   auto it=form.find(key); return it!=form.end()? it->second : "";
@@ -482,6 +492,9 @@ Response edit_user(const Request& req){
   if(result=="__updfail__"){ Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"Gagal menyimpan user\"}"); return r; }
   if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"User berhasil diperbarui\"}"); return r; }
 #endif
+  /* P33-Ea: PG dikonfigurasi tapi tidak terjangkau → fail-closed 503;
+   * 200 hanya untuk mode memory/dev (tanpa DATABASE_URL). */
+  if(pg_configured_from_env()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"User berhasil diperbarui\"}"); return r;
 }
 
@@ -517,6 +530,8 @@ Response delete_user(const Request& req){
   if(result=="__fail__"){ Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"Gagal menghapus user\"}"); return r; }
   if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"User berhasil dihapus\"}"); return r; }
 #endif
+  /* P33-Ea: fail-closed 503 saat PG dikonfigurasi tapi down. */
+  if(pg_configured_from_env()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"User berhasil dihapus\"}"); return r;
 }
 
@@ -562,6 +577,8 @@ Response user_toggle_status(const Request& req){
     Response r; r.json(200,"{\"success\":true,\"ok\":true,\"status\":\""+result+"\",\"message\":\"Status user diubah menjadi "+result+"\"}"); return r;
   }
 #endif
+  /* P33-Ea: fail-closed 503 saat PG dikonfigurasi tapi down. */
+  if(pg_configured_from_env()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Status user diubah\"}"); return r;
 }
 
@@ -593,6 +610,8 @@ Response user_verify(const Request& req){
   if(result=="__fail__"){ Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"Gagal verifikasi user\"}"); return r; }
   if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"User berhasil diverifikasi\"}"); return r; }
 #endif
+  /* P33-Ea: fail-closed 503 saat PG dikonfigurasi tapi down. */
+  if(pg_configured_from_env()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"User berhasil diverifikasi\"}"); return r;
 }
 
@@ -620,6 +639,8 @@ Response user_deactivate_package(const Request& req){
   if(result=="__fail__"){ Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"Gagal menonaktifkan paket\"}"); return r; }
   if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Paket berhasil dinonaktifkan\"}"); return r; }
 #endif
+  /* P33-Ea: fail-closed 503 saat PG dikonfigurasi tapi down. */
+  if(pg_configured_from_env()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Paket berhasil dinonaktifkan\"}"); return r;
 }
 
@@ -660,6 +681,8 @@ Response change_password(const Request& req){
   if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Password berhasil diubah\"}"); return r; }
 #endif
   (void)uid;
+  /* P33-Ea: fail-closed 503 saat PG dikonfigurasi tapi down. */
+  if(pg_configured_from_env()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Password berhasil diubah\"}"); return r;
 }
 
@@ -680,6 +703,9 @@ Response instansi_update(const Request& req){
     });
   }
 #endif
+  /* P33-Ea: PG dikonfigurasi tapi tidak terjangkau → fail-closed 503
+   * (pengaturan instansi tidak tersimpan — jangan laporkan sukses palsu). */
+  if(pg_configured_from_env()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"instansi\":\""+name+"\"}"); return r;
 }
 } // namespace examvan::handlers::admin

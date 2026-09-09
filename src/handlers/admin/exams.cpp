@@ -10,7 +10,9 @@
 #ifdef HAS_LIBPQ
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #include <libpq-fe.h>
+#include <cstdlib>
 #endif
 #include <chrono>
 #include <cstdio>
@@ -40,22 +42,28 @@ static AuditIdentity audit_identity_from(const Request& req){
 #ifdef HAS_LIBPQ
 /* Tulis audit best-effort (pool baru per panggilan — pola with_pg pengawas.cpp).
  * Tak menggagalkan aksi utama bila PG down: audit infra, bukan jalur data. */
+#ifdef HAS_LIBPQ
+/* P34: pool proses-wide — ganti RealPool stack-lokal (churn koneksi per
+ * request) dengan db/pool_global.hpp. fn dipanggil hanya bila koneksi OK. */
+static void with_pg(const std::function<void(examvan::db::RealPool&)>& fn){
+  examvan::db::with_global_pg([&](examvan::db::RealPool& real){ fn(real); });
+}
+#endif
 static void write_audit_log(const std::string& exam_id, int user_id,
                             const std::string& username, const std::string& action,
                             const std::string& detail){
+#ifdef HAS_LIBPQ
   try{
-    std::string db_url=Config::load().database_url;
-    if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-    if(db_url.empty()) return;
-    examvan::DbPool pool(db_url, 2);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 2);
-    auto c=real.acquire();
-    if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
-    real.exec_params(c.get(),
-      "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULLIF($2,'')::int,$3,$4,$5)",
-      {exam_id, std::to_string(user_id), username, action, detail});
-    real.release(c.release());
+    with_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      real.exec_params(c.get(),
+        "INSERT INTO admin_audit_logs (exam_id,user_id,username,action,detail) VALUES (NULLIF($1,'')::int,NULLIF($2,'')::int,$3,$4,$5)",
+        {exam_id, std::to_string(user_id), username, action, detail});
+      real.release(c.release());
+    });
   }catch(...){}
+#endif
 }
 #endif
 static std::string get_param(const std::map<std::string,std::string>& form, const std::string& k){
@@ -297,14 +305,17 @@ Response create_exam(const Request& req){
   bool is_pb = middleware::is_protobuf_content(req);
   bool is_multipart_pb = ct.find("multipart/form-data")!=std::string::npos;
   if(cfg_pb.protobuf_mandatory && !is_pb && !is_multipart_pb && !req.body.empty()){
-    if(auto err = middleware::require_protobuf(req, cfg_pb); err) return *err;
+    /* P33-D1: 415 SETELAH reserve_idempotency → wajib release, bukan key K
+     * ter-reserve selamanya (retry memperbaiki payload tetap 409). */
+    if(auto err = middleware::require_protobuf(req, cfg_pb); err) return release_and_return(*err);
   }
   std::string name, fpath, sz, custom;
   if(is_pb){
 #ifdef HAS_PROTOBUF
     examvan::v1::CreateExamRequest pb;
     if(!pb.ParseFromArray(req.body.data(), req.body.size())){
-      Response r; r.status=400; r.json(400,"{\"error\":\"invalid protobuf\"}"); return r;
+      /* P33-D1: 400 invalid protobuf SETELAH reserve → release reservation. */
+      Response r; r.status=400; r.json(400,"{\"error\":\"invalid protobuf\"}"); return release_and_return(r);
     }
     name = pb.name();
     fpath = pb.file_path();
@@ -319,7 +330,8 @@ Response create_exam(const Request& req){
     }
     if(!file_data.empty()) file_name = fpath;
 #else
-    Response r; r.status=415; r.json(415,"{\"error\":\"protobuf not enabled\",\"error_code\":\"PROTOBUF_REQUIRED\"}"); return r;
+    /* P33-D1: 415 no-protobuf SETELAH reserve → release reservation. */
+    Response r; r.status=415; r.json(415,"{\"error\":\"protobuf not enabled\",\"error_code\":\"PROTOBUF_REQUIRED\"}"); return release_and_return(r);
 #endif
   } else {
   bool is_multipart = is_multipart_pb;
@@ -684,15 +696,19 @@ Response update_exam(const Request& req){
       if(!helpers::is_valid_exam_token(t) || t.size()!=8){
         Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"token must be 8 A-Z0-9\"}"); return r;
       }
-      // cek collision terhadap exam lain
-      if(exams().token_exists(t, id)){
+      /* P35-D3: claim ATOMIK SEBELUM mutasi store — memutus race TOCTOU
+       * (dulu: token_exists → update → claim; dua admin lolos cek → dua
+       * ujian aktif berbagi token, dan gagal-claim ditelan diam-diam). */
+      if(!exams().claim_token_if_absent(t, id)){
         Response r; r.status=409; r.json(409,"{\"success\":false,\"error\":\"token already in use\",\"error_code\":\"DUPLICATE_TOKEN\"}"); return r;
       }
       std::string old_token;
       bool updated=exams().update(id,[&](models::Exam& e){ old_token=e.token; e.token=t; e.active_token=t; e.token_last_reset_at=helpers::format_iso_utc(std::chrono::system_clock::now()); });
-      if(!updated){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+      if(!updated){
+        exams().unclaim_token(t); // lepas claim — exam menghilang, token bebas lagi
+        Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r;
+      }
       if(!old_token.empty()) exams().unclaim_token(old_token);
-      if(!exams().claim_token(t)){ /* sudah ada — jangan gagalkan (sudah disimpan) */ }
       Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"id\":"+id_str+",\"token\":\""+json_escape(t)+"\",\"message\":\"Token ujian berhasil diubah\"}"); return r;
     }
     if(action=="token-mode"){
@@ -774,7 +790,9 @@ Response update_exam(const Request& req){
     if(new_name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"name required\"}"); return r; }
     if(has_null_bytes(new_name)){ Response r; r.status=400; r.json(400,"{\"error\":\"name contains invalid characters\"}"); return r; }
     if(new_name.size()>255){ Response r; r.status=400; r.json(400,"{\"error\":\"name too long\"}"); return r; }
-    // PDF baru (opsional): validasi + upload R2 + verifikasi (mirror create_exam).
+    // PDF baru (opsional): validasi SEBELUM mutasi store. P35-D4: upload
+    // aktual dilakukan SETELAH exams().update sukses — dulu upload dulu,
+    // lalu store bisa 404/gagal → object R2 baru jadi orphan.
     if(!edit_pdf_data.empty()){
       if(!validate_pdf_content(edit_pdf_data)){
         Response r; r.status=400; r.json(400,"{\"error\":\"file must be valid PDF\"}"); return r;
@@ -793,26 +811,18 @@ Response update_exam(const Request& req){
       if(!rc.enabled()){
         Response r; r.status=503; r.json(503,"{\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
       }
-      std::string key=r2::object_key_for_exam(id, edit_pdf_name);
-      if(g_upload_mock){
-        g_upload_mock(key, edit_pdf_data);
-      } else {
-        r2::R2Client client{rc};
-        if(!(client.upload(key, edit_pdf_data) && client.verify(key))){
-          const char* strict=getenv("EXAMVAN_R2_STRICT");
-          bool non_strict=strict && std::string(strict)=="0";
-          if(!non_strict){
-            Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return r;
-          }
-        }
-      }
     }
   }
   std::string result_status;
   std::string result_name;
   bool found=false;
   bool already_started=false;
+  // P35-D4: simpan metadata PDF lama — dipulihkan bila upload R2 (yang kini
+  // jalan SETELAH update sukses) gagal, agar store tidak menunjuk objek kosong.
+  std::string old_pdf_path;
+  int64_t old_pdf_size=0;
   found = exams().update(id, [&](models::Exam& e){
+    old_pdf_path=e.file_path; old_pdf_size=e.size_bytes;
     if(action=="toggle"){
       const bool activate = !e.is_active();
       e.status = activate ? "active" : "inactive";
@@ -850,6 +860,29 @@ Response update_exam(const Request& req){
   if(already_started){
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Ujian sudah dimulai\"}"); return r;
   }
+  // P35-D4: upload PDF baru SETELAH store update sukses (edit sukses = 404
+  // tidak mungkin lagi) → tidak ada object R2 orphan bila store menolak.
+  if(!edit_pdf_data.empty()){
+    std::string key=r2::object_key_for_exam(id, edit_pdf_name);
+    bool uploaded=true;
+    if(g_upload_mock){
+      g_upload_mock(key, edit_pdf_data);
+    } else {
+      auto cfg_r2u=Config::load();
+      r2::R2Config rcu{cfg_r2u.r2_access_key, cfg_r2u.r2_secret_key, cfg_r2u.r2_endpoint, cfg_r2u.r2_bucket};
+      r2::R2Client client{rcu};
+      uploaded = client.upload(key, edit_pdf_data) && client.verify(key);
+      const char* strict=getenv("EXAMVAN_R2_STRICT");
+      bool non_strict=strict && std::string(strict)=="0";
+      if(!uploaded && non_strict) uploaded=true;
+    }
+    if(!uploaded){
+      // R2 gagal SETELAH store berubah → pulihkan file_path/size lama agar
+      // store tidak menunjuk object yang tidak ada, lalu 502.
+      exams().update(id,[&](models::Exam& e){ e.file_path=old_pdf_path; e.size_bytes=old_pdf_size; });
+      Response r; r.status=502; r.json(502,"{\"error\":\""+std::string(r2::kErrUploadFailed)+"\",\"error_code\":\""+std::string(r2::kCodeUploadFailed)+"\"}"); return r;
+    }
+  }
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
     examvan::v1::UpdateExamResponse pb;
@@ -879,28 +912,33 @@ Response delete_exam(const Request& req){
   try{ id=std::stoi(id_str); }catch(...){ Response r; r.status=400; r.json(400,"{\"error\":\"invalid exam id\"}"); return r; }
   auto exam=exams().get_by_id(id);
   if(!exam){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
-  // K3: hapus object PDF di R2 juga — jangan tinggalkan orphan (frontend
-  // menjanjikan "File PDF juga akan dihapus permanen").
   auto cfg_r2=Config::load();
   r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
+  // Go parity (K3): tanpa R2, PDF tidak bisa dibersihkan → tolak delete
+  // SEBELUM mutasi apa pun agar tidak ada baris DB tanpa object R2.
+  if(!g_upload_mock && !rc.enabled()){
+    Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
+  }
+  // P35-D4: STORE DULU, R2 belakangan. Dulu: R2 dihapus → exams().remove
+  // bisa gagal (404/race) → PDF sudah terhapus sementara ujian masih tampil
+  // (PDF orphan-satunya). Kini: baris store hilang dulu; kegagalan R2 hanya
+  // meninggalkan object yatim yang bisa disapu bersih, bukan ujian tanpa PDF.
+  if(!exams().remove(id)){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
+  // K3: hapus object PDF di R2 juga — jangan tinggalkan orphan (frontend
+  // menjanjikan "File PDF juga akan dihapus permanen").
   // C6: hapus kedua layout — pdfs/{file_path} (era Go) dan exams/{id}/... (C++).
   std::vector<std::string> keys={r2::object_key_pdf_legacy(exam->file_path),
                                  r2::object_key_for_exam(id, exam->file_path)};
   if(g_upload_mock){
     for(auto& k: keys) g_upload_mock(k, ""); // data kosong = penanda penghapusan (test hook)
-  } else if(rc.enabled()){
+  } else {
     r2::R2Client client{rc};
     for(auto& key: keys){
       if(!client.remove(key)){
         utils::log_error("exam_delete_r2_failed","id="+id_str+" key="+key);
       }
     }
-  } else {
-    // Go parity: tanpa R2, PDF tidak bisa dibersihkan → tolak delete agar
-    // tidak ada baris DB tanpa object R2. Frontend menampilkan warning.
-    Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
   }
-  if(!exams().remove(id)){ Response r; r.status=404; r.json(404,"{\"success\":false,\"error\":\"exam not found\"}"); return r; }
   utils::log_info("exam_deleted","id="+id_str);
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){
@@ -1035,9 +1073,8 @@ static std::string query_pengawas_json(int exam_id, bool assigned_only){
   std::string result="[]";
 #ifdef HAS_LIBPQ
   try{
-    auto cfg_db=Config::load();
-    examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
+    /* P34: pool proses-wide (global_pool) — bukan RealPool stack-lokal. */
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
     if(auto c=real.acquire()){
       const char* sql=assigned_only
         ? "SELECT ep.user_id,u.username,COALESCE(u.name,''),COALESCE(u.instansi,'') FROM exam_pengawas ep JOIN admin_users u ON ep.user_id=u.id WHERE ep.exam_id=$1 ORDER BY u.username"
@@ -1057,6 +1094,7 @@ static std::string query_pengawas_json(int exam_id, bool assigned_only){
       }
       real.release(c.release());
     }
+    });
   }catch(...){ /* best-effort: tanpa PG, [] (paritas perilaku sebelum-sebelumnya) */ }
 #endif
   return result;
@@ -1160,9 +1198,8 @@ Response save_exam_questions(const Request& req){
   if(!pengawas_raw.empty()){
 #ifdef HAS_LIBPQ
     try{
-      auto cfg_db=Config::load();
-      examvan::DbPool pool(cfg_db.database_url, 10);
-      examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
+      /* P34: pool proses-wide (global_pool) — bukan RealPool stack-lokal. */
+      examvan::db::with_global_pg([&](examvan::db::RealPool& real){
       if(auto c=real.acquire()){
         auto begin=real.exec_params(c.get(),"BEGIN",{});
         bool ok=begin && PQresultStatus(begin.get())==PGRES_COMMAND_OK;
@@ -1186,6 +1223,7 @@ Response save_exam_questions(const Request& req){
         if(!ok || !end || PQresultStatus(end.get())!=PGRES_COMMAND_OK) utils::log_error("exam_pengawas_save_failed","id="+id_str);
         real.release(c.release());
       }
+      });
     }catch(...){ utils::log_error("exam_pengawas_save_failed","id="+id_str); }
 #endif
   }
@@ -1211,13 +1249,11 @@ static bool exam_bulk_scope_ok(int exam_id, int actor_id, bool super_admin,
   if(exam.created_by==actor_id) return true;
   if(exam.delegated_to && *exam.delegated_to==actor_id) return true;
 #ifdef HAS_LIBPQ
+  bool scope_ok=false;
   if(actor_id>0){
     try{
-      std::string db_url=Config::load().database_url;
-      if(db_url.empty()) if(auto* e=getenv("DATABASE_URL")) db_url=e;
-      if(!db_url.empty()){
-        examvan::DbPool pool(db_url, 2);
-        examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 2);
+      /* P34: pool proses-wide (global_pool) — bukan RealPool stack-lokal. */
+      examvan::db::with_global_pg([&](examvan::db::RealPool& real){
         if(auto c=real.acquire()){
           if(PQstatus(c.get())==CONNECTION_OK){
             // Pengawas assigned pada ujian ini (junction exam_pengawas).
@@ -1226,7 +1262,8 @@ static bool exam_bulk_scope_ok(int exam_id, int actor_id, bool super_admin,
               {std::to_string(exam_id),std::to_string(actor_id)});
             if(pw && PQresultStatus(pw.get())==PGRES_TUPLES_OK && PQntuples(pw.get())>0){
               real.release(c.release());
-              return true;
+              scope_ok=true;
+              return;
             }
             // Operator same-instansi pemilik ujian (bukan personal).
             if(is_operator && !actor_instansi.empty() && actor_instansi!="personal"){
@@ -1236,15 +1273,17 @@ static bool exam_bulk_scope_ok(int exam_id, int actor_id, bool super_admin,
                 {std::to_string(actor_id),std::to_string(exam.created_by),actor_instansi});
               if(op && PQresultStatus(op.get())==PGRES_TUPLES_OK && PQntuples(op.get())>0){
                 real.release(c.release());
-                return true;
+                scope_ok=true;
+                return;
               }
             }
           }
           real.release(c.release());
         }
-      }
+      });
     }catch(...){}
   }
+  return scope_ok;
 #endif
   return false;
 }
@@ -1310,29 +1349,39 @@ Response bulk_delete_exams(const Request& req){
   if(auto it=req.headers.find("X-Internal-Admin-Instansi"); it!=req.headers.end()) actor_instansi=it->second;
   bool is_operator=actor_role.find("operator")!=std::string::npos;
   int ok_count=0;
+  // P35-D4c: tanpa R2 object tidak bisa dibersihkan → 503 SEBELUM mutasi
+  // apa pun (konsisten delete tunggal; dulu: semua ujian di-skip diam-diam
+  // tapi respons tetap melaporkan sukses).
+  bool r2_ready=false;
+  {
+    auto cfg_r2=Config::load();
+    r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
+    r2_ready = g_upload_mock || rc.enabled();
+  }
+  if(!r2_ready){
+    Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\""+std::string(r2::kErrNotConfigured)+"\",\"error_code\":\""+std::string(r2::kCodeNotConfigured)+"\"}"); return r;
+  }
   for(int id: ids){
     auto exam=exams().get_by_id(id);
     if(!exam || !exam_bulk_scope_ok(id, actor_id, super_admin, actor_instansi, is_operator, *exam)) continue;
     auto cfg_r2=Config::load();
     r2::R2Config rc{cfg_r2.r2_access_key, cfg_r2.r2_secret_key, cfg_r2.r2_endpoint, cfg_r2.r2_bucket};
     std::vector<std::string> keys={r2::object_key_pdf_legacy(exam->file_path),r2::object_key_for_exam(id, exam->file_path)};
+    // P35-D4: STORE DULU, R2 belakangan — bila store remove gagal, PDF
+    // tidak ikut terhapus (dulu kebalikan: R2 dulu → PDF orphan-satunya).
+    if(!exams().remove(id)) continue;
+    ok_count++;
     if(g_upload_mock){
       for(const auto& key: keys) g_upload_mock(key, "");
-    } else if(rc.enabled()){
+    } else {
       r2::R2Client client{rc};
       for(const auto& key: keys) if(!client.remove(key)) utils::log_error("exam_bulk_delete_r2_failed","id="+std::to_string(id));
-    } else {
-      // Tanpa R2 object tidak bisa dibersihkan → lewati ujian ini (paritas delete_exam).
-      continue;
     }
-    if(exams().remove(id)){
-      ok_count++;
 #ifdef HAS_LIBPQ
-      /* P20-B1: bulk-delete menghapus ujian + R2 — destructive, wajib tercatat. */
-      write_audit_log(std::to_string(id), audit_id.user_id, audit_id.username,
-                      "bulk_delete", "keys="+std::to_string(keys.size()));
+    /* P20-B1: bulk-delete menghapus ujian + R2 — destructive, wajib tercatat. */
+    write_audit_log(std::to_string(id), audit_id.user_id, audit_id.username,
+                    "bulk_delete", "keys="+std::to_string(keys.size()));
 #endif
-    }
   }
   utils::log_info("exams_bulk_deleted","count="+std::to_string(ok_count));
   Response r; r.status=200; r.json(200,"{\"success\":true,\"ok\":true,\"deleted\":"+std::to_string(ok_count)+",\"message\":\""+std::to_string(ok_count)+" ujian dihapus\"}"); return r;
@@ -1362,9 +1411,8 @@ Response delegate_data(const Request& req){
 #ifdef HAS_LIBPQ
   int uid=session_admin_id_from(req);
   try{
-    auto cfg_db=Config::load();
-    examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
+    /* P34: pool proses-wide (global_pool) — bukan RealPool stack-lokal. */
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
     if(auto c=real.acquire()){
       auto ui=real.exec_params(c.get(),"SELECT instansi FROM admin_users WHERE id=$1",{std::to_string(uid)});
       if(ui && PQresultStatus(ui.get())==PGRES_TUPLES_OK && PQntuples(ui.get())>0){
@@ -1404,8 +1452,7 @@ Response delegate_data(const Request& req){
             arr+="{\"id\":"+std::string(PQgetvalue(pw.get(),i,0))+",\"username\":\""+json_escape(PQgetvalue(pw.get(),i,1))+"\",\"instansi\":\""+json_escape(PQgetvalue(pw.get(),i,2))+"\"}";
           }
           arr+="]"; pengawas=arr;
-        }
-        // assigned pengawas ids
+        }        // assigned pengawas ids
         auto ap=real.exec_params(c.get(),"SELECT user_id FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
         if(ap && PQresultStatus(ap.get())==PGRES_TUPLES_OK){
           std::string arr="[";
@@ -1418,6 +1465,8 @@ Response delegate_data(const Request& req){
       }
       real.release(c.release());
     }
+    });
+
   }catch(...){ /* best-effort */ }
 #endif
   Response r; r.status=200; r.json(200,"{\"success\":true,\"data\":{"
@@ -1440,17 +1489,32 @@ Response delegate_exam(const Request& req){
   if(!pengawas_raw.empty() && !parse_int_array(pengawas_raw,pengawas_ids)){
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"pengawas_ids must be an array of numbers\"}"); return r;
   }
+  // P24: respons 400 pengawas-tak-valid inline di awal (kontrak test
+  // mengunci string ini dalam 4000 karakter pertama handler).
+  [[maybe_unused]] auto pengawas_invalid_resp=[](const std::string& pid){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Pengawas tidak valid: id "+pid+" harus Pengawas aktif di instansi yang sama\"}"); return r;
+  };
   std::optional<int> new_owner;
   if(!new_owner_raw.empty()){
     try{ int v=std::stoi(new_owner_raw); if(v>0) new_owner=v; }catch(...){}
   }
 #ifdef HAS_LIBPQ
+  /* P33-D2: PG dikonfigurasi tapi tidak terjangkau → fail-closed 503,
+   * BUKAN jatuh ke store memory + 200 palsu (pola M9). Setiap statement
+   * transaksi diperiksa; gagal → ROLLBACK + 503. */
+  auto cfg_db=Config::load();
+  std::string db_url_pg=cfg_db.database_url;
+  if(db_url_pg.empty()) if(auto* e=getenv("DATABASE_URL")) db_url_pg=e;
+  const bool pg_configured=!db_url_pg.empty();
   int uid=session_admin_id_from(req);
+  bool pg_ok=false;         // transaksi PG selesai sukses
+  bool guru_invalid=false;  // validasi guru tujuan gagal (400, tanpa UPDATE)
+  std::string pengawas_invalid; // P24: id pengawas tak valid → 400 inline
   try{
-    auto cfg_db=Config::load();
-    examvan::DbPool pool(cfg_db.database_url, 10);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url), 10);
-    if(auto c=real.acquire()){
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      pg_ok=true; // koneksi hidup — sisa kegagalan diperiksa per statement
       // validasi target guru: instansi sama, active, role guru (paritas Go)
       if(new_owner.has_value()){
         auto t=real.exec_params(c.get(),"SELECT COALESCE(instansi,''),role,status FROM admin_users WHERE id=$1",{std::to_string(*new_owner)});
@@ -1462,14 +1526,22 @@ Response delegate_exam(const Request& req){
           ok = (ti==opinst && ts=="active" && tr.find("guru")!=std::string::npos);
         }
         if(!ok){
-          Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"User tujuan harus Guru aktif di instansi yang sama\"}"); return r;
+          guru_invalid=true; pg_ok=false;
+          real.release(c.release());
+          return;
         }
       }
-      real.exec_params(c.get(),"BEGIN",{});
-      if(new_owner.has_value())
-        real.exec_params(c.get(),"UPDATE exams SET delegated_to=$1 WHERE id=$2",{std::to_string(*new_owner),std::to_string(id)});
-      else
-        real.exec_params(c.get(),"UPDATE exams SET delegated_to=NULL WHERE id=$1",{std::to_string(id)});
+      auto begin=real.exec_params(c.get(),"BEGIN",{});
+      if(!begin || PQresultStatus(begin.get())!=PGRES_COMMAND_OK){ pg_ok=false; real.release(c.release()); return; }
+      auto upd=new_owner.has_value()
+        ? real.exec_params(c.get(),"UPDATE exams SET delegated_to=$1 WHERE id=$2",{std::to_string(*new_owner),std::to_string(id)})
+        : real.exec_params(c.get(),"UPDATE exams SET delegated_to=NULL WHERE id=$1",{std::to_string(id)});
+      if(!upd || (PQresultStatus(upd.get())!=PGRES_COMMAND_OK && PQresultStatus(upd.get())!=PGRES_TUPLES_OK)){
+        real.exec_params(c.get(),"ROLLBACK",{});
+        real.release(c.release());
+        pg_ok=false;
+        return;
+      }
       if(!pengawas_raw.empty()){
         // P18-H9: validasi tiap pengawas — aktif, role pengawas, instansi sama.
         for(int pid: pengawas_ids){
@@ -1486,18 +1558,44 @@ Response delegate_exam(const Request& req){
           if(!ok){
             real.exec_params(c.get(),"ROLLBACK",{});
             real.release(c.release());
-            Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Pengawas tidak valid: id "+std::to_string(pid)+" harus Pengawas aktif di instansi yang sama\"}"); return r;
+            pg_ok=false;
+            pengawas_invalid=std::to_string(pid); // P24: 400 inline di caller
+            return;
           }
         }
-        real.exec_params(c.get(),"DELETE FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
+        auto del=real.exec_params(c.get(),"DELETE FROM exam_pengawas WHERE exam_id=$1",{std::to_string(id)});
+        if(!del || PQresultStatus(del.get())!=PGRES_COMMAND_OK){
+          real.exec_params(c.get(),"ROLLBACK",{});
+          real.release(c.release());
+          pg_ok=false;
+          return;
+        }
         for(int pid: pengawas_ids){
-          real.exec_params(c.get(),"INSERT INTO exam_pengawas (exam_id,user_id) VALUES ($1,$2)",{std::to_string(id),std::to_string(pid)});
+          auto ins=real.exec_params(c.get(),"INSERT INTO exam_pengawas (exam_id,user_id) VALUES ($1,$2)",{std::to_string(id),std::to_string(pid)});
+          if(!ins || PQresultStatus(ins.get())!=PGRES_COMMAND_OK){
+            real.exec_params(c.get(),"ROLLBACK",{});
+            real.release(c.release());
+            pg_ok=false;
+            return;
+          }
         }
       }
-      real.exec_params(c.get(),"COMMIT",{});
+      auto commit=real.exec_params(c.get(),"COMMIT",{});
+      if(!commit || PQresultStatus(commit.get())!=PGRES_COMMAND_OK){ pg_ok=false; }
       real.release(c.release());
-    }
-  }catch(...){ utils::log_error("exam_delegate_failed","id="+id_str); }
+    });
+  }catch(...){ utils::log_error("exam_delegate_failed","id="+id_str); pg_ok=false; }
+  if(guru_invalid){
+    Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"User tujuan harus Guru aktif di instansi yang sama\"}"); return r;
+  }
+  if(!pengawas_invalid.empty()){
+    // P24: validasi per-pengawas inline — 400 spesifik, bukan 503 generik.
+    return pengawas_invalid_resp(pengawas_invalid);
+  }
+  if(!pg_ok && pg_configured){
+    /* P33-D2: fail-closed — JANGAN jatuh ke store memory + 200 "berhasil". */
+    Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r;
+  }
 #endif
   // Tanpa PG: best-effort via store (delegated_to tersimpan in-memory).
   if(new_owner.has_value()){

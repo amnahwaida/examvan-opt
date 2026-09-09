@@ -1,0 +1,26 @@
+# P33-I3: kredensial TIDAK boleh ikut build context Docker — .env berisi
+# secret produksi (admin pass, DB/Redis password, kredensial R2). Satu layer
+# bocor = seluruh kredensial produksi bocor. Secret disuplai via runtime env /
+# secret manager (docker-compose env_file / orchestrator secrets), bukan image.
+.env
+.env.*
+!.env.example
+
+# VCS & CI
+.git
+.gitignore
+.github
+
+# Artefak build & dependensi (mempercepat context + hindari layer basi)
+build
+build-curl
+build-san
+soak-logs
+migrasi-cpp
+test-results.xml
+
+# Dokumen & tooling lokal
+docs
+scripts
+.claude
+*.md

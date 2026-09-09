@@ -17,6 +17,7 @@
 #include <hiredis/hiredis.h>
 #endif
 #ifdef HAS_LIBPQ
+#include "db/pool_global.hpp"
 #include <libpq-fe.h>
 #endif
 
@@ -334,6 +335,24 @@ void SubmissionQueue::store_result(const JobResult& r){
 
 Worker::Worker(SubmissionQueue* q, std::function<std::optional<double>(const SubmissionJob&)> scorer): queue_(q), scorer_(std::move(scorer)) {}
 
+/* P33-G2: checked requeue — hasil LPUSH WAJIB diperiksa. Sebelumnya bool
+ * dibuang: blip Redis saat LPUSH → job hilang total tanpa jejak (tidak
+ * pending, tidak failed-queue, tidak ada JobResult); siswa melihat
+ * "terkirim" padahal jawaban tak pernah diproses. LPUSH gagal → job masuk
+ * kFailedQueueKey + JobResult gagal (jejak durabilitas), hook set_lpush_checked
+ * (P18-C4) tetap bisa memicu 503 ke klien. */
+bool Worker::checked_requeue(const SubmissionJob& job, const std::optional<double>& score){
+  if(queue_->requeue(job)) return true;
+  queue_->push_failed(job); // jejak durabilitas — jangan hilang diam-diam
+  JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address;
+  r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data);
+  r.success=false; r.score=score;
+  r.message="Gagal mengantar ulang jawaban (Redis tidak tersedia)";
+  r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now());
+  queue_->store_result(r);
+  return false;
+}
+
 void Worker::start(){
   running_=true;
   for(int i=0;i<kWorkerCount;i++) workers_.emplace_back(&Worker::run_worker,this,i);
@@ -359,7 +378,8 @@ void Worker::stop(){
     if(job.retries<kMaxRetries){
       job.retries++;
       std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries)));
-      queue_->requeue(job);
+      /* P33-G2: LPUSH gagal → failed-queue + JobResult (bukan hilang diam-diam). */
+      checked_requeue(job, b.second);
     } else {
       /* P21-T5: gagal permanen → dead-letter queue agar queue_status
        * melaporkannya (sebelumnya hanya JobResult, panel selalu failed:0). */
@@ -405,17 +425,18 @@ void Worker::run_batch(){
     lk.unlock();
     if(batch.empty()) continue;
 #ifdef HAS_LIBPQ
-    auto cfg=examvan::Config::load();
-    examvan::DbPool pool(cfg.database_url,10);
-    examvan::db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),10);
-    auto c=real.acquire();
-    bool tx_ok=c && PQstatus(c.get())==CONNECTION_OK;
-    if(tx_ok){
-      auto begin=real.exec_params(c.get(),"BEGIN",{});
-      tx_ok=begin && PQresultStatus(begin.get())==PGRES_COMMAND_OK;
-    }
-    std::vector<std::pair<SubmissionJob,std::optional<double>>> persisted, failed=batch;
-    if(tx_ok){
+    /* P33-G1: pool proses-wide — bukan DbPool+RealPool stack-lokal per
+     * iterasi batch (connection churn konstan + connection storm saat burst). */
+    bool tx_ok=false;
+    std::vector<std::pair<SubmissionJob,std::optional<double>>> persisted, failed;
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      tx_ok=c && PQstatus(c.get())==CONNECTION_OK;
+      if(tx_ok){
+        auto begin=real.exec_params(c.get(),"BEGIN",{});
+        tx_ok=begin && PQresultStatus(begin.get())==PGRES_COMMAND_OK;
+      }
+      if(!tx_ok){ if(c) real.release(c.release()); failed=batch; return; }
       failed.clear();
       for(auto& b: batch){
         auto& j=b.first; auto& score=b.second; bool ok=true;
@@ -455,8 +476,8 @@ void Worker::run_batch(){
             {std::to_string(b.first.exam_id), b.first.mac_address});
         }
       }
-    } else if(c) real.exec_params(c.get(),"ROLLBACK",{});
-    if(c) real.release(c.release());
+      real.release(c.release());
+    });
     // P18-M11: backoff serial memblokir batch — tidur sekali (max backoff)
     // lalu requeue semua, bukan sleep per-job.
     if(!failed.empty()){
@@ -464,10 +485,10 @@ void Worker::run_batch(){
       for(auto& b: failed) max_ms=std::max(max_ms, retry_backoff_ms(b.first.retries+1));
       if(max_ms>0) std::this_thread::sleep_for(std::chrono::milliseconds(max_ms));
     }
-    for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; queue_->requeue(job); } else { queue_->push_failed(job); JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
+    for(auto& b: failed){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; checked_requeue(job, b.second); } else { queue_->push_failed(job); JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Gagal menyimpan jawaban"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
     for(auto& b: persisted){ JobResult r; r.job_id=b.first.job_id; r.exam_id=b.first.exam_id; r.mac_address=b.first.mac_address; r.identity_data=map_to_json(b.first.identity_data); r.identity_hash=identity_fingerprint(b.first.identity_data); r.success=true; r.score=b.second; r.message="ok"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); }
 #else
-    for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries))); queue_->requeue(job); } else { queue_->push_failed(job); JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Database tidak tersedia"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
+    for(auto& b: batch){ auto job=b.first; if(job.retries<kMaxRetries){ job.retries++; std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries))); checked_requeue(job, b.second); } else { queue_->push_failed(job); JobResult r; r.job_id=job.job_id; r.exam_id=job.exam_id; r.mac_address=job.mac_address; r.identity_data=map_to_json(job.identity_data); r.identity_hash=identity_fingerprint(job.identity_data); r.success=false; r.score=b.second; r.message="Database tidak tersedia"; r.processed_at=helpers::format_iso_utc(std::chrono::system_clock::now()); queue_->store_result(r); } }
 #endif
   }
 }
@@ -598,17 +619,24 @@ int drain_heartbeats_once(){
   auto cfg=Config::load();
   auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
   if(!ctx) return 0;
-  DbPool pool(cfg.database_url,60);
-  db::RealPool real(examvan::conninfo_from_url_or_raw(pool.url),60);
-  auto c=real.acquire();
-  if(!c) return 0;
+  // P24 (tindak lanjut T2 pass-21): flusher memakai pool PG proses-wide yang
+  // sama dengan handler (global_pool) — sebelumnya pool stack-lokal (…,60)
+  // baru per tick-30s (churn koneksi TCP+auth PG 2×/menit seumur proses, dan
+  // max_conns konfigurasi tidak pernah terpakai di jalur ini). Pool tanpa
+  // DATABASE_URL (mode memori/dev) → null, flusher diam seperti sebelumnya.
+  auto* pool=examvan::db::global_pool();
+  if(!pool) return 0;
+  auto c=pool->acquire();
+  if(!c || PQstatus(c.get())!=CONNECTION_OK) return 0;
   int total=0;
   for(int batch=0; batch<kHeartbeatMaxBatches; ++batch){
-    int n=drain_heartbeat_batch(ctx.get(), real, c.get());
+    int n=drain_heartbeat_batch(ctx.get(), *pool, c.get());
     if(n==0) break;                 // antrean kosong
     total+=n;
     if(n<kHeartbeatBatchSize) break; // batch parsial = antrean habis
   }
+  // Koneksi dikembalikan ke pool proses-wide (di-reuse tick berikutnya).
+  pool->release(c.release());
   return total;
 #else
   return 0;

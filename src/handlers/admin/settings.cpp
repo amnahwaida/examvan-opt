@@ -19,7 +19,9 @@
 #include <functional>
 #endif
 #include <map>
+#include <vector>
 #include <string>
+#include <cstdlib>
 
 namespace examvan::handlers::admin {
 
@@ -115,18 +117,23 @@ static std::map<std::string,std::string> load_all_settings(){
   return m;
 }
 
-static void upsert_setting(const std::string& key, const std::string& value){
+/* P33-Eg: hasil upsert TIDAK ditelan lagi — false saat koneksi gagal atau
+ * UPDATE/INSERT error, supaya update_settings bisa fail-closed 503. */
+static bool upsert_setting(const std::string& key, const std::string& value){
+  bool ok=false;
   with_pg([&](examvan::db::RealPool& real){
     auto c=real.acquire();
     if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
     auto r=real.exec_params(c.get(),
       "INSERT INTO saas_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
       {key,value});
-    if(!r || (PQresultStatus(r.get())!=PGRES_COMMAND_OK && PQresultStatus(r.get())!=PGRES_TUPLES_OK)){
-      utils::log_error("saas_settings_upsert_failed",PQresultErrorMessage(r.get()));
+    ok = r && (PQresultStatus(r.get())==PGRES_COMMAND_OK || PQresultStatus(r.get())==PGRES_TUPLES_OK);
+    if(!ok){
+      utils::log_error("saas_settings_upsert_failed",r?PQresultErrorMessage(r.get()):"no result");
     }
     real.release(c.release());
   });
+  return ok;
 }
 #endif
 
@@ -245,7 +252,11 @@ Response update_settings(const Request& req){
     if(a==std::string::npos) return "";
     return v.substr(a,b-a+1);
   };
-  int written=0;
+  // P33-Eg: validasi INPUT dulu (DB-independent) — body tanpa satu pun key
+  // valid → 400 kontrak partial-update (paritas Go pointer fields), tanpa
+  // menyentuh DB. Baru kemudian tulis; kegagalan infra → 503 fail-closed.
+  struct PendingWrite { std::string key, value; };
+  std::vector<PendingWrite> pending;
   for(int i=0;i<kSettingKeysCount;i++){
     std::string key=kSettingKeys[i];
     if(!json_has_key(req.body,key)) continue; // only present keys are written
@@ -255,15 +266,29 @@ Response update_settings(const Request& req){
     if((key=="smtp_password" || key=="turnstile_secret_key") && value.find('*')!=std::string::npos){
       continue;
     }
-#ifdef HAS_LIBPQ
-    upsert_setting(key,value);
-    written++;
-#else
-    (void)value; written++;
-#endif
+    pending.push_back({key,value});
   }
-  if(written==0){
+  if(pending.empty()){
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"tidak ada setting yang valid\"}"); return r;
+  }
+  /* P33-Eg: gate fail-closed — PG dikonfigurasi (Config atau env) → upsert
+   * wajib dicek per key; gagal → 503 (pola M9), BUKAN fake-200. Mode
+   * memory/dev tanpa DATABASE_URL mempertahankan perilaku lama (200) sesuai
+   * kontrak M9/P26 (non-persistent via opt-in eksplisit). */
+  bool pg_configured = !Config::load().database_url.empty();
+  if(!pg_configured){ if(auto* e=getenv("DATABASE_URL")) pg_configured=(*e)!='\0'; }
+  int written=0;
+  for(auto& pw: pending){
+#ifdef HAS_LIBPQ
+    if(pg_configured){
+      if(!upsert_setting(pw.key,pw.value)){
+        Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r;
+      }
+    }
+#else
+    (void)pw;
+#endif
+    written++;
   }
   utils::log_info("saas_settings_updated","keys="+std::to_string(written));
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Pengaturan berhasil disimpan\"}"); return r;

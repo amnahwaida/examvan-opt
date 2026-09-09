@@ -77,10 +77,42 @@ std::string pg_conninfo_from_url(const std::string& u){
   if(!pass.empty()) ci+=" password="+pass;
   ci+=" dbname="+dbname;
   size_t qpos=u.find('?');
+  /* P33-G4: query-string diparse UTUH menjadi pasangan key=value (dulu:
+   * kehadiran `sslmode=` apa pun dipaksa jadi `sslmode=require` —
+   * verify-full operator diturunkan senyap (MITM tak terdeteksi), disable
+   * untuk PG lokal no-TLS membuat koneksi gagal, connect_timeout /
+   * application_name / sslrootcert dibuang). Kini: parameter klien
+   * diteruskan apa adanya; default `require` hanya bila sslmode ABSEN
+   * (dengan ATAU tanpa query-string — URL polos pun terlindungi TLS). */
+  bool have_sslmode=false;
   if(qpos!=std::string::npos){
     std::string qs=u.substr(qpos+1);
-    if(qs.find("sslmode=")!=std::string::npos) ci+=" sslmode=require";
+    size_t pos=0;
+    while(pos<qs.size()){
+      size_t amp=qs.find('&',pos);
+      if(amp==std::string::npos) amp=qs.size();
+      std::string pair=qs.substr(pos,amp-pos);
+      pos=amp+1;
+      if(pair.empty()) continue;
+      size_t eq=pair.find('=');
+      if(eq==std::string::npos) continue;
+      std::string key=pair.substr(0,eq), val=pair.substr(eq+1);
+      if(key.empty()) continue;
+      // URL-decode sederhana nilai (%XX dan '+' → spasi).
+      std::string dec; dec.reserve(val.size());
+      for(size_t i=0;i<val.size();++i){
+        if(val[i]=='+' ) dec+=' ';
+        else if(val[i]=='%' && i+2<val.size()){
+          auto hex=[](char c)->int{ if(c>='0'&&c<='9') return c-'0'; if(c>='a'&&c<='f') return c-'a'+10; if(c>='A'&&c<='F') return c-'A'+10; return -1; };
+          int h=hex(val[i+1]), l=hex(val[i+2]);
+          if(h>=0&&l>=0){ dec+=static_cast<char>(h*16+l); i+=2; } else dec+=val[i];
+        } else dec+=val[i];
+      }
+      if(key=="sslmode") have_sslmode=true;
+      ci+=" "+key+"="+dec;
+    }
   }
+  if(!have_sslmode) ci+=" sslmode=require";
   return ci;
 }
 

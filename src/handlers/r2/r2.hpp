@@ -16,7 +16,10 @@ struct R2Config {
   std::string secret_key;
   std::string endpoint;
   std::string bucket;
-  bool enabled() const { return !access_key.empty() && !secret_key.empty() && !endpoint.empty(); }
+  /* P33-F7: enabled() wajib menuntut konfigurasi LENGKAP — bucket kosong
+   * dulu tetap "enabled" → presign URL ke bucket "" (kegagalan diam di
+   * jalur upload PDF). Partial config = not enabled (fail-closed). */
+  bool enabled() const { return !access_key.empty() && !secret_key.empty() && !endpoint.empty() && !bucket.empty(); }
 };
 
 std::string presign_url(const R2Config& cfg, const std::string& key, int expires_seconds = 3600);

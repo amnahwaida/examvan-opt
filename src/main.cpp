@@ -6,6 +6,7 @@
 #include "db/pool.hpp"
 #ifdef HAS_LIBPQ
 #include "db/pool_real.hpp"
+#include "db/pool_global.hpp"
 #endif
 #include "redis/client.hpp"
 #ifdef HAS_HIREDIS
@@ -39,13 +40,15 @@ int main(){
   }
   std::cout << "EXAMVAN C++ v" << cfg.version << " starting on :" << cfg.port << "\n";
 #ifdef HAS_LIBPQ
-  std::string conninfo = examvan::pg_conninfo_from_url(cfg.database_url);
-  examvan::db::RealPool db(conninfo.empty()? cfg.database_url:conninfo, cfg.database_max_conns);
-  if(!db.connect() || !db.ping()){
+  /* P33-G9: SATU pool proses-wide — main kini meng-inisialisasi global_pool()
+   * lebih awal dan memakainya untuk migrate/hydrate. Dulu: pool stack terpisah    * RealPool stack-lokal + pool global lazy → dua pool process-wide, budget
+   * koneksi dobel, pool startup idle selamanya. */
+  auto* pool = examvan::db::global_pool();
+  if(!pool || !pool->connect() || !pool->ping()){
     std::cerr << "database error: exam metadata store is mandatory\n";
     return 1;
   }
-  examvan::store::ExamStorePostgres postgres_store(db);
+  examvan::store::ExamStorePostgres postgres_store(*pool);
   if(!postgres_store.migrate() || !postgres_store.hydrate()){
     std::cerr << "database error: exams schema/hydration failed\n";
     return 1;
@@ -78,8 +81,13 @@ int main(){
   examvan::RedisClient redis(cfg.redis_url);
   redis.connect();
 #endif
+#ifdef HAS_LIBPQ
+  bool db_up = pool && pool->ping();
+#else
+  bool db_up = db.ping();
+#endif
   std::string db_display = examvan::DbPool(cfg.database_url, cfg.database_max_conns).sanitized_url();
-  std::cout << "DB: " << (db.ping()?"connected":"not connected") << " ("<<db_display<<") Redis: " << (redis.ping()?"connected":"not connected") << "\n";
+  std::cout << "DB: " << (db_up?"connected":"not connected") << " ("<<db_display<<") Redis: " << (redis.ping()?"connected":"not connected") << "\n";
 #ifdef HAS_HIREDIS
   examvan::Hub hub(
     [&](const std::string& k, const std::string& v){ if(redis_ctx) examvan::redis_real::redis_set(redis_ctx.get(), k, v, 300); },
@@ -154,12 +162,12 @@ int main(){
   // Heartbeat presence → student_access_logs (paritas Go startHeartbeatFlusher:
   // tick 30s, RPOP batch → INSERT transaksional; requeue saat gagal).
   examvan::queue::HeartbeatFlusher hb_flusher([](){ return examvan::queue::drain_heartbeats_once(); });
-  if(redis_ok && db.ping()) hb_flusher.start();
+  if(redis_ok && db_up) hb_flusher.start();
 #endif
   examvan::jobs::JobRunner expiry(examvan::jobs::run_expiry_job, std::chrono::seconds(3600));
   examvan::jobs::JobRunner cleanup(examvan::jobs::run_approval_cleanup, std::chrono::seconds(1800));
   examvan::jobs::JobRunner retention(examvan::jobs::run_access_log_retention, std::chrono::seconds(86400));
-  if(db.ping()){ expiry.start(); cleanup.start(); retention.start(); }
+  if(db_up){ expiry.start(); cleanup.start(); retention.start(); }
   std::cout << "Ready. uWS=" << (examvan::server::Server::has_uwebsockets()?"yes (production)":"stub (parity 100% WS hub logic)") << "\n";
   std::cout << "Dual-run: nginx map per-grup upstream lama=Go baru=C++ (dok 05 §1) — rollback sed -i 's/cpp_backend/go_backend/' && nginx -s reload\n";
   // P18-C5: graceful shutdown — SIGTERM/SIGINT drain worker+flusher+jobs.

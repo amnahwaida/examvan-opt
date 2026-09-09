@@ -66,6 +66,9 @@ bool redis_setnx(redisContext* c, const std::string& k, const std::string& v, in
 std::string redis_get(redisContext* c, const std::string& k){
   auto* r=(redisReply*)redisCommand(c,"GET %s",k.c_str()); if(!r||r->type!=REDIS_REPLY_STRING){ if(r) freeReplyObject(r); return ""; } std::string s(r->str,r->len); freeReplyObject(r); return s;
 }
+bool redis_del(redisContext* c, const std::string& k){
+  auto* r=(redisReply*)redisCommand(c,"DEL %s",k.c_str()); if(!r) return false; bool ok=r->type!=REDIS_REPLY_ERROR; freeReplyObject(r); return ok;
+}
 long long redis_llen(redisContext* c, const std::string& k){
   auto* r=(redisReply*)redisCommand(c,"LLEN %s",k.c_str()); if(!r||r->type!=REDIS_REPLY_INTEGER){ if(r) freeReplyObject(r); return 0; } long long n=r->integer; freeReplyObject(r); return n;
 }

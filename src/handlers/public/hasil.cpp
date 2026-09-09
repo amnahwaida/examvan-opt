@@ -12,6 +12,7 @@
 #ifdef HAS_LIBPQ
 #include "db/pool_real.hpp"
 #include "db/pool.hpp"
+#include "db/pool_global.hpp"
 #endif
 #include <unordered_map>
 #include <mutex>
@@ -76,35 +77,31 @@ bool get_exam_by_token(const std::string& raw, models::Exam& out){
   }
   std::string token=upper_trim(raw);
 #ifdef HAS_LIBPQ
+  bool found=false;
   try{
-    auto cfg=Config::load();
-    std::string db=cfg.database_url;
-    if(db.empty()) if(auto* e=getenv("DATABASE_URL")) db=e;
-    if(!db.empty()){
-      std::string ci=pg_conninfo_from_url(db);
-      if(ci.empty()) ci=db;
-      examvan::db::RealPool real(ci, 2);
-      if(real.connect()){
-        if(auto c=real.acquire()){
-          auto res=real.exec_params(c.get(),
-            "SELECT id, name, token, public_results, show_answers, questions_json, identity_fields, created_by, delegated_to"
-            " FROM exams WHERE token=$1 LIMIT 1", {token});
-          if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0){
-            out.id=std::stoi(PQgetvalue(res.get(),0,0));
-            out.name=PQgetvalue(res.get(),0,1);
-            out.token=PQgetvalue(res.get(),0,2);
-            try{ out.public_results=std::stoi(PQgetvalue(res.get(),0,3)); }catch(...){ out.public_results=0; }
-            try{ out.show_answers=std::stoi(PQgetvalue(res.get(),0,4)); }catch(...){ out.show_answers=0; }
-            std::string qj=PQgetvalue(res.get(),0,5);
-            if(!qj.empty()) out.questions_json=qj;
-            std::string idf=PQgetvalue(res.get(),0,6);
-            if(!idf.empty()) out.identity_fields=idf;
-            return true;
-          }
-        }
+    /* P33-F5: pool proses-wide (dulu pool stack 2-koneksi per request). */
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+      auto c=real.acquire();
+      if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
+      auto res=real.exec_params(c.get(),
+        "SELECT id, name, token, public_results, show_answers, questions_json, identity_fields, created_by, delegated_to"
+        " FROM exams WHERE token=$1 LIMIT 1", {token});
+      if(res && PQresultStatus(res.get())==PGRES_TUPLES_OK && PQntuples(res.get())>0){
+        out.id=std::stoi(PQgetvalue(res.get(),0,0));
+        out.name=PQgetvalue(res.get(),0,1);
+        out.token=PQgetvalue(res.get(),0,2);
+        try{ out.public_results=std::stoi(PQgetvalue(res.get(),0,3)); }catch(...){ out.public_results=0; }
+        try{ out.show_answers=std::stoi(PQgetvalue(res.get(),0,4)); }catch(...){ out.show_answers=0; }
+        std::string qj=PQgetvalue(res.get(),0,5);
+        if(!qj.empty()) out.questions_json=qj;
+        std::string idf=PQgetvalue(res.get(),0,6);
+        if(!idf.empty()) out.identity_fields=idf;
+        found=true;
       }
-    }
+      real.release(c.release());
+    });
   }catch(...){}
+  if(found) return true;
 #endif
   return false;
 }
@@ -403,11 +400,13 @@ Response cek_hasil_page(const Request& req){
     for(char &c: t) c=(char)std::toupper((unsigned char)c);
     Response r; r.status=302; r.headers["Location"]="/hasil/"+t; return r;
   }
-  /* P21-T4: versi satu sumber — Config::version (X-Version klien tetap
-   * menang bila eksplisit dikirim, paritas perilaku lama). */
+  /* P21-T4: versi satu sumber — Config::version. P33-F4: X-Version klien
+   * hanya dipakai bila lolos whitelist is_safe_version ([A-Za-z0-9.-],
+   * 1..64) — nilai mentah klien tidak lagi disisipkan ke atribut href asset
+   * (attribute breakout: `?v=2.7.3" onclick=...`). */
   std::string ver=Config::load().version;
   auto it=req.headers.find("X-Version");
-  if(it!=req.headers.end()) ver=it->second;
+  if(it!=req.headers.end() && helpers::is_safe_version(it->second)) ver=it->second;
   std::string html=render_public_template("cek_hasil", ver);
   if(!html.empty()){
     Response r; r.status=200; r.headers["Content-Type"]="text/html"; r.body=html; return r;
@@ -448,15 +447,11 @@ Response hasil_page(const Request& req){
   ctx.show_answers=exam.show_answers!=0;
 #ifdef HAS_LIBPQ
   try{
-    auto cfg=Config::load();
-    std::string db=cfg.database_url;
-    if(db.empty()) if(auto* e=getenv("DATABASE_URL")) db=e;
-    if(!db.empty()){
-      std::string ci=pg_conninfo_from_url(db);
-      if(ci.empty()) ci=db;
-      examvan::db::RealPool real(ci, 2);
-      if(real.connect()){
-        if(auto c=real.acquire()){
+    /* P33-F5: pool proses-wide. */
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+    {
+      auto c=real.acquire();
+      if(c && PQstatus(c.get())==CONNECTION_OK){
           auto cnt=real.exec_params(c.get(),
             "SELECT COUNT(*) FROM submissions WHERE exam_id=$1 AND answers_json IS NOT NULL AND answers_json != ''",
             {std::to_string(exam.id)});
@@ -464,9 +459,10 @@ Response hasil_page(const Request& req){
             ctx.total_students=PQgetvalue(cnt.get(),0,0);
           auto cr=real.exec_params(c.get(),"SELECT username FROM admin_users WHERE id=$1",{std::to_string(exam.created_by)});
           if(cr && PQntuples(cr.get())>0) ctx.creator_name=PQgetvalue(cr.get(),0,0);
-        }
+          real.release(c.release());
       }
     }
+    });
   }catch(...){}
 #endif
   Response r=base; r.status=200; r.headers["Content-Type"]="text/html";
@@ -530,15 +526,11 @@ Response cek_hasil_api(const Request& req){
   bool got=false;
 #ifdef HAS_LIBPQ
   try{
-    auto cfg=Config::load();
-    std::string db=cfg.database_url;
-    if(db.empty()) if(auto* e=getenv("DATABASE_URL")) db=e;
-    if(!db.empty()){
-      std::string ci=pg_conninfo_from_url(db);
-      if(ci.empty()) ci=db;
-      examvan::db::RealPool real(ci, 2);
-      if(real.connect()){
-        if(auto c=real.acquire()){
+    /* P33-F5: pool proses-wide. */
+    examvan::db::with_global_pg([&](examvan::db::RealPool& real){
+    {
+      auto c=real.acquire();
+      if(c && PQstatus(c.get())==CONNECTION_OK){
           auto st=real.exec_params(c.get(),
             "SELECT COUNT(*), COALESCE(AVG(score),0), COALESCE(MAX(score),0), COALESCE(MIN(score),0)"
             " FROM submissions WHERE exam_id=$1 AND answers_json IS NOT NULL AND answers_json != ''",
@@ -604,9 +596,10 @@ Response cek_hasil_api(const Request& req){
             submissions=s;
             got=true;
           }
+          real.release(c.release());
         }
-      }
     }
+    });
   }catch(...){}
 #endif
   (void)got;

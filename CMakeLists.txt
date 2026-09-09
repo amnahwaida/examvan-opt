@@ -274,6 +274,11 @@ add_executable(examvan-tests
   tests/test_p29_tdd.cpp
   tests/test_p30_tdd.cpp
   tests/test_p31_tdd.cpp
+  tests/test_p32_tdd.cpp
+  tests/test_pg_integration_tdd.cpp
+  tests/test_p33_tdd.cpp
+  tests/test_p34_tdd.cpp
+  tests/test_p35_tdd.cpp
 )
 target_compile_definitions(examvan-tests PRIVATE EXAMVAN_TESTING=1)
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)

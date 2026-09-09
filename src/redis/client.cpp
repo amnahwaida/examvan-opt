@@ -43,6 +43,23 @@ bool RedisClient::try_acquire_job(const std::string& job, int ttl){
   return true;
 }
 void RedisClient::release_job(const std::string& job){
+#ifdef HAS_HIREDIS
+  // P32: lock di Redis wajib di-DEL — sebelumnya hanya peta in-process yang
+  // dibersihkan; key Redis (TTL 3600 utk "expiry") tetap ada sehingga
+  // pemanggil berikutnya (proses sama maupun replika lain) terblokir sampai
+  // TTL habis. Tanpa Redis terjangkau → peta memori saja (fallback).
+  try{
+    if(!url.empty()){
+      auto ctx=redis_real::connect_redis(url);
+      if(ctx){
+        (void)redis_real::redis_del(ctx.get(), prefixed("job:"+job));
+        std::lock_guard<std::mutex> g(g_mu);
+        g_locks.erase(prefixed("job:"+job));
+        return;
+      }
+    }
+  }catch(...){}
+#endif
   std::lock_guard<std::mutex> g(g_mu);
   g_locks.erase(prefixed("job:"+job));
 }
