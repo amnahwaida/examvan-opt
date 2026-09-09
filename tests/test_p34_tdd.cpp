@@ -19,7 +19,7 @@
 //  7. G3  — acquire() TIDAK memanggil PQconnectdb di bawah mutex; conninfo
 //           punya connect_timeout.
 //  8. G4  — query-string PG diparse utuh: sslmode/connect_timeout dipertahankan,
-//           default `require` hanya bila sslmode absen.
+//           default `prefer` hanya bila sslmode absen (P36-koreksi).
 //  9. D1  — 3 jalur error protobuf create_exam me-release reservation idempotency.
 // 10. F7  — enabled() wajib menuntut bucket + endpoint lengkap.
 // 11. I2  — rate-limit login hanya untuk POST (limit_except POST).
@@ -173,9 +173,13 @@ TEST(P34, G4_PgConninfoQueryString) {
   auto ci3 = pg_conninfo_from_url("postgresql://u:p@db:5432/examvan?connect_timeout=7&application_name=examvan");
   EXPECT_NE(ci3.find("connect_timeout=7"), std::string::npos) << ci3;
   EXPECT_NE(ci3.find("application_name=examvan"), std::string::npos) << ci3;
-  // Tanpa query-string sslmode → default aman `require`.
+  // Tanpa query-string sslmode → default `prefer` (P36-koreksi: default
+  // `require` memutus stack compose produksi — image postgres:16-alpine
+  // ber-ssl=off, koneksi ditolak senyap. prefer = TLS dipakai bila server
+  // mendukung; kepatuhan tetap dicapai via sslmode eksplisit di URL).
   auto ci4 = pg_conninfo_from_url("postgresql://u:p@db:5432/examvan");
-  EXPECT_NE(ci4.find("sslmode=require"), std::string::npos) << ci4;
+  EXPECT_NE(ci4.find("sslmode=prefer"), std::string::npos) << ci4;
+  EXPECT_EQ(ci4.find("sslmode=require"), std::string::npos) << ci4;
 }
 
 // D1: reservation idempotency wajib di-release di 3 jalur error protobuf.

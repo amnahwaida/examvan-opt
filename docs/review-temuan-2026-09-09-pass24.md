@@ -178,7 +178,7 @@ Pola dominan pass-24:
 - **Lokasi**: `src/db/pool.cpp:79-83` — `std::string qs = u.substr(qpos+1); if (qs.find("sslmode=") != std::string::npos) ci += " sslmode=require";`
 - **Bukti**: (a) `sslmode=disable` pada PG lokal no-TLS → dipaksa `require` → koneksi GAGAL senyap pada DB sehat; (b) `sslmode=verify-full` → diturunkan ke `require` → verifikasi cert/hostname hilang (MITM tak terdeteksi); `connect_timeout`/`application_name`/`sslrootcert` diabaikan.
 - **Skenario**: operator set verify-full untuk kepatuhan → sistem diam-diam berjalan tanpa verifikasi cert.
-- **Remediasi**: parse query-string jadi pasangan key=value utuh; default `require` hanya jika absent.
+- **Remediasi**: parse query-string jadi pasangan key=value utuh; default sslmode hanya jika absent. **P36-koreksi (2026-09-10)**: verifikasi live vs `postgres:16-alpine` (`ssl=off` default) membuktikan default `require` memutus stack compose produksi — koneksi ditolak senyap (`server does not support SSL, but SSL was required`). Default dikoreksi ke `prefer` (TLS bila server mendukung); operator kepatuhan wajib set sslmode eksplisit (verify-full + sslrootcert) di DATABASE_URL — kini dihormati, tidak ditimpa. Dikunci test P34-G4 (diamendemen) + PgIntegration 8/8 PASS vs PG hidup.
 
 ### I2 — **[CLOSED — P34]** `limit_req` login menghantam GET
 

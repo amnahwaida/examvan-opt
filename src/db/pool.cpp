@@ -82,8 +82,13 @@ std::string pg_conninfo_from_url(const std::string& u){
    * verify-full operator diturunkan senyap (MITM tak terdeteksi), disable
    * untuk PG lokal no-TLS membuat koneksi gagal, connect_timeout /
    * application_name / sslrootcert dibuang). Kini: parameter klien
-   * diteruskan apa adanya; default `require` hanya bila sslmode ABSEN
-   * (dengan ATAU tanpa query-string — URL polos pun terlindungi TLS). */
+   * diteruskan apa adanya.
+   * P36-koreksi (verifikasi live vs postgres:16-alpine, `ssl=off` default):
+   * default `require` memutus stack produksi compose (db tanpa TLS, URL
+   * tanpa sslmode) — koneksi gagal senyap. Default kini `prefer`: TLS
+   * dipakai bila server mendukung, server no-TLS tetap konek. Operator
+   * yang butuh kepatuhan wajib set sslmode eksplisit (verify-full +
+   * sslrootcert) di DATABASE_URL — kini DIHORMAT, tidak ditimpa. */
   bool have_sslmode=false;
   if(qpos!=std::string::npos){
     std::string qs=u.substr(qpos+1);
@@ -112,7 +117,7 @@ std::string pg_conninfo_from_url(const std::string& u){
       ci+=" "+key+"="+dec;
     }
   }
-  if(!have_sslmode) ci+=" sslmode=require";
+  if(!have_sslmode) ci+=" sslmode=prefer";
   return ci;
 }
 
