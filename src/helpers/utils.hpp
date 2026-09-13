@@ -27,4 +27,11 @@ std::string url_decode(const std::string& s);
 /* Parse body form ke map key→value (setelah url_decode). */
 std::map<std::string,std::string> parse_form(const std::string& body);
 
+/* "YYYY-MM-DD HH:MM[:SS]" (WIB, UTC+7) → "YYYY-MM-DDTHH:MM:SSZ" (UTC) —
+ * konversi jadwal soal ujian (paritas Go SaveQuestions). P36-D6: parser
+ * ketat — full-consumption + hari-dalam-bulan valid; nullopt bila format
+ * menyimpang (dulu sscanf 5 field tanpa %n: "10:00JUNK" diterima,
+ * "2026-02-31" menjadi 3 Maret). */
+std::optional<std::string> wib_to_utc_iso(const std::string& s);
+
 } // namespace examvan::helpers

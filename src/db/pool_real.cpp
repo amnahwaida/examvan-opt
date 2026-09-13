@@ -68,6 +68,11 @@ void RealPool::release(PGconn* c){
 }
 
 PgResultPtr RealPool::exec_params(PGconn* c, const std::string& sql, const std::vector<std::string>& params){
+  /* P37-F12 (hardening kelas): PQexecParams(nullptr) mengembalikan null TANPA
+   * crash — release-before-use (webhook OTP pass-24) lolos senyap dari semua
+   * test tanpa PG riil. Tolak koneksi-null eksplisit agar kelas bug ini
+   * menjadi visible (result null → cabang caller gagal), bukan silent. */
+  if(!c) return {};
   std::vector<const char*> vals;
   for(auto& p: params) vals.push_back(p.c_str());
   PGresult* r=PQexecParams(c, sql.c_str(), static_cast<int>(vals.size()), nullptr, vals.data(), nullptr, nullptr, 0);
@@ -75,6 +80,7 @@ PgResultPtr RealPool::exec_params(PGconn* c, const std::string& sql, const std::
 }
 
 PgResultPtr RealPool::exec_params_nullable(PGconn* c, const std::string& sql, const std::vector<std::optional<std::string>>& params){
+  if(!c) return {}; // P37-F12: hardening kelas — lihat exec_params di atas.
   std::vector<const char*> vals;
   vals.reserve(params.size());
   for(const auto& p: params) vals.push_back(p ? p->c_str() : nullptr);

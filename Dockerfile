@@ -7,10 +7,12 @@ COPY tests tests
 COPY templates templates
 COPY static static
 COPY proto proto
-COPY scripts scripts
 COPY nginx nginx
 COPY Dockerfile ./
-COPY .gitignore .stylelintrc.json MIGRASI_STATUS.md docs-cutover.md ./
+# P37-I11: `.stylelintrc.json` (satu-satunya sumber yang masih dibutuhkan)
+# dipindah ke baris COPY CMakeLists — `.gitignore` (VCS), `scripts/`, dan
+# `*.md` (MIGRASI_STATUS.md, docs-cutover.md) di-exclude .dockerignore.
+COPY .stylelintrc.json ./
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITH_UWEBSOCKETS=ON && cmake --build build -j$(nproc) && ./build/examvan-tests --gtest_filter=-ServerLive.*:F7Jobs.JobRunnerStartStop:P3*:P4*:P5*:P6*:P7*:P8*:P9*:P10*:P11*:P12*:P13*:Review_*:R3_*:R4_*:R5_*:DockerBuild.*:DockerRuntime.*
 
 FROM builder AS sanitizer

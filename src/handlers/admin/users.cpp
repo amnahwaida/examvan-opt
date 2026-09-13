@@ -693,18 +693,26 @@ Response instansi_update(const Request& req){
   if(name.empty()){ Response r; r.status=400; r.json(400,"{\"error\":\"instansi required\"}"); return r; }
 #ifdef HAS_LIBPQ
   int uid=session_admin_id_from(req);
+  /* P37-E-l: sentinel hasil (pola change_password) — gate akhir wajib tahu
+   * apakah UPDATE benar-benar dieksekusi/sukses. Dulu: UPDATE COMMIT di DB
+   * lalu response TETAP 503 (gate `pg_configured_from_env()` tanpa sentinel)
+   * → admin mengira gagal, retry tetap 503 selamanya — fitur 100% rusak. */
+  std::string result="";
   if(uid>0){
     with_pg([&](examvan::db::RealPool& real){
       auto c=real.acquire();
       if(!c || PQstatus(c.get())!=CONNECTION_OK) return;
       auto up=real.exec_params(c.get(),"UPDATE admin_users SET instansi=$2 WHERE id=$1",{std::to_string(uid),name});
-      if(up && PQresultStatus(up.get())==PGRES_COMMAND_OK) utils::log_info("user_instansi_updated","id="+std::to_string(uid));
+      if(up && PQresultStatus(up.get())==PGRES_COMMAND_OK){ result="ok"; utils::log_info("user_instansi_updated","id="+std::to_string(uid)); }
+      else { utils::log_error("user_instansi_update_failed", up?PQresultErrorMessage(up.get()):"null result"); result="__fail__"; }
       real.release(c.release());
     });
   }
+  if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"instansi\":\""+name+"\"}"); return r; }
+  if(result=="__fail__"){ Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"Gagal memperbarui instansi\"}"); return r; }
 #endif
-  /* P33-Ea: PG dikonfigurasi tapi tidak terjangkau → fail-closed 503
-   * (pengaturan instansi tidak tersimpan — jangan laporkan sukses palsu). */
+  /* P33-Ea: PG dikonfigurasi tapi tidak terjangkau (lambda tak pernah sukses)
+   * → fail-closed 503 — jangan laporkan sukses palsu. */
   if(pg_configured_from_env()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r; }
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"instansi\":\""+name+"\"}"); return r;
 }

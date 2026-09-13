@@ -138,12 +138,29 @@ static std::map<std::string,std::string> parse_string_map(const std::string& raw
 static bool enqueue_job_to_redis(const queue::SubmissionJob& job){
 #ifdef HAS_HIREDIS
   auto cfg=Config::load();
-  auto ctx=examvan::redis_real::connect_redis(cfg.redis_url);
-  if(!ctx) return false;
+  /* P36-G8: jalur submit terpanas wajib reuse koneksi thread-local (pola
+   * queue_redis main.cpp) — dulu TCP+AUTH Redis baru pada SETIAP submit
+   * siswa (churn koneksi di jam sibuk; hook test tidak pernah terpasang di
+   * produksi). Koneksi mati → reconnect sekali sebelum gagal. */
+  static thread_local std::map<std::string, examvan::redis_real::RedisPtr> tls_conn;
+  auto& ctx=tls_conn[cfg.redis_url];
+  if(!ctx){
+    ctx=examvan::redis_real::connect_redis(cfg.redis_url);
+    if(!ctx) return false;
+  }
   std::string payload=job.to_json();
   auto* r=(redisReply*)redisCommand(ctx.get(),"LPUSH %s %b", queue::kQueueKey, payload.data(), payload.size());
   bool ok=r && r->type==REDIS_REPLY_INTEGER && r->integer>0;
   if(r) freeReplyObject(r);
+  if(!ok){
+    // Koneksi rusak (Redis restart) → buang & coba SATU koneksi segar.
+    ctx.reset();
+    ctx=examvan::redis_real::connect_redis(cfg.redis_url);
+    if(!ctx) return false;
+    r=(redisReply*)redisCommand(ctx.get(),"LPUSH %s %b", queue::kQueueKey, payload.data(), payload.size());
+    ok=r && r->type==REDIS_REPLY_INTEGER && r->integer>0;
+    if(r) freeReplyObject(r);
+  }
   return ok;
 #else
   (void)job;
@@ -568,12 +585,20 @@ Response request_approval(const Request& req){
     exam->exam_started_at.has_value() && !exam->exam_started_at->empty() &&
     !exam_schedule_ended(*exam);
   std::string status = auto_approve ? "approved" : "pending";
-  // ---- Persist ke exam_approvals (best-effort; paritas Go SQL) ----
+  // ---- Persist ke exam_approvals (paritas Go SQL) ----
+  /* P37-F14: flag pg_used (idiom persist_submission_pending) — PG dikonfigurasi
+   * tapi tidak terjangkau → 503 fail-closed. Dulu: persist di-skip diam-diam
+   * (`if(auto c=real.acquire())` null → catch kosong) dan status in-memory
+   * tetap dibalas 200 "approved" — siswa menunggu approval yang tidak pernah
+   * ada, submit kemudian terblokir device_approved gate dengan pesan
+   * kontradiktif. */
 #ifdef HAS_LIBPQ
+  bool pg_used=false;
   try{
     /* P33-F5: pool proses-wide. */
     examvan::db::with_global_pg([&](examvan::db::RealPool& real){
     if(auto c=real.acquire()){
+      pg_used=true;
       // Cap approved per exam (paritas Go: saas_settings max_approvals_per_exam,
       // default 500) — cegah token bocor mencetak device approved tak terbatas.
       real.exec_params(c.get(),"BEGIN",{});
@@ -616,7 +641,21 @@ Response request_approval(const Request& req){
       real.release(c.release());
     }
     });
-  }catch(...){ /* best-effort: status fallback (pending/approved) tetap dipakai */ }
+  }catch(...){ /* status fallback (pending/approved) tetap dipakai */ }
+  /* P37-F14: PG terkonfigurasi tapi persist tidak pernah jalan → jangan
+   * klaim sukses; 503 agar klien retry-backoff (paritas webhook fail_closed). */
+  if(!pg_used){
+    bool pg_configured=false;
+    {
+      auto cfg=Config::load();
+      std::string db=cfg.database_url;
+      if(db.empty()) if(auto* e=getenv("DATABASE_URL")) db=e;
+      pg_configured=!db.empty();
+    }
+    if(pg_configured){
+      Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r;
+    }
+  }
 #endif
 #ifdef HAS_PROTOBUF
   if(middleware::is_protobuf_accept(req)){

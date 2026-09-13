@@ -367,13 +367,17 @@ Response system_apps_page(const Request& req){
         real.exec_params(c.get(),"CREATE TABLE IF NOT EXISTS system_apps (id SERIAL PRIMARY KEY,name TEXT NOT NULL,platform TEXT NOT NULL,version TEXT NOT NULL,file_path TEXT NOT NULL,size_bytes BIGINT NOT NULL DEFAULT 0,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),UNIQUE(name,platform,version))",{});
         if(req.method=="DELETE" || (req.method=="POST" && req.path.find("/delete")!=std::string::npos)){
           auto it=req.params.find("id");
-          if(it==req.params.end()){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"ID tidak valid.\"}"); return r; }
+          /* P37-G18: SETIAP early-return wajib pre-release — dulu return
+           * langsung tanpa release; PgConnDeleter=PQfinish → koneksi SEHAT
+           * di-CLOSE (bukan kembali ke pool) → churn TCP+auth PG baru per
+           * request admin (upload/download/delete/list). */
+          if(it==req.params.end()){ real.release(c.release()); Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"ID tidak valid.\"}"); return r; }
           auto row=real.exec_params(c.get(),"SELECT file_path FROM system_apps WHERE id=$1",{it->second});
-          if(!row || PQresultStatus(row.get())!=PGRES_TUPLES_OK || PQntuples(row.get())==0){ Response r; r.status=404; r.json(404,"{\"success\":false,\"message\":\"Aplikasi tidak ditemukan.\"}"); return r; }
+          if(!row || PQresultStatus(row.get())!=PGRES_TUPLES_OK || PQntuples(row.get())==0){ real.release(c.release()); Response r; r.status=404; r.json(404,"{\"success\":false,\"message\":\"Aplikasi tidak ditemukan.\"}"); return r; }
           std::string file_path=PQgetvalue(row.get(),0,0);
           auto del=real.exec_params(c.get(),"DELETE FROM system_apps WHERE id=$1",{it->second});
           bool ok=del && PQresultStatus(del.get())==PGRES_COMMAND_OK && std::atoi(PQcmdTuples(del.get()))>0;
-          if(!ok){ Response r; r.status=500; r.json(500,"{\"success\":false,\"message\":\"Gagal menghapus metadata aplikasi.\"}"); return r; }
+          if(!ok){ real.release(c.release()); Response r; r.status=500; r.json(500,"{\"success\":false,\"message\":\"Gagal menghapus metadata aplikasi.\"}"); return r; }
           /* P20-B1: delete system-app (termasuk R2 object) — aksi destruktif
            * superadmin, wajib tercatat dengan atribusi caller. */
           {
@@ -382,7 +386,8 @@ Response system_apps_page(const Request& req){
                             "system_app_delete", "id="+it->second+" file="+file_path);
           }
           auto cfg_r2=Config::load(); r2::R2Config rc{cfg_r2.r2_access_key,cfg_r2.r2_secret_key,cfg_r2.r2_endpoint,cfg_r2.r2_bucket};
-          if(rc.enabled() && !file_path.empty()){ r2::R2Client client{rc}; if(!client.remove(file_path)){ Response r; r.status=502; r.json(502,"{\"success\":false,\"message\":\"Metadata terhapus, tetapi object R2 belum dapat dibersihkan.\"}"); return r; } }
+          if(rc.enabled() && !file_path.empty()){ r2::R2Client client{rc}; if(!client.remove(file_path)){ real.release(c.release()); Response r; r.status=502; r.json(502,"{\"success\":false,\"message\":\"Metadata terhapus, tetapi object R2 belum dapat dibersihkan.\"}"); return r; } }
+          real.release(c.release());
           Response r; r.status=200; r.json(200,"{\"success\":true,\"message\":\"Aplikasi berhasil dihapus\"}"); return r;
         }
         if(req.method=="POST"){
@@ -396,36 +401,37 @@ Response system_apps_page(const Request& req){
           std::string version=multipart_field(req.body,boundary,"version");
           std::string file=multipart_field(req.body,boundary,"file");
           if(name.empty()||version.empty()||file.empty()||(platform!="android"&&platform!="windows"&&platform!="linux")){
+            real.release(c.release());
             Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Field aplikasi atau file tidak valid.\"}"); return r;
           }
           name=helpers::sanitize_student_input(name);
-          if(!std::regex_match(version,std::regex(R"(^[0-9]+\.[0-9]+\.[0-9]+$)"))){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Format versi tidak valid.\"}"); return r; }
-          if(file.size()>100*1024*1024){ Response r; r.status=413; r.json(413,"{\"success\":false,\"message\":\"File terlalu besar.\"}"); return r; }
+          if(!std::regex_match(version,std::regex(R"(^[0-9]+\.[0-9]+\.[0-9]+$)"))){ real.release(c.release()); Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Format versi tidak valid.\"}"); return r; }
+          if(file.size()>100*1024*1024){ real.release(c.release()); Response r; r.status=413; r.json(413,"{\"success\":false,\"message\":\"File terlalu besar.\"}"); return r; }
           auto dup=real.exec_params(c.get(),"SELECT id FROM system_apps WHERE name=$1 AND platform=$2 AND version=$3",{name,platform,version});
-          if(dup && PQresultStatus(dup.get())==PGRES_TUPLES_OK && PQntuples(dup.get())>0){ Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Aplikasi dengan versi tersebut sudah ada.\"}"); return r; }
+          if(dup && PQresultStatus(dup.get())==PGRES_TUPLES_OK && PQntuples(dup.get())>0){ real.release(c.release()); Response r; r.status=400; r.json(400,"{\"success\":false,\"message\":\"Aplikasi dengan versi tersebut sudah ada.\"}"); return r; }
           auto cfg_r2=Config::load(); r2::R2Config rc{cfg_r2.r2_access_key,cfg_r2.r2_secret_key,cfg_r2.r2_endpoint,cfg_r2.r2_bucket};
-          if(!rc.enabled()){ Response r; r.status=503; r.json(503,"{\"success\":false,\"error_code\":\"R2_NOT_CONFIGURED\",\"message\":\"Cloudflare R2 tidak dikonfigurasi.\"}"); return r; }
+          if(!rc.enabled()){ real.release(c.release()); Response r; r.status=503; r.json(503,"{\"success\":false,\"error_code\":\"R2_NOT_CONFIGURED\",\"message\":\"Cloudflare R2 tidak dikonfigurasi.\"}"); return r; }
           std::string key=r2::object_key_for_app(version,platform);
           r2::R2Client client{rc};
-          if(!client.upload(key,file,"application/octet-stream") || !client.verify(key)){ Response r; r.status=502; r.json(502,"{\"success\":false,\"error_code\":\"UPLOAD_FAILED\",\"message\":\"Gagal mengupload file aplikasi.\"}"); return r; }
+          if(!client.upload(key,file,"application/octet-stream") || !client.verify(key)){ real.release(c.release()); Response r; r.status=502; r.json(502,"{\"success\":false,\"error_code\":\"UPLOAD_FAILED\",\"message\":\"Gagal mengupload file aplikasi.\"}"); return r; }
           auto ins=real.exec_params(c.get(),"INSERT INTO system_apps (name,platform,version,file_path,size_bytes) VALUES ($1,$2,$3,$4,$5)",{name,platform,version,key,std::to_string(file.size())});
-          if(!ins || PQresultStatus(ins.get())!=PGRES_COMMAND_OK){ client.remove(key); Response r; r.status=500; r.json(500,"{\"success\":false,\"message\":\"Gagal menyimpan metadata aplikasi.\"}"); return r; }
+          if(!ins || PQresultStatus(ins.get())!=PGRES_COMMAND_OK){ client.remove(key); real.release(c.release()); Response r; r.status=500; r.json(500,"{\"success\":false,\"message\":\"Gagal menyimpan metadata aplikasi.\"}"); return r; }
           /* P20-B1: upload system-app (hingga 100MB ke R2) — wajib tercatat. */
           {
             const auto audit_id=audit_identity_from(req);
             write_audit_log("", audit_id.user_id, audit_id.username,
                             "system_app_upload", "name="+name+" platform="+platform+" version="+version+" bytes="+std::to_string(file.size()));
           }
+          real.release(c.release());
           Response r; r.status=201; r.json(201,"{\"success\":true,\"message\":\"Aplikasi berhasil diunggah\"}"); return r;
         }
         auto rows=real.exec_params(c.get(),"SELECT id,name,platform,version,file_path,size_bytes,created_at::text,updated_at::text FROM system_apps ORDER BY created_at DESC",{});
+        real.release(c.release());
         if(rows && PQresultStatus(rows.get())==PGRES_TUPLES_OK){
           std::string out="[";
           for(int i=0;i<PQntuples(rows.get());++i){ if(i) out+=","; out+="{\"id\":"+std::string(PQgetvalue(rows.get(),i,0))+",\"Name\":\""+json_escape(PQgetvalue(rows.get(),i,1))+"\",\"Platform\":\""+json_escape(PQgetvalue(rows.get(),i,2))+"\",\"Version\":\""+json_escape(PQgetvalue(rows.get(),i,3))+"\",\"FilePath\":\""+json_escape(PQgetvalue(rows.get(),i,4))+"\",\"SizeBytes\":"+PQgetvalue(rows.get(),i,5)+",\"CreatedAt\":\""+json_escape(PQgetvalue(rows.get(),i,6))+"\",\"UpdatedAt\":\""+json_escape(PQgetvalue(rows.get(),i,7))+"\"}"; }
           out+="]"; Response r; r.json(200,"{\"success\":true,\"apps\":"+out+"}"); return r;
         }
-        /* P21-T2: kembali ke pool proses-wide (bukan close). */
-        real.release(c.release());
         }
       }
     }

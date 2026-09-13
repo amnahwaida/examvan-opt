@@ -18,6 +18,12 @@ std::string redis_get(redisContext* c, const std::string& key);
 bool redis_del(redisContext* c, const std::string& key);
 // Panjang list Redis (LLEN) — dipakai queue_status untuk antrean pending.
 long long redis_llen(redisContext* c, const std::string& key);
+/* P37-G15: reconnect wrapper — ctx->err → redisReconnect + PING validasi.
+ * Return false bila koneksi tak bisa dipulihkan (caller buang ctx). */
+bool redis_reset(RedisPtr& c);
+// EXISTS key — true bila command sukses DAN key ada; error juga false
+// (caller cek ctx->err untuk membedakan).
+bool redis_exists(redisContext* c, const std::string& key);
 
 } // namespace examvan::redis_real
 #endif

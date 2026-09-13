@@ -39,22 +39,55 @@ RedisPtr connect_redis(const std::string& url){
     if(port<=0||port>65535) return nullptr;
   } else if(!hostport.empty()) host=hostport;
   if(host.empty()) return nullptr;
-  auto* c=redisConnect(host.c_str(), port);
+  /* P37-G15: redisConnect tanpa timeout → BLACKHORE (firewall DROP) membuat
+   * thread menggantung tanpa batas. redisConnectWithTimeout + redisEnable-
+   * KeepAlive: TCP gagal dalam 2s, bukan selamanya. */
+  timeval tv{2,0};
+  auto* c=redisConnectWithTimeout(host.c_str(), port, tv);
   if(!c||c->err) { if(c) redisFree(c); return nullptr; }
+  redisEnableKeepAlive(c);
   RedisPtr ptr(c);
+  /* P37-G15: AUTH wajib kirim username+password — Redis 6+ ACL user
+   * non-default (managed services) menolak `AUTH <password>` saja dengan
+   * WRONGPASS. Default user "default" tetap valid untuk ACL lama. */
   if(!password.empty()){
-    auto* r=(redisReply*)redisCommand(ptr.get(),"AUTH %s",password.c_str());
+    auto* r=(redisReply*)redisCommand(ptr.get(),"AUTH %s %s","default",password.c_str());
     if(!r){ return nullptr; }
     bool ok=r->type==REDIS_REPLY_STATUS;
     freeReplyObject(r);
     if(!ok) return nullptr;
   }
   if(db!=0){
+    /* P37-G15: hasil SELECT WAJIB dicek — dulu diabaikan: redis://host:6379/2
+     * diam-diam menulis ke db 0 (data presence/result campur). */
     auto* r=(redisReply*)redisCommand(ptr.get(),"SELECT %d",db);
-    if(r) freeReplyObject(r);
+    if(!r) return nullptr;
+    bool ok=r->type==REDIS_REPLY_STATUS;
+    freeReplyObject(r);
+    if(!ok) return nullptr;
   }
   return ptr;
   }catch(...){ return nullptr; }
+}
+
+/* P37-G15: wrapper reconnect — dulu TIDAK ada redisReconnect di seluruh
+ * codebase; ctx thread_local dibuat sekali seumur proses → Redis restart
+ * SEKALI = 8 worker BRPOP mati PERMANEN (antrean tak pernah dikonsumsi lagi)
+ * + presence WS mati sampai restart proses. */
+bool redis_reset(RedisPtr& c){
+  if(!c) return false;
+  if(!c->err) return true;                 // masih sehat
+  if(redisReconnect(c.get())!=REDIS_OK) return false;
+  return redis_ping(c.get());
+}
+
+bool redis_exists(redisContext* c, const std::string& k){
+  auto* r=(redisReply*)redisCommand(c,"EXISTS %s",k.c_str());
+  if(!r) return false;                     // error — caller wajib bedakan dari 0
+  bool ok=r->type==REDIS_REPLY_INTEGER;
+  long long n=ok?r->integer:0;
+  freeReplyObject(r);
+  return ok && n>0;
 }
 bool redis_ping(redisContext* c){ auto* r=(redisReply*)redisCommand(c,"PING"); if(!r) return false; bool ok=r->type==REDIS_REPLY_STATUS; freeReplyObject(r); return ok; }
 bool redis_set(redisContext* c, const std::string& k, const std::string& v, int ttl){

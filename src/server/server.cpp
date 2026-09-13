@@ -1,6 +1,14 @@
 #include "server/server.hpp"
 #include "session/cookie.hpp"
 #include "websocket/hub.hpp"
+#ifdef HAS_LIBPQ
+#include "db/pool_global.hpp"
+#endif
+#ifdef HAS_HIREDIS
+#include "redis/redis_real.hpp"
+#include "queue/submission_queue.hpp"
+#endif
+#include <string>
 #include <sstream>
 #include <fstream>
 #include <thread>
@@ -661,7 +669,39 @@ void Server::stop() {
 static auto g_start_time = std::chrono::steady_clock::now();
 std::string health_json(const Config& cfg) {
   auto uptime = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - g_start_time).count();
-  return "{\"status\":\"ok\",\"version\":\"" + cfg.version + "\",\"uwebsockets\":" + (Server::has_uwebsockets() ? "true" : "false") + ",\"db\":\"ok\",\"redis\":\"ok\",\"queue\":0,\"uptime\":" + std::to_string(uptime) + "}";
+  /* P37-G17: dulu "db":"ok","redis":"ok","queue":0 HARDCODED — monitoring/
+   * LB terus mengirim traffic ke instance yang dependency-nya mati dan
+   * operator tidak sadar dampak G15 (worker mati pasca Redis restart).
+   * Kini probe nyata: PG ping, Redis PING, LLEN antrean. Tanpa
+   * konfigurasi → "not_configured" (dev/memori), bukan "ok" palsu. */
+#ifdef HAS_LIBPQ
+  auto* pool=examvan::db::global_pool();
+  bool db_ok=pool && pool->ping();
+  const char* db_state=db_ok?"ok":(pool?"down":"not_configured");
+#else
+  const char* db_state="not_configured";
+#endif
+#ifdef HAS_HIREDIS
+  std::string rurl=cfg.redis_url;
+  if(rurl.empty()) if(auto* e=getenv("REDIS_URL")) rurl=e;
+  bool redis_ok=false; long long queue_depth=-1;
+  if(!rurl.empty()){
+    auto rc=examvan::redis_real::connect_redis(rurl);
+    if(rc){
+      redis_ok=examvan::redis_real::redis_ping(rc.get());
+      if(redis_ok) queue_depth=examvan::redis_real::redis_llen(rc.get(),examvan::queue::kQueueKey);
+    }
+  }
+  const char* redis_state=redis_ok?"ok":(rurl.empty()?"not_configured":"down");
+#else
+  const char* redis_state="not_configured"; long long queue_depth=-1;
+#endif
+  bool degraded=(std::string(db_state)!="ok" && std::string(db_state)!="not_configured")
+             || (std::string(redis_state)!="ok" && std::string(redis_state)!="not_configured");
+  bool down=(std::string(db_state)=="down")||(std::string(redis_state)=="down");
+  (void)degraded; // disertakan agar mudah diperluas jadi tri-state ok/degraded/down
+  const char* status=down?"degraded":"ok";
+  return "{\"status\":\"" + std::string(status) + "\",\"version\":\"" + cfg.version + "\",\"uwebsockets\":" + (Server::has_uwebsockets() ? "true" : "false") + ",\"db\":\"" + db_state + "\",\"redis\":\"" + redis_state + "\",\"queue\":" + std::to_string(queue_depth) + ",\"uptime\":" + std::to_string(uptime) + "}";
 }
 
 } // namespace examvan::server

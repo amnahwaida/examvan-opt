@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <openssl/rand.h>
 
 namespace examvan::helpers {
@@ -185,6 +186,68 @@ std::map<std::string,std::string> parse_form(const std::string& body){
     start=amp+1;
   }
   return m;
+}
+
+// ---- Konversi jadwal WIB → UTC ISO (paritas Go SaveQuestions) ----
+// Go menerima "YYYY-MM-DD HH:MM" (Asia/Jakarta, UTC+7 tanpa DST) lalu
+// menyimpan UTC ISO "YYYY-MM-DDTHH:MM:SSZ". Dipindah dari exams.cpp (P36-D6)
+// agar terkunci test unit langsung.
+namespace {
+int days_from_civil(int y, unsigned m, unsigned d){
+  y -= (int)(m <= 2);
+  const int era = (y >= 0 ? y : y-399) / 400;
+  const unsigned yoe = (unsigned)(y - era * 400);
+  const unsigned doy = (153u*(m + (m > 2 ? -3 : 9)) + 2u)/5u + d - 1u;
+  const unsigned doe = yoe * 365u + yoe/4u - yoe/100u + doy;
+  return era * 146097 + (int)doe - 719468;
+}
+void civil_from_days(int z, int& y, unsigned& m, unsigned& d){
+  z += 719468;
+  const int era = (z >= 0 ? z : z - 146096) / 146097;
+  const unsigned doe = (unsigned)(z - era * 146097);
+  const unsigned yoe = (doe - doe/1460u + doe/36524u - doe/146096u) / 365u;
+  const int y2 = (int)yoe + era * 400;
+  const unsigned doy = doe - (365u*yoe + yoe/4u - yoe/100u);
+  const unsigned mp = (5u*doy + 2u)/153u;
+  const unsigned d2 = doy - (153u*mp + 2u)/5u + 1u;
+  const unsigned m2 = mp < 10u ? mp + 3u : mp - 9u;
+  y = y2 + (int)(m2 <= 2u); m = m2; d = d2;
+}
+} // namespace
+
+std::optional<std::string> wib_to_utc_iso(const std::string& s){
+  /* P36-D6: parser KETAT — format tunggal "YYYY-MM-DD HH:MM[:SS]" dan WAJIB
+   * dikonsumsi utuh (dulu sscanf 5 field tanpa %n: "2026-05-01 10:00JUNK"
+   * diterima). Rentang divalidasi termasuk hari-dalam-bulan (dulu hanya
+   * d<=31: "2026-02-31" menjadi 3 Maret). Tanpa ini, jadwal soal rusak
+   * tersimpan dan scoring/Android gagal saat ujian berlangsung. */
+  if(s.size()<16) return std::nullopt;
+  auto dig=[&](size_t i)->int{ char c=s[i]; if(c<'0'||c>'9') return -1; return c-'0'; };
+  auto two=[&](size_t i)->int{ int a=dig(i), b=dig(i+1); if(a<0||b<0) return -1; return a*10+b; };
+  if(dig(0)<0||dig(1)<0||dig(2)<0||dig(3)<0||s[4]!='-'||s[7]!='-'||s[10]!=' '||s[13]!=':')
+    return std::nullopt;
+  int y=dig(0)*1000+dig(1)*100+dig(2)*10+dig(3);
+  int mo=two(5), d=two(8), h=two(11), mi=two(14);
+  if(y<2000||y>2100||mo<1||mo>12||h>23||mi>59) return std::nullopt;
+  static const int kMd[]{31,28,31,30,31,30,31,31,30,31,30,31};
+  int dim=kMd[mo-1];
+  if(mo==2 && ((y%4==0&&y%100!=0)||y%400==0)) dim=29;
+  if(d<1||d>dim) return std::nullopt;
+  size_t p=16;
+  if(p<s.size() && s[p]==':'){ // detik opsional
+    int sec=two(17); if(sec>59) return std::nullopt;
+    p=19;
+  }
+  if(p!=s.size()) return std::nullopt; // full-consumption — sampah ditolak
+  long long total=days_from_civil(y,(unsigned)mo,(unsigned)d)*1440LL + h*60LL + mi - 7LL*60;
+  long long days=total/1440; long long rem=total%1440;
+  if(rem<0){ rem+=1440; days-=1; }
+  int y2; unsigned m2,d2;
+  civil_from_days((int)days,y2,m2,d2);
+  int hh=(int)(rem/60), mm=(int)(rem%60);
+  char buf[64];
+  snprintf(buf,sizeof(buf),"%04d-%02u-%02uT%02d:%02d:00Z",y2,m2,d2,hh,mm);
+  return std::string(buf);
 }
 
 } // namespace examvan::helpers

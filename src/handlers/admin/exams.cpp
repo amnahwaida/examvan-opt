@@ -956,46 +956,8 @@ Response export_xlsx(const Request& req){
   // membaca :id dari params dan membangun XLSX nyata (zip + XML valid).
   return export_submissions_xlsx(req);
 }
-// ---- Konversi jadwal WIB → UTC ISO (paritas Go SaveQuestions) ----
-// Go menerima "YYYY-MM-DD HH:MM" (Asia/Jakarta, UTC+7 tanpa DST) lalu
-// menyimpan UTC ISO "YYYY-MM-DDTHH:MM:SSZ". C++ sebelumnya menyimpan
-// mentah format lokal → jadwal tidak kompatibel dengan exam buatan Go.
-static int days_from_civil(int y, unsigned m, unsigned d){
-  y -= (int)(m <= 2);
-  const int era = (y >= 0 ? y : y-399) / 400;
-  const unsigned yoe = (unsigned)(y - era * 400);
-  const unsigned doy = (153u*(m + (m > 2 ? -3 : 9)) + 2u)/5u + d - 1u;
-  const unsigned doe = yoe * 365u + yoe/4u - yoe/100u + doy;
-  return era * 146097 + (int)doe - 719468;
-}
-static void civil_from_days(int z, int& y, unsigned& m, unsigned& d){
-  z += 719468;
-  const int era = (z >= 0 ? z : z - 146096) / 146097;
-  const unsigned doe = (unsigned)(z - era * 146097);
-  const unsigned yoe = (doe - doe/1460u + doe/36524u - doe/146096u) / 365u;
-  const int y2 = (int)yoe + era * 400;
-  const unsigned doy = doe - (365u*yoe + yoe/4u - yoe/100u);
-  const unsigned mp = (5u*doy + 2u)/153u;
-  const unsigned d2 = doy - (153u*mp + 2u)/5u + 1u;
-  const unsigned m2 = mp < 10u ? mp + 3u : mp - 9u;
-  y = y2 + (int)(m2 <= 2u); m = m2; d = d2;
-}
-// "YYYY-MM-DD HH:MM" (WIB) → "YYYY-MM-DDTHH:MM:SSZ" (UTC). nullopt bila format invalid.
-static std::optional<std::string> wib_to_utc_iso(const std::string& s){
-  if(s.size()<16) return std::nullopt;
-  int y=0,mo=0,d=0,h=0,mi=0;
-  if(std::sscanf(s.c_str(),"%d-%d-%d %d:%d",&y,&mo,&d,&h,&mi)!=5) return std::nullopt;
-  if(y<2000||y>2100||mo<1||mo>12||d<1||d>31||h<0||h>23||mi<0||mi>59) return std::nullopt;
-  long long total=days_from_civil(y,(unsigned)mo,(unsigned)d)*1440LL + h*60LL + mi - 7LL*60;
-  long long days=total/1440; long long rem=total%1440;
-  if(rem<0){ rem+=1440; days-=1; }
-  int y2; unsigned m2,d2;
-  civil_from_days((int)days,y2,m2,d2);
-  int hh=(int)(rem/60), mm=(int)(rem%60);
-  char buf[64];
-  snprintf(buf,sizeof(buf),"%04d-%02u-%02uT%02d:%02d:00Z",y2,m2,d2,hh,mm);
-  return std::string(buf);
-}
+// P36-D6: konversi WIB→UTC ISO pindah ke helpers::wib_to_utc_iso (dipakai
+// langsung + terkunci test unit D6).
 
 // Validasi struktur array soal: tipe whitelist + field wajib per tipe.
 // Go tidak memvalidasi, tetapi frontend hanya bisa menghasilkan struktur ini
@@ -1166,8 +1128,8 @@ Response save_exam_questions(const Request& req){
   }
   // Jadwal: input WIB "YYYY-MM-DD HH:MM" → simpan UTC ISO (paritas Go).
   // Format selain itu ditolak 400 — jangan telan input tak valid diam-diam.
-  std::optional<std::string> st_iso=wib_to_utc_iso(st);
-  std::optional<std::string> et_iso=wib_to_utc_iso(et);
+  std::optional<std::string> st_iso=helpers::wib_to_utc_iso(st);
+  std::optional<std::string> et_iso=helpers::wib_to_utc_iso(et);
   if(!st.empty() && !st_iso){
     Response r; r.status=400; r.json(400,"{\"success\":false,\"error\":\"Format jadwal mulai tidak valid — gunakan format: YYYY-MM-DD HH:MM\"}"); return r;
   }
@@ -1267,9 +1229,16 @@ static bool exam_bulk_scope_ok(int exam_id, int actor_id, bool super_admin,
             }
             // Operator same-instansi pemilik ujian (bukan personal).
             if(is_operator && !actor_instansi.empty() && actor_instansi!="personal"){
+              /* P37-D7: instansi PEMILIK ujian (owner.instansi) wajib disamakan
+               * dengan instansi aktor — dulu JOIN hanya memastikan baris creator
+               * ADA (owner.id=$2) tanpa membandingkan instansi, sehingga
+               * operator instansi A bisa bulk-toggle/bulk-DELETE ujian milik
+               * instansi B (bypass multi-tenancy lintas sekolah). Paritas guard
+               * "exam_access" router_full.cpp:170 (me.instansi=owner.instansi). */
               auto op=real.exec_params(c.get(),
                 "SELECT 1 FROM admin_users me JOIN admin_users owner ON owner.id=$2"
-                " WHERE me.id=$1 AND me.instansi=$3 AND me.instansi<>'' AND me.instansi<>'personal'",
+                " WHERE me.id=$1 AND me.instansi=$3 AND me.instansi<>'' AND me.instansi<>'personal'"
+                " AND me.instansi=owner.instansi AND owner.instansi<>'' AND owner.instansi<>'personal'",
                 {std::to_string(actor_id),std::to_string(exam.created_by),actor_instansi});
               if(op && PQresultStatus(op.get())==PGRES_TUPLES_OK && PQntuples(op.get())>0){
                 real.release(c.release());

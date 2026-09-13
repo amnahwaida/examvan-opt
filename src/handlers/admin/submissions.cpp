@@ -213,6 +213,7 @@ Response submission_detail(const Request& req){
       auto exist=real.exec_params(c.get(),"SELECT 1 FROM submissions WHERE id=$1",{id_str});
       if(exist && PQresultStatus(exist.get())==PGRES_TUPLES_OK && PQntuples(exist.get())>0)
         scope_denied=true; // ada tapi bukan milik actor → 403
+      real.release(c.release()); // P37-E-d: pre-release — dulu return telanjang → koneksi sehat di-CLOSE (PQfinish), bukan kembali ke pool
       return;
     }
     auto r=real.exec_params(c.get(),
@@ -297,6 +298,7 @@ Response delete_submission(const Request& req){
       auto exist=real.exec_params(c.get(),"SELECT 1 FROM submissions WHERE id=$1",{id_str});
       if(exist && PQresultStatus(exist.get())==PGRES_TUPLES_OK && PQntuples(exist.get())>0)
         result="__scope__";
+      real.release(c.release()); // P37-E-d: pre-release — dulu return telanjang → koneksi sehat di-CLOSE
       return;
     }
     auto del=real.exec_params(c.get(),"DELETE FROM submissions WHERE id=$1",{id_str});

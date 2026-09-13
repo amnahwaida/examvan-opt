@@ -427,6 +427,13 @@ Response delete_voucher(const Request& req){
   });
   if(result=="__fail__"){ Response r; r.status=500; r.json(500,"{\"success\":false,\"error\":\"Gagal menghapus voucher (mungkin sudah dipakai)\"}"); return r; }
   if(result=="ok"){ Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Voucher dihapus\"}"); return r; }
+  /* P37-E-m: satu-satunya jalur tulis voucher tanpa gate — PG dikonfigurasi
+   * tapi lambda tidak pernah sukses (koneksi gagal) → dulu 200 palsu "Voucher
+   * dihapus" padahal baris tetap ada & redeemable (kelas P20-M9 fake-200;
+   * paritas gate delete_submission). */
+  if(pg_configured_from_env()){
+    Response r; r.status=503; r.json(503,"{\"success\":false,\"error\":\"Database tidak tersedia\"}"); return r;
+  }
 #endif
   Response r; r.json(200,"{\"success\":true,\"ok\":true,\"message\":\"Voucher dihapus\"}"); return r;
 }

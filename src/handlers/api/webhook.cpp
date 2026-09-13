@@ -184,7 +184,10 @@ Response webhook(const Request& req){
         std::string status=PQgetvalue(res.get(),0,2);
         std::string otp_code=PQgetvalue(res.get(),0,3);
         long expiry_epoch=std::atol(PQgetvalue(res.get(),0,5));
-        real.release(c.release());
+        /* P37-F12: JANGAN release di sini — koneksi masih dipakai UPDATE
+         * aktivasi di bawah (P33-F1 release prematur → exec di koneksi null;
+         * PQexecParams(nullptr) silent-fail → setiap OTP valid berakhir
+         * "Gagal mengaktifkan akun"). Satu release tunggal setelah UPDATE. */
         if(status!="pending_otp"){
           finish(respond_channel(false,"Akun tidak ditemukan atau kode kedaluwarsa"));
           return;
@@ -215,12 +218,12 @@ Response webhook(const Request& req){
         auto up=real.exec_params(c.get(),
           "UPDATE admin_users SET status='active', otp_code=NULL, otp_expiry=NULL WHERE LOWER(username)=LOWER($1)",
           {username});
-        if(up && (PQresultStatus(up.get())==PGRES_COMMAND_OK||PQresultStatus(up.get())==PGRES_TUPLES_OK)){
-          real.release(c.release());
+        bool ok=up && (PQresultStatus(up.get())==PGRES_COMMAND_OK||PQresultStatus(up.get())==PGRES_TUPLES_OK);
+        real.release(c.release()); // P37-F12: satu release tunggal setelah UPDATE
+        if(ok){
           finish(respond_channel(true,"Verifikasi sukses! Akun Anda telah aktif."));
           return;
         }
-        real.release(c.release());
         finish(respond_channel(false,"Gagal mengaktifkan akun"));
       });
       if(!pg_ok){ return fail_closed_db(); }

@@ -279,6 +279,8 @@ add_executable(examvan-tests
   tests/test_p33_tdd.cpp
   tests/test_p34_tdd.cpp
   tests/test_p35_tdd.cpp
+  tests/test_p36_tdd.cpp
+  tests/test_p37_tdd.cpp
 )
 target_compile_definitions(examvan-tests PRIVATE EXAMVAN_TESTING=1)
 target_link_libraries(examvan-tests PRIVATE examvan_core GTest::gtest_main)

@@ -23,10 +23,14 @@ bool RedisClient::try_acquire_job(const std::string& job, int ttl){
       if(ctx){
         bool ok=redis_real::redis_setnx(ctx.get(), prefixed("job:"+job), "1", ttl>0?ttl:60);
         if(ok) return true;
-        // SETNX gagal = lock dipegang replika lain; jangan fallback in-memory
-        // (akan double-run). Cek ringan: bila key memang ada → tolak.
-        std::string v=redis_real::redis_get(ctx.get(), prefixed("job:"+job));
-        if(!v.empty()) return false;
+        /* P37-G15: SETNX gagal = lock dipegang replika lain ATAU error.
+         * Bedakan dengan probe EXISTS: key terlihat → lock sah → tolak.
+         * Error (EXISTS juga gagal / ctx->err) → return false TANPA fallback
+         * in-process — fallback membuat dua replika double-run job yang sama
+         * (expiry/approval/retention dieksekusi ganda). */
+        if(ctx->err) return false;
+        if(redis_real::redis_exists(ctx.get(), prefixed("job:"+job))) return false;
+        return false; // SETNX gagal tanpa error & key tak terlihat: replika lain baru saja melepas → Tolak (aman, coba tick berikutnya)
       }
     }
   }catch(...){}

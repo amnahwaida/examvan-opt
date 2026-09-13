@@ -1,5 +1,6 @@
 #include "queue/submission_queue.hpp"
 #include "helpers/utils.hpp"
+#include "utils/log.hpp"
 #include "config/config.hpp"
 #include "db/pool.hpp"
 #include "db/pool_real.hpp"
@@ -9,6 +10,13 @@
 #include <random>
 #include <sstream>
 #include <openssl/rand.h>
+#include <fstream>
+#include <cstdio>
+#include <cerrno>
+#include <ctime>
+#include <cstdlib>
+#include <sys/stat.h>
+#include <sys/types.h>
 #ifdef HAS_PROTOBUF
 #include "examvan.pb.h"
 #endif
@@ -132,6 +140,34 @@ static std::string map_to_json(const std::map<std::string,std::string>& m){
   ss<<"}";
   return ss.str();
 }
+/* P37-G14: durabilitas dead-letter — fallback kegagalan dulu menulis ke
+ * Redis yang SAMA yang baru saja gagal (lpush_checked_ dibuang `(void)`);
+ * Redis mati penuh = jawaban siswa hilang TANPA JEJAK LOKAL (failed-queue
+ * P21-T5 hanya hidup ketika Redis hidup). Spool file JSONL append-only:
+ * operator bisa replay manual saat infrastruktur pulih. Path dapat dioverride
+ * via EXAMVAN_FAILED_SPOOL (default /tmp — container read_only punya tmpfs). */
+static const char kSpoolPath[] = "/tmp/examvan-failed-jobs.jsonl";
+static void append_spool_line(const SubmissionJob& job){
+  try{
+    std::string path;
+    if(const char* env=getenv("EXAMVAN_FAILED_SPOOL")) path=env;
+    if(path.empty()) path=kSpoolPath;
+    // Pastikan direktori ada (best-effort; kegagalan spool hanya di-log).
+    if(auto slash=path.rfind('/'); slash!=std::string::npos && slash>0){
+      std::string dir=path.substr(0,slash);
+      #ifdef _WIN32
+      #else
+      ::mkdir(dir.c_str(),0755);
+      #endif
+    }
+    std::ofstream f(path,std::ios::app);
+    if(!f){ utils::log_error("failed_job_spool_open",path+" errno="+std::to_string(errno)); return; }
+    f<<"{\"ts\":\""<<helpers::format_iso_utc(std::chrono::system_clock::now())
+     <<"\",\"job\":"<<json_escape(job.to_json())<<"}\n";
+    if(!f.good()) utils::log_error("failed_job_spool_write",path);
+  }catch(...){ utils::log_error("failed_job_spool_error",""); }
+}
+
 std::string SubmissionJob::to_json() const {
   std::ostringstream ss;
   ss<<"{\"job_id\":\""<<json_escape(job_id)<<"\",\"exam_id\":"<<exam_id
@@ -311,7 +347,13 @@ void SubmissionQueue::push_failed(const SubmissionJob& job) const{
   /* P21-T5: dead-letter queue. Job yang melewati kMaxRetries sudah tidak
    * akan pernah diproses ulang — tanpa jejak, operator tidak pernah tahu
    * ada jawaban siswa yang hilang (queue_status.failed selalu 0). */
-  if(!lpush_checked_ && !lpush_) return;
+  if(!lpush_checked_ && !lpush_){
+    /* P37-G14: tanpa hook Redis sama sekali (atau Redis mati penuh),
+     * dead-letter hanya hidup di Redis — spool file lokal = lapisan
+     * terakhir agar job tidak lenyap tanpa jejak. */
+    append_spool_line(job);
+    return;
+  }
 #ifdef HAS_PROTOBUF
   std::string payload;
   {
@@ -322,10 +364,12 @@ void SubmissionQueue::push_failed(const SubmissionJob& job) const{
 #else
   std::string payload=job.to_json();
 #endif
+  /* P37-G14: hasil LPUSH dead-letter TIDAK boleh dibuang `(void)` —
+   * gagal Redis → spool lokal (jejak tetap ada). */
   if(lpush_checked_){
-    try{ (void)lpush_checked_(kFailedQueueKey, payload); }catch(...){}
+    try{ if(!lpush_checked_(kFailedQueueKey, payload)) append_spool_line(job); }catch(...){ append_spool_line(job); }
   } else {
-    try{ lpush_(kFailedQueueKey, payload); }catch(...){}
+    try{ lpush_(kFailedQueueKey, payload); }catch(...){ append_spool_line(job); }
   }
 }
 
@@ -377,7 +421,9 @@ void Worker::stop(){
     auto job=b.first;
     if(job.retries<kMaxRetries){
       job.retries++;
-      std::this_thread::sleep_for(std::chrono::milliseconds(retry_backoff_ms(job.retries)));
+      /* P36-G5: final drain TANPA sleep backoff per-job — dulu backoff runtime
+       * per item (40 backlog x 5s = shutdown 200 detik). Backoff berlaku untuk
+       * retry runtime, bukan drain saat shutdown. */
       /* P33-G2: LPUSH gagal → failed-queue + JobResult (bukan hilang diam-diam). */
       checked_requeue(job, b.second);
     } else {

@@ -8,7 +8,6 @@
 
 # VCS & CI
 .git
-.gitignore
 .github
 
 # Artefak build & dependensi (mempercepat context + hindari layer basi)
@@ -20,7 +19,12 @@ migrasi-cpp
 test-results.xml
 
 # Dokumen & tooling lokal
+# P37-I11: HATI-HATI — pola di bawah TIDAK boleh menelan sumber yang di-COPY
+# Dockerfile (build gagal "not found"). `*.md` dulu menelan MIGRASI_STATUS.md
+# & docs-cutover.md; `.gitignore` dulu di-COPY eksplisit. Kontrak di-pin test
+# P37 (I11_DockerignoreMustNotExcludeCopiedSources).
 docs
 scripts
 .claude
-*.md
+MIGRASI_STATUS.md
+docs-cutover.md
